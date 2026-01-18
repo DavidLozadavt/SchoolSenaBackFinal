@@ -1069,6 +1069,7 @@ Route::delete('/periodos/{id}', [PeriodosController::class, 'destroy']);
 
 //rutas SCHOOL SENA para gestión de regionales
 Route::post('regional', [RegionalController::class, 'store']);
+Route::get('regional', [RegionalController::class, 'index']);
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
 Route::get('jornadas/agrupadas', [JornadaController::class, 'getJornadasMaterias']);

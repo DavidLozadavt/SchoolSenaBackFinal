@@ -38,4 +38,8 @@ class RegionalController extends Controller
             ], 500);
         }
     }
+    public function index() {
+        $regionales = Regional::with('departamento')->select('id','nombre','telefono','direccion', 'idDepartamento');
+        return response()->json($regionales->get());
+    }
 }
