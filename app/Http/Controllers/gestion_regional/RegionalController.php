@@ -38,8 +38,36 @@ class RegionalController extends Controller
             ], 500);
         }
     }
-    public function index() {
-        $regionales = Regional::with('departamento')->select('id','nombre','telefono','direccion', 'idDepartamento');
+    public function index()
+    {
+        $regionales = Regional::with('departamento')->select('id', 'nombre', 'telefono', 'direccion', 'idDepartamento');
         return response()->json($regionales->get());
+    }
+    public function update(Request $request, $id)
+    {
+        try {
+            $request->validate([
+                'nombre' => 'sometimes|string|max:255',
+                'telefono' => 'sometimes|string|max:20',
+                'direccion' => 'sometimes|string|max:255',
+            ]);
+
+            $regional = Regional::findOrFail($id);
+
+            $regional->update(
+                $request->only(['nombre', 'telefono', 'direccion'])
+            );
+
+            return response()->json([
+                'status' => 'success',
+                'message' => '¡Regional actualizada correctamente!',
+                'data' => $regional->load('departamento')
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al actualizar la regional: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }
