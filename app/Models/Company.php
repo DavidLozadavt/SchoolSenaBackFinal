@@ -7,6 +7,7 @@ use App\Models\Nomina\HistorialConfiguracionNomina;
 use App\Models\Nomina\Sede;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -51,5 +52,9 @@ class Company extends Model
     public function historialConfiguracionesNomina(): HasMany
     {
         return $this->hasMany(HistorialConfiguracionNomina::class, 'idEmpresa');
+    }
+    public function regional():BelongsTo
+    {
+        return $this->belongsTo(Regional::class, 'idRegional');
     }
 }
