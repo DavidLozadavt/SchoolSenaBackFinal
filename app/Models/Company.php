@@ -17,6 +17,18 @@ class Company extends Model
 
     protected $table = "empresa";
 
+    protected $fillable = [
+        'razonSocial',
+        'nit',
+        'representanteLegal',
+        'idRegional',
+        'direccion',
+        'email',
+        'rutaLogo',
+        'digitoVerificacion',
+    ];
+
+
     const RUTA_LOGO_DEFAULT = "/default/logoweb.png";
     const RUTA_LOGO = "company";
     const VIRTUALT = 1;

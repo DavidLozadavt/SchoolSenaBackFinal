@@ -106,6 +106,7 @@ use App\Http\Controllers\ServicioController;
 use App\Http\Controllers\TipoServicioController;
 use App\Http\Controllers\CategoriaServicioController;
 use App\Http\Controllers\gestion_aporte\PolizasController;
+use App\Http\Controllers\gestion_centros_formacion\CentrosFormacionController;
 use App\Http\Controllers\gestion_ventas\ResponsableServicioController;
 use App\Http\Controllers\gestion_programas_academicos\PensumController;
 use App\Http\Controllers\gestion_regional\RegionalController;
@@ -1071,6 +1072,11 @@ Route::delete('/periodos/{id}', [PeriodosController::class, 'destroy']);
 Route::post('regional', [RegionalController::class, 'store']);
 Route::get('regional', [RegionalController::class, 'index']);
 Route::patch('regional/{id}', [RegionalController::class, 'update']);
+
+//rutas SHOOL SENA para gestión de Centros de Formación:
+Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);
+Route::get('centrosFormacion', [CentrosFormacionController::class, 'index']);
+
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
 Route::get('jornadas/agrupadas', [JornadaController::class, 'getJornadasMaterias']);
