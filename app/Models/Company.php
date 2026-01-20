@@ -21,7 +21,6 @@ class Company extends Model
         'razonSocial',
         'nit',
         'representanteLegal',
-        'idRegional',
         'direccion',
         'email',
         'rutaLogo',
@@ -64,9 +63,5 @@ class Company extends Model
     public function historialConfiguracionesNomina(): HasMany
     {
         return $this->hasMany(HistorialConfiguracionNomina::class, 'idEmpresa');
-    }
-    public function regional():BelongsTo
-    {
-        return $this->belongsTo(Regional::class, 'idRegional');
     }
 }
