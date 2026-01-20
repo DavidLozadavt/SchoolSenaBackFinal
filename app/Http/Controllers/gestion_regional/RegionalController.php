@@ -54,29 +54,63 @@ class RegionalController extends Controller
     }
     public function index()
     {
-        $regionales = Company::select('id', 'razonSocial', 'nit', 'rutaLogo', 'representanteLegal', 'digitoVerificacion', 'email', 'telefono');
+        $regionales = Company::select('id', 'razonSocial', 'nit', 'rutaLogo', 'representanteLegal', 'digitoVerificacion', 'email', 'telefono', 'direccion');
         return response()->json($regionales->get());
     }
-    /**
+    public function show($id)
+    {
+        try {
+            $regional = Company::findOrFail($id);
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $regional
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Regional no encontrada'
+            ], 404);
+        }
+    }
+
     public function update(Request $request, $id)
     {
         try {
             $request->validate([
-                'nombre' => 'sometimes|string|max:255',
-                'telefono' => 'sometimes|string|max:20',
+                'razonSocial' => 'sometimes|string|max:255',
+                'nit' => [
+                    'sometimes',
+                    'string',
+                    'max:255',
+                    Rule::unique('empresa', 'nit')->ignore($id),
+                ],
+                'representanteLegal' => 'sometimes|string|max:20',
                 'direccion' => 'sometimes|string|max:255',
+                'email' => 'sometimes|email|max:255',
+                'digitoVerificacion' => [
+                    'sometimes',
+                    'integer',
+                    'digits:5',
+                    Rule::unique('empresa', 'digitoVerificacion')->ignore($id),
+                ],
             ]);
 
-            $regional = Regional::findOrFail($id);
+            $regional = Company::findOrFail($id);
 
-            $regional->update(
-                $request->only(['nombre', 'telefono', 'direccion'])
-            );
+            $regional->update($request->only([
+                'razonSocial',
+                'nit',
+                'representanteLegal',
+                'direccion',
+                'email',
+                'digitoVerificacion'
+            ]));
 
             return response()->json([
                 'status' => 'success',
                 'message' => '¡Regional actualizada correctamente!',
-                'data' => $regional->load('departamento')
+                'data' => $regional
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -85,5 +119,4 @@ class RegionalController extends Controller
             ], 500);
         }
     }
-    */
 }
