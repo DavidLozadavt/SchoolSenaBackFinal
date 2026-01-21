@@ -90,11 +90,11 @@ class RegionalController extends Controller
                 'direccion' => 'sometimes|string|max:255',
                 'email' => 'sometimes|email|max:255',
                 'digitoVerificacion' => [
-                    'sometimes',
+                    'required',
                     'integer',
-                    'digits:5',
-                    Rule::unique('empresa', 'digitoVerificacion')->ignore($id),
+                    'between:1,9',
                 ],
+                'idCiudad' => 'nullable|exists:ciudad,id',
             ]);
 
             $regional = Company::findOrFail($id);
@@ -105,7 +105,8 @@ class RegionalController extends Controller
                 'representanteLegal',
                 'direccion',
                 'email',
-                'digitoVerificacion'
+                'digitoVerificacion',
+                'idCiudad'
             ]));
 
             return response()->json([
