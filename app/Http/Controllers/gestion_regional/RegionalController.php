@@ -26,9 +26,9 @@ class RegionalController extends Controller
                 'digitoVerificacion' => [
                     'required',
                     'integer',
-                    'digits:5',
-                    Rule::unique('empresa', 'digitoVerificacion'),
+                    'between:1,9',
                 ],
+                'idCiudad' => 'nullable|exists:ciudad,id',
             ]);
 
             $nuevaRegional = Company::create([
@@ -38,7 +38,8 @@ class RegionalController extends Controller
                 'direccion' => $request->direccion,
                 'email' => $request->email,
                 'rutaLogo' => Company::RUTA_LOGO_DEFAULT,
-                'digitoVerificacion' => $request->digitoVerificacion
+                'digitoVerificacion' => $request->digitoVerificacion,
+                'idCiudad' => $request->idCiudad,
             ]);
             return response()->json([
                 'status' => 'success',
@@ -54,7 +55,7 @@ class RegionalController extends Controller
     }
     public function index()
     {
-        $regionales = Company::select('id', 'razonSocial', 'nit', 'rutaLogo', 'representanteLegal', 'digitoVerificacion', 'email', 'telefono', 'direccion');
+        $regionales = Company::select('id', 'razonSocial', 'nit', 'rutaLogo', 'representanteLegal', 'digitoVerificacion', 'email', 'direccion', 'idCiudad')->whereNotNull('idCiudad')->with('ciudad');
         return response()->json($regionales->get());
     }
     public function show($id)

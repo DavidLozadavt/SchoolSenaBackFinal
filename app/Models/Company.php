@@ -25,6 +25,7 @@ class Company extends Model
         'email',
         'rutaLogo',
         'digitoVerificacion',
+        'idCiudad',
     ];
 
 
