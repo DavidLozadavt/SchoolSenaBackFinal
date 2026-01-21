@@ -86,7 +86,7 @@ class RegionalController extends Controller
                     'max:255',
                     Rule::unique('empresa', 'nit')->ignore($id),
                 ],
-                'representanteLegal' => 'sometimes|string|max:20',
+                'representanteLegal' => 'sometimes|string|max:255',
                 'direccion' => 'sometimes|string|max:255',
                 'email' => 'sometimes|email|max:255',
                 'digitoVerificacion' => [
