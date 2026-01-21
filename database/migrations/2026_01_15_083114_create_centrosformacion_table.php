@@ -23,13 +23,13 @@ return new class extends Migration
             $table->string('correosubdirector');
 
             //ForeingKey necesarias Regional y Departamentos:
-            $table->unsignedBigInteger('idRegional');
             $table->unsignedInteger('idCiudad');
+            $table->unsignedInteger('idEmpresa');
             //Definición de las llaves foraneas:
-            $table->foreign('idRegional', 'centrosformacion_idregional_foreign')
-                ->references('id')->on('regional');
             $table->foreign('idCiudad', 'centrosformacion_idciudad_foreign')
                 ->references('id')->on('ciudad');
+                $table->foreign('idEmpresa', 'centrosformacion_idempresa_foreign')
+                ->references('id')->on('empresa');
 
             $table->timestamps();
         });
