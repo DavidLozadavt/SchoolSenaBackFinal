@@ -114,6 +114,9 @@ use App\Http\Controllers\PeriodosController;
 use App\Http\Controllers\gestion_jornadas\JornadaController;
 
 use App\Http\Controllers\gestion_programas_academicos\NivelesProgramaController;
+use App\Http\Controllers\gestion_sede_institucional\SedeInstitucionalController;
+use App\Http\Controllers\InfraestructuraController;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -1085,3 +1088,17 @@ Route::delete('jornadas/eliminar', [JornadaController::class, 'eliminarJornadaMa
 Route::put('jornadas/actualizar', [JornadaController::class, 'actualizarJornadaMaterias']);
 Route::put('jornadas/cambiar-estado', [JornadaController::class, 'cambiarEstadoJornada']);
 
+//rutas sedes institucional
+Route::get('sedes-institucionales', [SedeInstitucionalController::class, 'index']);
+Route::post('sedes-institucionales', [SedeInstitucionalController::class, 'store']);
+Route::put('sedes-institucionales/{id}', [SedeInstitucionalController::class, 'update']);
+Route::delete('sedes-institucionales/{id}', [SedeInstitucionalController::class, 'destroy']);
+Route::get('sedes-institucionales/{id}', [SedeInstitucionalController::class, 'show']);
+
+// Rutas de Infraestructura
+Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']); 
+Route::get('sedes/{idSede}/infraestructuras', [InfraestructuraController::class, 'index']);
+Route::post('infraestructuras', [InfraestructuraController::class, 'store']);
+Route::get('infraestructuras/{id}', [InfraestructuraController::class, 'show']);
+Route::put('infraestructuras/{id}', [InfraestructuraController::class, 'update']);
+Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destroy']);
