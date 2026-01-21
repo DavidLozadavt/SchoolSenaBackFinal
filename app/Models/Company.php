@@ -64,4 +64,8 @@ class Company extends Model
     {
         return $this->hasMany(HistorialConfiguracionNomina::class, 'idEmpresa');
     }
+    public function ciudad()
+    {
+        return $this->belongsTo(City::class, 'idCiudad');
+    }
 }
