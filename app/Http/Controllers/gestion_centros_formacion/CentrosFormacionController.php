@@ -44,13 +44,13 @@ class CentrosFormacionController extends Controller
             ]);
             return response()->json([
                 'status' => 'success',
-                'message' => '¡Centro guardado con éxito!',
+                'message' => '¡Regional guardada con éxito!',
                 'data' => $nuevoCentro
             ], 201);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al guardar el centro de formación: ' . $e->getMessage()
+                'message' => 'Error al guardar la regional: ' . $e->getMessage()
             ], 500);
         }
     }
