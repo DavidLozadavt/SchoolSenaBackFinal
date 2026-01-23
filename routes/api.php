@@ -1083,8 +1083,11 @@ Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show'])
 Route::patch('centrosFormacion/{id}', [CentrosFormacionController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
-Route::post('sedesSena', [ControllersSedeController::class, 'store']);
 Route::get('sedesSena/users', [ControllersSedeController::class, 'getUsersSena']);
+Route::post('sedesSena', [ControllersSedeController::class, 'store']);
+Route::get('sedesSena', [ControllersSedeController::class, 'index']);
+Route::get('sedesSena/{id}', [ControllersSedeController::class, 'show']);
+Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
