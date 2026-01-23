@@ -12,119 +12,147 @@ use Illuminate\Support\Facades\Storage;
 class SedeController extends Controller
 {
     /**
-     * Display a listing of the resource.
-     *
-     * @return \Illuminate\Http\Response
+     * 📋 Listar SOLO sedes administrativas
      */
     public function index(): JsonResponse
     {
         $idCompany = KeyUtil::idCompany();
-        $sedes = Sede::where('idEmpresa', $idCompany)->get();
-        return response()->json($sedes);
-    }
 
-    public function getAllSedes()   {
-        $idCompany = KeyUtil::idCompany();
-        $sedes = Sede::with('responsable.persona')
-            ->where('idEmpresa', $idCompany)
+        $sedes = Sede::where('idEmpresa', $idCompany)
+            ->where('tipo', 'administrativo') // ✅ filtro clave
             ->get();
-    
+
         return response()->json($sedes);
     }
 
     /**
-     * Store a newly created resource in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response
+     * 📋 Listar sedes administrativas con responsable
+     */
+    public function getAllSedes()
+    {
+        $idCompany = KeyUtil::idCompany();
+
+        $sedes = Sede::with('responsable.persona')
+            ->where('idEmpresa', $idCompany)
+            ->where('tipo', 'administrativo') // ✅ filtro clave
+            ->get();
+
+        return response()->json($sedes);
+    }
+
+    /**
+     * ➕ Crear sede administrativa
      */
     public function store(Request $request): JsonResponse
     {
-        $urlImagen = null;
+        $request->validate([
+            'nombre'        => 'required|string|max:255',
+            'direccion'     => 'required|string|max:255',
+            'email'         => 'required|email|max:255',
+            'telefono'      => 'required|string|max:20',
+            'celular'       => 'required|string|max:20',
+            'idResponsable' => 'required|integer',
+            'descripcion'   => 'nullable|string',
+            'imagen'        => 'nullable|image|mimes:jpeg,png,jpg,gif',
+        ]);
+
+        $urlImagen = Sede::RUTA_FOTO_DEFAULT;
+
         if ($request->hasFile('imagen')) {
-            $urlImagen = $request
-                ->file('imagen')
-                ->store('sedes', ['disk' => 'public']);
+            $urlImagen = $request->file('imagen')->store('sedes', 'public');
         }
-        $request->request->add(['urlImagen' => $urlImagen ?? Sede::RUTA_FOTO_DEFAULT]);
-        $request->request->add(['idEmpresa' => KeyUtil::idCompany()]);
-        $sede = Sede::create($request->all());
+
+        $sede = Sede::create([
+            'nombre'        => $request->nombre,
+            'direccion'     => $request->direccion,
+            'email'         => $request->email,
+            'telefono'      => $request->telefono,
+            'celular'       => $request->celular,
+            'descripcion'   => $request->descripcion,
+            'idResponsable' => $request->idResponsable,
+            'urlImagen'     => $urlImagen,
+            'idEmpresa'     => KeyUtil::idCompany(),
+            'tipo'          => 'administrativo', // ✅ automático
+        ]);
+
         return response()->json($sede, 201);
     }
 
     /**
-     * Display the specified resource.
-     *
-     * @param  \App\Models\Sede  $sede
-     * @return \Illuminate\Http\Response
+     * 👁️ Ver sede administrativa
      */
     public function show(string $id): JsonResponse
     {
-        $sede = Sede::findOrFail($id);
+        $sede = Sede::where('id', $id)
+            ->where('tipo', 'administrativo') // ✅ seguridad extra
+            ->firstOrFail();
+
         return response()->json($sede);
     }
 
     /**
-     * Update the specified resource in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \App\Models\Sede  $sede
-     * @return \Illuminate\Http\Response
+     * ✏️ Actualizar sede administrativa
      */
-    public function updateSede(Request $request, $id)
+    public function updateSede(Request $request, $id): JsonResponse
     {
         $request->validate([
-            'nombre'       => 'required|string|max:255',
-            'direccion'    => 'required|string|max:255',
-            'email'        => 'required|email|max:255',
-            'telefono'     => 'required|string|max:20',
-            'celular'      => 'required|string|max:20',
+            'nombre'        => 'required|string|max:255',
+            'direccion'     => 'required|string|max:255',
+            'email'         => 'required|email|max:255',
+            'telefono'      => 'required|string|max:20',
+            'celular'       => 'required|string|max:20',
             'idResponsable' => 'required|integer',
-            'descripcion'  => 'nullable|string',
-            'imagen'       => 'nullable|image|mimes:jpeg,png,jpg,gif',
+            'descripcion'   => 'nullable|string',
+            'imagen'        => 'nullable|image|mimes:jpeg,png,jpg,gif',
         ]);
 
-        $sede = Sede::findOrFail($id);
+        $sede = Sede::where('id', $id)
+            ->where('tipo', 'administrativo')
+            ->firstOrFail();
 
         $dataToUpdate = [
-            'nombre'       => $request->input('nombre'),
-            'direccion'    => $request->input('direccion'),
-            'email'        => $request->input('email'),
-            'telefono'     => $request->input('telefono'),
-            'celular'      => $request->input('celular'),
-            'idResponsable' => $request->input('idResponsable'),
-            'descripcion'  => $request->input('descripcion'),
+            'nombre'        => $request->nombre,
+            'direccion'     => $request->direccion,
+            'email'         => $request->email,
+            'telefono'      => $request->telefono,
+            'celular'       => $request->celular,
+            'idResponsable' => $request->idResponsable,
+            'descripcion'   => $request->descripcion,
         ];
-
 
         if ($request->hasFile('imagen')) {
             if ($sede->urlImagen && $sede->urlImagen !== Sede::RUTA_FOTO_DEFAULT) {
                 Storage::disk('public')->delete($sede->urlImagen);
             }
 
-            $path = $request->file('imagen')->store('sedes', 'public');
-            $dataToUpdate['urlImagen'] = $path;
+            $dataToUpdate['urlImagen'] = $request->file('imagen')
+                ->store('sedes', 'public');
         }
 
         $sede->update($dataToUpdate);
 
         return response()->json([
-            'success' => 'Sede actualizada con éxito',
-            'sede'    => $sede
-        ], 200);
+            'success' => true,
+            'message' => 'Sede administrativa actualizada correctamente',
+            'data'    => $sede
+        ]);
     }
 
     /**
-     * Remove the specified resource from storage.
-     *
-     * @param  \App\Models\Sede  $sede
-     * @return \Illuminate\Http\Response
+     * 🗑️ Eliminar sede administrativa
      */
     public function destroy(string $id): JsonResponse
     {
-        $sede = Sede::findOrFail($id);
-        Storage::disk('public')->delete($sede->urlImagen);
+        $sede = Sede::where('id', $id)
+            ->where('tipo', 'administrativo')
+            ->firstOrFail();
+
+        if ($sede->urlImagen && $sede->urlImagen !== Sede::RUTA_FOTO_DEFAULT) {
+            Storage::disk('public')->delete($sede->urlImagen);
+        }
+
         $sede->delete();
+
         return response()->json(null, 204);
     }
 }
