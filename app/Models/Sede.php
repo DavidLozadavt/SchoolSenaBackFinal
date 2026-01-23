@@ -10,18 +10,19 @@ class Sede extends Model
     use HasFactory;
 
     protected $table = 'sedes';
+    public const RUTA_FOTO_DEFAULT = 'sedes/default.png';
 
     protected $fillable = [
         'nombre',
         'jefeInmediato',
         'descripcion',
         'urlImagen',
+        'idEmpresa',
+        'idCiudad',
         'direccion',
         'email',
         'telefono',
         'celular',
-        'idEmpresa',
-        'idCiudad',
         'idResponsable',
     ];
 

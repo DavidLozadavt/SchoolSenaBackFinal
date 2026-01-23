@@ -114,6 +114,8 @@ use App\Http\Controllers\PeriodosController;
 use App\Http\Controllers\gestion_jornadas\JornadaController;
 
 use App\Http\Controllers\gestion_programas_academicos\NivelesProgramaController;
+use App\Http\Controllers\SedeController as ControllersSedeController;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -1079,6 +1081,10 @@ Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);
 Route::get('centrosFormacion', [CentrosFormacionController::class, 'index']);
 Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show']);
 Route::patch('centrosFormacion/{id}', [CentrosFormacionController::class, 'update']);
+
+//rutas SHOOL SENA para gestión de Centros de Formación:
+Route::post('sedesSena', [ControllersSedeController::class, 'store']);
+Route::get('sedesSena/users', [ControllersSedeController::class, 'getUsersSena']);
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
