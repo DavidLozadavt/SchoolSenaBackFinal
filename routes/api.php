@@ -217,12 +217,16 @@ Route::post('interrumpir_contrato', [ContratacionController::class, 'interrumpir
 Route::post('extender_contrato', [ContratacionController::class, 'extenderContrato']);
 Route::post('update_documento_contrato', [ContratacionController::class, 'updateDocumentoContrato']);
 Route::post('delete_documento_contrato', [ContratacionController::class, 'deleteDocumentoContrato']);
+Route::get('download_documento_contrato/{id}', [ContratacionController::class, 'downloadDocumentoContrato']);
 Route::get('bancos', [ContratacionController::class, 'bancos']);
 Route::post('store_banco', [ContratacionController::class, 'storeBanco']);
 Route::get('tipos_terminacion_contrato', [ContratacionController::class, 'tiposTerminacionContrato']);
 Route::get('actividades_riesgo_profesional', [ContratacionController::class, 'getActividadesRiesgoProfesional']);
 Route::post('store_actividades_riesgo_profesional', [ContratacionController::class, 'storeActividadeRiesgoProfesional']);
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
+Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
+Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas']);
+Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
 
 
 //GestionTipoContrato
