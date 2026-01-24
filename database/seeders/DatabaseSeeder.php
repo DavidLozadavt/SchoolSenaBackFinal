@@ -43,5 +43,6 @@ class DatabaseSeeder extends Seeder
         $this->call([
         TipoGradoSeeder::class,
     ]);
+        $this->call(TipoInfraestructuraSeeder::class);
     }
 }

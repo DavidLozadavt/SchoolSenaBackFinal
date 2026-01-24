@@ -3,16 +3,23 @@
 namespace App\Models\Nomina;
 
 use App\Models\Company;
-use App\Models\PuntoVenta;
+use App\Models\City;
 use App\Models\User;
+use App\Models\PuntoVenta;
+use App\Models\nomina\Area;
+use App\Models\AsignacionPeriodoPrograma;
+use App\Models\Infraestructura;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use App\Models\AsignacionPeriodoPrograma;
+
 class Sede extends Model
 {
     use HasFactory;
+
+    protected $table = 'sedes';
+    protected $primaryKey = 'id';
+
+    const RUTA_FOTO_DEFAULT = "default/sede.png";
 
     protected $fillable = [
         "nombre",
@@ -20,22 +27,24 @@ class Sede extends Model
         "email",
         "telefono",
         "celular",
-        "urlSede",
+        "urlImagen",
         "descripcion",
         "idResponsable",
-        "idEmpresa"
+        "idEmpresa",
+        "idCiudad",
+        "tipo"
     ];
-    protected $table = 'sedes';
-
-    const RUTA_FOTO_DEFAULT = "default/sede.png";
 
     protected $appends = ['rutaImagenUrl'];
 
+    /* =========================
+       📸 Imagen
+    ========================= */
     public function getRutaImagenUrlAttribute()
     {
         $defaultUrl = url('storage/' . self::RUTA_FOTO_DEFAULT);
 
-        if (isset($this->attributes['urlImagen'])) {
+        if (!empty($this->attributes['urlImagen'])) {
             if ($this->attributes['urlImagen'] === self::RUTA_FOTO_DEFAULT) {
                 return url($this->attributes['urlImagen']);
             }
@@ -46,29 +55,41 @@ class Sede extends Model
         return $defaultUrl;
     }
 
-    public function empresa(): BelongsTo
+    /* =========================
+       🔗 Relaciones
+    ========================= */
+    public function empresa()
     {
         return $this->belongsTo(Company::class, 'idEmpresa');
     }
 
-    public function areas(): HasMany
+    public function ciudad()
     {
-        return $this->hasMany(Area::class, 'idSede');
+        return $this->belongsTo(City::class, 'idCiudad');
     }
+
     public function responsable()
     {
         return $this->belongsTo(User::class, 'idResponsable');
     }
 
+    public function areas()
+    {
+        return $this->hasMany(Area::class, 'idSede');
+    }
 
     public function puntosVenta()
     {
         return $this->hasMany(PuntoVenta::class, 'idSede');
-
     }
 
-    public function asignaciones(): HasMany
+    public function asignaciones()
     {
         return $this->hasMany(AsignacionPeriodoPrograma::class, 'idSede');
+    }
+
+    public function infraestructuras()
+    {
+        return $this->hasMany(Infraestructura::class, 'idSede');
     }
 }
