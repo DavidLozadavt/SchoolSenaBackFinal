@@ -40,8 +40,10 @@ class DatabaseSeeder extends Seeder
         $this->call(TiposFormacionSeeder::class);
         $this->call(EstadosProgramaSeeder::class);
         $this->call([TipoJornadaSeeder::class]);
+        $this->call([PermissionsSeeder::class,]);
         $this->call([
         TipoGradoSeeder::class,
+        
     ]);
         $this->call(TipoInfraestructuraSeeder::class);
     }
