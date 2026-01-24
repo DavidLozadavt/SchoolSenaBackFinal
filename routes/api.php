@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AgendaEscenarioController;
+use App\Http\Controllers\AperturarProgramaController;
 use App\Http\Controllers\EstadoViajeController;
 use App\Http\Controllers\gestion_transporte\ObservacionViajeController;
 use App\Http\Controllers\IdentificationTypeController;
@@ -1084,12 +1085,18 @@ Route::get('centrosFormacion', [CentrosFormacionController::class, 'index']);
 Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show']);
 Route::patch('centrosFormacion/{id}', [CentrosFormacionController::class, 'update']);
 
-//rutas SHOOL SENA para gestión de Centros de Formación:
+//rutas SHOOL SENA para gestión de Sedes:
 Route::get('sedesSena/users', [ControllersSedeController::class, 'getUsersSena']);
 Route::post('sedesSena', [ControllersSedeController::class, 'store']);
 Route::get('sedesSena', [ControllersSedeController::class, 'index']);
 Route::get('sedesSena/{id}', [ControllersSedeController::class, 'show']);
 Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
+
+//rutas SHOOL SENA para gestión de aperturaPrograma:
+Route::get('aperturaPrograma',[AperturarProgramaController::class, 'index']);
+Route::post('aperturaPrograma',[AperturarProgramaController::class, 'store']);
+Route::get('aperturaPrograma/{id}',[AperturarProgramaController::class, 'show']);
+Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'update']);
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
