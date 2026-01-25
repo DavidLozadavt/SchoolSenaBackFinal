@@ -30,3 +30,4 @@ Route::get('/planilla-viaje', [ReportController::class, 'generatePDFPlanilla']);
 // SPA
 Route::get('/{any}', [App\Http\Controllers\WebController::class, 'index'])
     ->where('any', '.*');
+    

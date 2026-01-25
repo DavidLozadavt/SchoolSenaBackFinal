@@ -38,6 +38,9 @@ use App\Models\Nomina\Vacacion;
 use App\Models\Novedad;
 use App\Models\ObservacionPreocupacional;
 use App\Models\TipoTerminacionContrato;
+use App\Models\AreaConocimiento;
+use App\Models\Programa;
+use App\Models\NivelEducativo;
 
 class ContratacionController extends Controller
 {
@@ -266,7 +269,7 @@ class ContratacionController extends Controller
             $persona = new Person();
             $persona->id = $nextId;
             $persona->fechaNac = $request->input('fechaNac');
-            $persona->idtipoIdentificacion = $request->input('idtipoIdentificacion');
+            $persona->idTipoIdentificacion = $request->input('idtipoIdentificacion');
             $persona->identificacion = $identificacion;
             $persona->nombre1 = $request->input('nombre1');
             $persona->nombre2 = $request->input('nombre2');
@@ -296,7 +299,7 @@ class ContratacionController extends Controller
             $tecero->identificacion = $persona->identificacion;
             $tecero->idTipoTercero = TipoTercero::PERSONA_NATURAL;
             $tecero->idCompany = $company_id;
-            $tecero->idTipoIdentificacion = $persona->idtipoIdentificacion;
+            $tecero->idTipoIdentificacion = $persona->idTipoIdentificacion;
             $tecero->email = $persona->email;
             $tecero->save();
 
@@ -370,19 +373,33 @@ class ContratacionController extends Controller
             $contrato->idArea = $request->input('idArea');
             $contrato->idGrupoNomina = $request->input('idGrupoNomina');
 
+            if ($request->has('idNivelEducativo')) {
+                $contrato->idNivelEducativo = $request->input('idNivelEducativo');
+            }
 
+            if ($request->has('observacionPreocupacional')) {
+                $observacionTexto = trim($request->input('observacionPreocupacional'));
 
-            $observacionTexto = trim($request->input('observacionPreocupacional'));
-
-            if (!empty($observacionTexto)) {
-                $observacionPreocupacional = new ObservacionPreocupacional();
-                $observacionPreocupacional->idPersona = $contrato->idpersona;
-                $observacionPreocupacional->observacion = $observacionTexto;
-                $observacionPreocupacional->save();
+                if (!empty($observacionTexto)) {
+                    $observacionPreocupacional = new ObservacionPreocupacional();
+                    $observacionPreocupacional->idPersona = $contrato->idpersona;
+                    $observacionPreocupacional->observacion = $observacionTexto;
+                    $observacionPreocupacional->save();
+                }
             }
 
 
             $contrato->save();
+
+            // Guardar áreas de conocimiento
+            if ($request->has('areasConocimiento') && is_array($request->input('areasConocimiento'))) {
+                $contrato->areasConocimiento()->sync($request->input('areasConocimiento'));
+            }
+
+            // Guardar programas
+            if ($request->has('programas') && is_array($request->input('programas'))) {
+                $contrato->programas()->sync($request->input('programas'));
+            }
 
             $novedad = new Novedad();
             $novedad->tipo = 'INGRESO';
@@ -822,6 +839,7 @@ class ContratacionController extends Controller
             'documentosContrato.AsignacionTipoDocumentoProceso.tipoDocumento',
             'persona.ciudadUbicacion',
             'persona.CiudadNac',
+            'persona.tipoIdentificacion',
             'persona.observacionesPreocupacionales',
             'salario.rol',
             'tipoContrato',
@@ -838,6 +856,9 @@ class ContratacionController extends Controller
             'actividadRiesgo',
             'tipoCotizante',
             'tarifasRiesgo',
+            'nivelEducativo',
+            'areasConocimiento',
+            'programas',
             'transacciones.pago' => function ($query) {
                 $query->first();
             }
@@ -909,6 +930,61 @@ class ContratacionController extends Controller
         $documentoContrato->delete();
 
         return response()->json(['message' => 'Documento eliminado correctamente']);
+    }
+
+    /**
+     * Descarga o visualiza un documento de contrato
+     *
+     * @param int $idDocumento
+     * @param \Illuminate\Http\Request $request
+     * @return \Illuminate\Http\Response
+     */
+    public function downloadDocumentoContrato($idDocumento, Request $request)
+    {
+        // Si el token viene como query parameter, establecerlo en el header para autenticación
+        if ($request->has('token')) {
+            $request->headers->set('Authorization', 'Bearer ' . $request->query('token'));
+        }
+
+        $documentoContrato = DocumentoContrato::with('AsignacionTipoDocumentoProceso.tipoDocumento')->find($idDocumento);
+
+        if (!$documentoContrato) {
+            return response()->json(['error' => 'Documento no encontrado'], 404);
+        }
+
+        $rutaArchivo = $documentoContrato->ruta;
+
+        // Si no hay ruta o es la ruta por defecto, retornar error
+        if (!$rutaArchivo || $rutaArchivo === DocumentoContrato::RUTA_DOCUMENTO_DEFAULT) {
+            return response()->json(['error' => 'Archivo no disponible'], 404);
+        }
+
+        // Eliminar el prefijo /storage/ si existe
+        $rutaArchivoRelativa = parse_url($rutaArchivo, PHP_URL_PATH);
+        $rutaArchivoSinStorage = str_replace('/storage/', 'app/public/', $rutaArchivoRelativa);
+        $rutaCompleta = storage_path($rutaArchivoSinStorage);
+
+        // Verificar que el archivo existe
+        if (!file_exists($rutaCompleta)) {
+            return response()->json(['error' => 'Archivo no encontrado en el servidor'], 404);
+        }
+
+        // Obtener el tipo MIME del archivo
+        $mimeType = mime_content_type($rutaCompleta);
+        if (!$mimeType) {
+            $mimeType = 'application/octet-stream';
+        }
+
+        // Obtener el nombre del archivo original si está disponible
+        $nombreArchivo = $documentoContrato->AsignacionTipoDocumentoProceso?->tipoDocumento?->tituloDocumento ?? 'documento';
+        $extension = pathinfo($rutaCompleta, PATHINFO_EXTENSION);
+        $nombreArchivoCompleto = $nombreArchivo . '.' . $extension;
+
+        // Retornar el archivo para visualización/descarga
+        return response()->file($rutaCompleta, [
+            'Content-Type' => $mimeType,
+            'Content-Disposition' => 'inline; filename="' . $nombreArchivoCompleto . '"'
+        ]);
     }
 
 
@@ -1612,7 +1688,7 @@ class ContratacionController extends Controller
         try {
 
             $validated = $request->validate([
-                'tipo' => 'required|string|in:PENSION,SALUD',
+                'tipo' => 'required|string|in:PENSION,SALUD,ARL,CAJA COMPENSACION,CESANTIAS',
             ]);
 
 
@@ -1626,6 +1702,7 @@ class ContratacionController extends Controller
 
 
             if ($validated['tipo'] === 'PENSION') {
+                $contrato->idPension = $request->input('entidad_id');
                 $contrato->idPensionMovilidad = $request->input('entidad_id');
 
                 $novedad = new Novedad();
@@ -1636,6 +1713,7 @@ class ContratacionController extends Controller
                 $novedad->fechaInicial = now();
                 $novedad->save();
             } elseif ($validated['tipo'] === 'SALUD') {
+                $contrato->idSalud = $request->input('entidad_id');
                 $contrato->idSaludMovilidad = $request->input('entidad_id');
 
                 $novedad = new Novedad();
@@ -1645,6 +1723,12 @@ class ContratacionController extends Controller
                 $novedad->estado = 'LIQUIDADO';
                 $novedad->fechaInicial = now();
                 $novedad->save();
+            } elseif ($validated['tipo'] === 'ARL') {
+                $contrato->idArl = $request->input('entidad_id');
+            } elseif ($validated['tipo'] === 'CAJA COMPENSACION') {
+                $contrato->idCajaCompensacion = $request->input('entidad_id');
+            } elseif ($validated['tipo'] === 'CESANTIAS') {
+                $contrato->idCesantias = $request->input('entidad_id');
             }
 
             $contrato->save();
@@ -1668,11 +1752,6 @@ class ContratacionController extends Controller
 
     public function udapteContrato(Request $request, $id)
     {
-
-
-
-        $fechaInicio = Carbon::parse($request->input('fechaContratacion'));
-
         try {
             DB::beginTransaction();
             $contrato = Contract::find($id);
@@ -1681,54 +1760,144 @@ class ContratacionController extends Controller
                 return response()->json(['error' => 'Contrato no encontrado'], 404);
             }
 
-
-
-            $contrato->idtipoContrato = $request->input('idtipoContrato');
-            $contrato->fechaContratacion = $fechaInicio;
-
-            if ($contrato->idtipoContrato == 6) {
-                $contrato->fechaFinalContrato = null;
-            } else {
-                $fechaFinalContrato = Carbon::parse($request->input('fechaFinalContrato'))->format('Y-m-d');
-                $contrato->fechaFinalContrato = $fechaFinalContrato;
+            // Solo actualizar campos que vienen en el request
+            if ($request->has('idtipoContrato')) {
+                $contrato->idtipoContrato = $request->input('idtipoContrato');
             }
 
-            $contrato->valorTotalContrato = $request->input('valorTotalContrato');
-            $contrato->salario_id = $request->input('salario_id');
-            $contrato->periodoPago = $request->input('periodoPago');
-            $contrato->objetoContrato = $request->input('objetoContrato');
-            $contrato->observacion = $request->input('observacion');
-            $contrato->perfilProfesional = $request->input('perfilProfesional') ?: 'N/A';
-            $contrato->otrosi = 'N';
-            $contrato->idEstado = Status::ID_ACTIVE;
+            if ($request->has('fechaContratacion')) {
+                $fechaInicio = Carbon::parse($request->input('fechaContratacion'));
+                $contrato->fechaContratacion = $fechaInicio;
+            }
 
-            $contrato->idPension = $request->input('idPension');
-            $contrato->idArl = $request->input('idArl');
-            $contrato->idSalud = $request->input('idSalud');
+            if ($request->has('fechaFinalContrato')) {
+                if ($contrato->idtipoContrato == 6) {
+                    $contrato->fechaFinalContrato = null;
+                } else {
+                    $fechaFinalContrato = Carbon::parse($request->input('fechaFinalContrato'))->format('Y-m-d');
+                    $contrato->fechaFinalContrato = $fechaFinalContrato;
+                }
+            }
 
-            $contrato->idCajaCompensacion = $request->input('idCajaCompensacion');
-            $contrato->idCesantias = $request->input('idCesantias');
-            $contrato->tipoCuentaBancaria = $request->input('tipoCuentaBancaria');
-            $contrato->tipoCotizante  = $request->input('tipoCotizante');
-            $contrato->numeroCuentaBancaria = $request->input('numeroCuentaBancaria');
-            $contrato->idTipoCotizante = $request->input('idTipoCotizante');
-            $contrato->idSubTipoCotizante = $request->input('idSubTipoCotizante');
-            $contrato->idBanco = $request->input('idBanco');
-            $contrato->tipoSalario = $request->input('tipoSalario');
-            $contrato->idTarifaRiesgo = $request->input('idTarifaRiesgo');
-            $contrato->idActividadRiesgo = $request->input('idActividadRiesgo');
-            $contrato->idArea = $request->input('idArea');
-            $contrato->idGrupoNomina = $request->input('idGrupoNomina');
+            if ($request->has('valorTotalContrato')) {
+                $contrato->valorTotalContrato = $request->input('valorTotalContrato');
+            }
 
+            if ($request->has('salario_id')) {
+                $contrato->salario_id = $request->input('salario_id');
+            }
 
+            if ($request->has('periodoPago')) {
+                $contrato->periodoPago = $request->input('periodoPago');
+            }
 
-            $observacionTexto = trim($request->input('observacionPreocupacional'));
+            if ($request->has('objetoContrato')) {
+                $contrato->objetoContrato = $request->input('objetoContrato');
+            }
 
-            if (!empty($observacionTexto)) {
-                $observacionPreocupacional = new ObservacionPreocupacional();
-                $observacionPreocupacional->idPersona = $contrato->idpersona;
-                $observacionPreocupacional->observacion = $observacionTexto;
-                $observacionPreocupacional->save();
+            if ($request->has('observacion')) {
+                $contrato->observacion = $request->input('observacion');
+            }
+
+            if ($request->has('perfilProfesional')) {
+                $contrato->perfilProfesional = $request->input('perfilProfesional') ?: 'N/A';
+            }
+
+            if ($request->has('otrosi')) {
+                $contrato->otrosi = $request->input('otrosi');
+            }
+
+            if ($request->has('idEstado')) {
+                $contrato->idEstado = $request->input('idEstado');
+            }
+
+            if ($request->has('idPension')) {
+                $contrato->idPension = $request->input('idPension');
+            }
+
+            if ($request->has('idArl')) {
+                $contrato->idArl = $request->input('idArl');
+            }
+
+            if ($request->has('idSalud')) {
+                $contrato->idSalud = $request->input('idSalud');
+            }
+
+            if ($request->has('idCajaCompensacion')) {
+                $contrato->idCajaCompensacion = $request->input('idCajaCompensacion');
+            }
+
+            if ($request->has('idCesantias')) {
+                $contrato->idCesantias = $request->input('idCesantias');
+            }
+
+            if ($request->has('tipoCuentaBancaria')) {
+                $contrato->tipoCuentaBancaria = $request->input('tipoCuentaBancaria');
+            }
+
+            if ($request->has('tipoCotizante')) {
+                $contrato->tipoCotizante = $request->input('tipoCotizante');
+            }
+
+            if ($request->has('numeroCuentaBancaria')) {
+                $contrato->numeroCuentaBancaria = $request->input('numeroCuentaBancaria');
+            }
+
+            if ($request->has('idTipoCotizante')) {
+                $contrato->idTipoCotizante = $request->input('idTipoCotizante');
+            }
+
+            if ($request->has('idSubTipoCotizante')) {
+                $contrato->idSubTipoCotizante = $request->input('idSubTipoCotizante');
+            }
+
+            if ($request->has('idBanco')) {
+                $contrato->idBanco = $request->input('idBanco');
+            }
+
+            if ($request->has('tipoSalario')) {
+                $contrato->tipoSalario = $request->input('tipoSalario');
+            }
+
+            if ($request->has('idTarifaRiesgo')) {
+                $contrato->idTarifaRiesgo = $request->input('idTarifaRiesgo');
+            }
+
+            if ($request->has('idActividadRiesgo')) {
+                $contrato->idActividadRiesgo = $request->input('idActividadRiesgo');
+            }
+
+            if ($request->has('idArea')) {
+                $contrato->idArea = $request->input('idArea');
+            }
+
+            if ($request->has('idGrupoNomina')) {
+                $contrato->idGrupoNomina = $request->input('idGrupoNomina');
+            }
+
+            if ($request->has('idNivelEducativo')) {
+                $contrato->idNivelEducativo = $request->input('idNivelEducativo');
+            }
+
+            // Actualizar áreas de conocimiento
+            if ($request->has('areasConocimiento') && is_array($request->input('areasConocimiento'))) {
+                $contrato->areasConocimiento()->sync($request->input('areasConocimiento'));
+            }
+
+            // Actualizar programas
+            if ($request->has('programas') && is_array($request->input('programas'))) {
+                $contrato->programas()->sync($request->input('programas'));
+            }
+
+            if ($request->has('observacionPreocupacional')) {
+                $observacionTexto = trim($request->input('observacionPreocupacional'));
+
+                if (!empty($observacionTexto)) {
+                    $observacionPreocupacional = new ObservacionPreocupacional();
+                    $observacionPreocupacional->idPersona = $contrato->idpersona;
+                    $observacionPreocupacional->observacion = $observacionTexto;
+                    $observacionPreocupacional->save();
+                }
             }
 
 
@@ -1738,7 +1907,9 @@ class ContratacionController extends Controller
 
 
 
-            if (in_array($contrato->idtipoContrato, [6, 7])) {
+            // Solo crear vacación si se actualizó fechaContratacion y el tipo de contrato lo requiere
+            if ($request->has('fechaContratacion') && in_array($contrato->idtipoContrato, [6, 7])) {
+                $fechaInicio = Carbon::parse($request->input('fechaContratacion'));
                 $vacion = new Vacacion();
                 $vacion->idContrato = $contrato->id;
                 $vacion->periodo = $fechaInicio->copy()->addYear()->year;
@@ -1781,13 +1952,19 @@ class ContratacionController extends Controller
                 return response()->json(['error' => 'Activación del usuario no encontrada'], 404);
             }
 
-            $activationUser->fechaInicio = $fechaInicio;
+            // Solo actualizar fechas de activación si se actualizó fechaContratacion
+            if ($request->has('fechaContratacion')) {
+                $fechaInicio = Carbon::parse($request->input('fechaContratacion'));
+                $activationUser->fechaInicio = $fechaInicio;
 
-            if ($contrato->idtipoContrato == 6) {
-
-                $activationUser->fechaFin = date('Y-m-d', strtotime($fechaInicio . ' + 3 years'));
-            } else {
-                $activationUser->fechaFin = $fechaFinalContrato;
+                if ($contrato->idtipoContrato == 6) {
+                    $activationUser->fechaFin = date('Y-m-d', strtotime($fechaInicio . ' + 3 years'));
+                } else {
+                    if ($request->has('fechaFinalContrato')) {
+                        $fechaFinalContrato = Carbon::parse($request->input('fechaFinalContrato'))->format('Y-m-d');
+                        $activationUser->fechaFin = $fechaFinalContrato;
+                    }
+                }
             }
 
             $activationUser->state_id = Status::ID_ACTIVE;
@@ -1859,7 +2036,12 @@ class ContratacionController extends Controller
             }
 
             $persona->fechaNac = $request->input('fechaNac');
-            $persona->idtipoIdentificacion = $request->input('idtipoIdentificacion');
+            
+            $idTipoIdentificacion = $request->input('idtipoIdentificacion');
+            if ($idTipoIdentificacion !== null && $idTipoIdentificacion !== '' && $idTipoIdentificacion !== 0) {
+                $persona->idTipoIdentificacion = $idTipoIdentificacion;
+            }
+            
             $persona->identificacion = $identificacion;
             $persona->nombre1 = $request->input('nombre1');
             $persona->nombre2 = $request->input('nombre2');
@@ -1919,5 +2101,50 @@ class ContratacionController extends Controller
         $documentoContrato->save();
 
         return response()->json($documentoContrato, 200);
+    }
+
+    /**
+     * Obtiene todas las áreas de conocimiento disponibles.
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAreasConocimiento()
+    {
+        $areas = AreaConocimiento::orderBy('nombreAreaConocimiento', 'asc')->get();
+        return response()->json($areas);
+    }
+
+    /**
+     * Obtiene todos los programas disponibles.
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getProgramas()
+    {
+        $programas = Programa::with('nivel', 'tipoFormacion', 'estado')
+            ->where('idCompany', KeyUtil::idCompany())
+            ->orderBy('nombrePrograma', 'asc')
+            ->get();
+        return response()->json($programas);
+    }
+
+    /**
+     * Obtiene los instructores (contratos) asignados a un programa específico.
+     * Útil para asignar líderes de fichas.
+     *
+     * @param int $idPrograma
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getInstructoresPorPrograma($idPrograma)
+    {
+        $instructores = Contract::with(['persona', 'nivelEducativo', 'areasConocimiento'])
+            ->whereHas('programas', function ($query) use ($idPrograma) {
+                $query->where('programa.id', $idPrograma);
+            })
+            ->where('idEstado', Status::ID_ACTIVE)
+            ->where('idempresa', KeyUtil::idCompany())
+            ->get();
+
+        return response()->json($instructores);
     }
 }
