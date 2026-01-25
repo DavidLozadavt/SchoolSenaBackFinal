@@ -10,7 +10,7 @@ use App\Models\Nomina\Sede;
 
 class AsignacionPeriodoPrograma extends Model
 {
-    protected $table = 'asignacionPeriodoPrograma'; 
+    protected $table = 'aperturarprograma'; 
     protected $guarded = ['id']; 
     /** * Relaciones con tablas existentes 
      */
