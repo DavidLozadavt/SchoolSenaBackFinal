@@ -22,4 +22,17 @@ class Proceso extends Model
     {
         return $this->hasMany(AsignacionProcesoTipoDocumento::class, 'idProceso');
     }
+
+    /**
+     * Tipos de documento asignados a este proceso (toggle en "Asignar tipos de documentos").
+     */
+    public function tiposDocumento()
+    {
+        return $this->belongsToMany(
+            TipoDocumento::class,
+            'asignacion_proceso_tipo_documento',
+            'idProceso',
+            'idTipoDocumento'
+        );
+    }
 }

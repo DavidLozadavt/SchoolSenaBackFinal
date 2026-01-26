@@ -109,6 +109,7 @@ use App\Http\Controllers\CategoriaServicioController;
 use App\Http\Controllers\gestion_aporte\PolizasController;
 use App\Http\Controllers\gestion_centros_formacion\CentrosFormacionController;
 use App\Http\Controllers\gestion_ventas\ResponsableServicioController;
+use App\Http\Controllers\gestion_programas_academicos\DocumentoFichaController;
 use App\Http\Controllers\gestion_programas_academicos\PensumController;
 use App\Http\Controllers\gestion_regional\RegionalController;
 use App\Http\Controllers\PeriodosController;
@@ -1069,6 +1070,22 @@ Route::delete('programas_eliminar/{id}', [PensumController::class, 'destroy']);
 Route::get('asignacion_detalle/{id}', [PensumController::class, 'getInformacionApertura']);
 Route::put('asignacion_detalle_update/{id}', [PensumController::class, 'updateInformacionApertura']);
 Route::get('asignacion_detalle_completo/{id}', [NivelesProgramaController::class, 'getDetalleAsignacion']);
+
+// Documentos por ficha (FichaPrograma) y por proceso
+Route::get('ficha/{idGradoPrograma}/tipos-documento', [DocumentoFichaController::class, 'tiposPorFicha']);
+Route::put('ficha/{idGradoPrograma}/tipos-documento', [DocumentoFichaController::class, 'guardarAsignacion']);
+Route::get('ficha/{idGradoPrograma}/documentos-pide', [DocumentoFichaController::class, 'documentosPide']);
+Route::get('ficha/{idGradoPrograma}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizadosFicha']);
+Route::put('ficha/{idGradoPrograma}/documento/{idTipoDocumento}/autorizar', [DocumentoFichaController::class, 'autorizarDocumentoFicha']);
+Route::get('proceso/{idProceso}/tipos-documento', [DocumentoFichaController::class, 'tiposPorProceso']);
+Route::put('proceso/{idProceso}/tipos-documento', [DocumentoFichaController::class, 'guardarAsignacionProceso']);
+Route::get('proceso/{idProceso}/documentos-pide', [DocumentoFichaController::class, 'documentosPideProceso']);
+Route::get('proceso/{idProceso}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizadosProceso']);
+Route::delete('proceso/{idProceso}/documento/{idTipoDocumento}', [DocumentoFichaController::class, 'eliminarDocumentoProceso']);
+Route::get('tipos-documento-listado', [DocumentoFichaController::class, 'listadoTipos']);
+Route::get('programa/{idPrograma}/fichas', [DocumentoFichaController::class, 'fichasPorPrograma']);
+Route::get('programa/{idPrograma}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizados']);
+Route::put('programa/{idPrograma}/documento/{idTipoDocumento}/autorizar', [DocumentoFichaController::class, 'autorizarDocumento']);
 
 //ruta de Periodos 
 Route::post('/periodos', [PeriodosController::class, 'store']);

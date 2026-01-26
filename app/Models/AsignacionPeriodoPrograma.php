@@ -10,7 +10,8 @@ use App\Models\Nomina\Sede;
 
 class AsignacionPeriodoPrograma extends Model
 {
-    protected $table = 'aperturarprograma'; 
+    // MySQL puede convertir nombres a minúsculas, usar el nombre exacto de la BD
+    protected $table = 'asignacionperiodoprograma'; 
     protected $guarded = ['id']; 
     /** * Relaciones con tablas existentes 
      */
