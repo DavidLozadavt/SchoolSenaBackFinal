@@ -13,6 +13,11 @@ return new class extends Migration
      */
 public function up(): void
 {
+    // Verificar si la tabla ya existe antes de crearla
+    if (Schema::hasTable('asignacionPeriodoPrograma')) {
+        return; // La tabla ya existe, no hacer nada
+    }
+    
     Schema::create('asignacionPeriodoPrograma', function (Blueprint $table) {
         $table->bigIncrements('id');
         $table->text('observacion')->nullable();
@@ -51,9 +56,16 @@ public function up(): void
 
         $table->timestamps(); 
 
-        $table->foreign('idPeriodo')->references('id')->on('periodo');
-        $table->foreign('idPrograma')->references('id')->on('programa');
-        $table->foreign('idSede')->references('id')->on('sedes');
+        // Crear claves foráneas solo si las tablas existen
+        if (Schema::hasTable('periodo')) {
+            $table->foreign('idPeriodo')->references('id')->on('periodo');
+        }
+        if (Schema::hasTable('programa')) {
+            $table->foreign('idPrograma')->references('id')->on('programa');
+        }
+        if (Schema::hasTable('sedes')) {
+            $table->foreign('idSede')->references('id')->on('sedes');
+        }
     });
 }
 
@@ -64,6 +76,6 @@ public function up(): void
      */
    public function down()
 {
-    Schema::dropIfExists('asignacionPeriodoPrograma');
+    Schema::dropIfExists('asignacionperiodoprograma');
 }
 };

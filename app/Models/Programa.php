@@ -36,9 +36,26 @@ class Programa extends Model
     {
         return $this->belongsTo(EstadoPrograma::class, 'idEstadoPrograma');
     }
+    /**
+     * Relación con TipoGrado (opcional - puede no existir la columna idTipoGrado en la tabla)
+     * Si la columna no existe, esta relación retornará null
+     */
     public function tipoGrado(): BelongsTo
     {
-        
         return $this->belongsTo(TipoGrado::class, 'idTipoGrado', 'id');
+    }
+
+    /**
+     * Tipos de documento autorizados/activos para este programa.
+     * Tabla pivot: asignacion_programa_tipo_documento (con campo activo).
+     */
+    public function tiposDocumento()
+    {
+        return $this->belongsToMany(
+            TipoDocumento::class,
+            'asignacion_programa_tipo_documento',
+            'idPrograma',
+            'idTipoDocumento'
+        )->withPivot('activo')->withTimestamps();
     }
 }

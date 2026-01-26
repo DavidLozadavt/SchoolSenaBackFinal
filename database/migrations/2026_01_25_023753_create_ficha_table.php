@@ -44,7 +44,7 @@ return new class extends Migration
                   ->references('id')->on('jornadas');
 
             $table->foreign('idAsignacion')
-                  ->references('id')->on('aperturarprograma');
+                  ->references('id')->on('asignacionperiodoprograma');
             
 
             //$table->foreign('idAprendizVocero')
