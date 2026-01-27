@@ -1124,6 +1124,7 @@ Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'updat
 Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
+Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
 
 
 
