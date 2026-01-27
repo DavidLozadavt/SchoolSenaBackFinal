@@ -106,6 +106,7 @@ use App\Http\Controllers\EscenarioController;
 use App\Http\Controllers\ServicioController;
 use App\Http\Controllers\TipoServicioController;
 use App\Http\Controllers\CategoriaServicioController;
+use App\Http\Controllers\FichaController;
 use App\Http\Controllers\gestion_aporte\PolizasController;
 use App\Http\Controllers\gestion_centros_formacion\CentrosFormacionController;
 use App\Http\Controllers\gestion_ventas\ResponsableServicioController;
@@ -1118,6 +1119,12 @@ Route::get('aperturaPrograma',[AperturarProgramaController::class, 'index']);
 Route::post('aperturaPrograma',[AperturarProgramaController::class, 'store']);
 Route::get('aperturaPrograma/{id}',[AperturarProgramaController::class, 'show']);
 Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'update']);
+
+//rutas SHOOL SENA para gestión de Fichas:
+Route::post('fichas', [FichaController::class, 'store']);
+Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
+
+
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
