@@ -1122,6 +1122,7 @@ Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'updat
 
 //rutas SHOOL SENA para gestión de Fichas:
 Route::post('fichas', [FichaController::class, 'store']);
+Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 
 
