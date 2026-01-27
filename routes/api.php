@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AgendaEscenarioController;
+use App\Http\Controllers\AperturarProgramaController;
 use App\Http\Controllers\EstadoViajeController;
 use App\Http\Controllers\gestion_transporte\ObservacionViajeController;
 use App\Http\Controllers\IdentificationTypeController;
@@ -105,9 +106,11 @@ use App\Http\Controllers\EscenarioController;
 use App\Http\Controllers\ServicioController;
 use App\Http\Controllers\TipoServicioController;
 use App\Http\Controllers\CategoriaServicioController;
+use App\Http\Controllers\FichaController;
 use App\Http\Controllers\gestion_aporte\PolizasController;
 use App\Http\Controllers\gestion_centros_formacion\CentrosFormacionController;
 use App\Http\Controllers\gestion_ventas\ResponsableServicioController;
+use App\Http\Controllers\gestion_programas_academicos\DocumentoFichaController;
 use App\Http\Controllers\gestion_programas_academicos\PensumController;
 use App\Http\Controllers\gestion_regional\RegionalController;
 use App\Http\Controllers\PeriodosController;
@@ -1069,6 +1072,22 @@ Route::get('asignacion_detalle/{id}', [PensumController::class, 'getInformacionA
 Route::put('asignacion_detalle_update/{id}', [PensumController::class, 'updateInformacionApertura']);
 Route::get('asignacion_detalle_completo/{id}', [NivelesProgramaController::class, 'getDetalleAsignacion']);
 
+// Documentos por ficha (FichaPrograma) y por proceso
+Route::get('ficha/{idGradoPrograma}/tipos-documento', [DocumentoFichaController::class, 'tiposPorFicha']);
+Route::put('ficha/{idGradoPrograma}/tipos-documento', [DocumentoFichaController::class, 'guardarAsignacion']);
+Route::get('ficha/{idGradoPrograma}/documentos-pide', [DocumentoFichaController::class, 'documentosPide']);
+Route::get('ficha/{idGradoPrograma}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizadosFicha']);
+Route::put('ficha/{idGradoPrograma}/documento/{idTipoDocumento}/autorizar', [DocumentoFichaController::class, 'autorizarDocumentoFicha']);
+Route::get('proceso/{idProceso}/tipos-documento', [DocumentoFichaController::class, 'tiposPorProceso']);
+Route::put('proceso/{idProceso}/tipos-documento', [DocumentoFichaController::class, 'guardarAsignacionProceso']);
+Route::get('proceso/{idProceso}/documentos-pide', [DocumentoFichaController::class, 'documentosPideProceso']);
+Route::get('proceso/{idProceso}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizadosProceso']);
+Route::delete('proceso/{idProceso}/documento/{idTipoDocumento}', [DocumentoFichaController::class, 'eliminarDocumentoProceso']);
+Route::get('tipos-documento-listado', [DocumentoFichaController::class, 'listadoTipos']);
+Route::get('programa/{idPrograma}/fichas', [DocumentoFichaController::class, 'fichasPorPrograma']);
+Route::get('programa/{idPrograma}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizados']);
+Route::put('programa/{idPrograma}/documento/{idTipoDocumento}/autorizar', [DocumentoFichaController::class, 'autorizarDocumento']);
+
 //ruta de Periodos 
 Route::post('/periodos', [PeriodosController::class, 'store']);
 Route::get('/periodos', [PeriodosController::class, 'index']);
@@ -1088,12 +1107,25 @@ Route::get('centrosFormacion', [CentrosFormacionController::class, 'index']);
 Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show']);
 Route::patch('centrosFormacion/{id}', [CentrosFormacionController::class, 'update']);
 
-//rutas SHOOL SENA para gestión de Centros de Formación:
+//rutas SHOOL SENA para gestión de Sedes:
 Route::get('sedesSena/users', [ControllersSedeController::class, 'getUsersSena']);
 Route::post('sedesSena', [ControllersSedeController::class, 'store']);
 Route::get('sedesSena', [ControllersSedeController::class, 'index']);
 Route::get('sedesSena/{id}', [ControllersSedeController::class, 'show']);
 Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
+
+//rutas SHOOL SENA para gestión de aperturaPrograma:
+Route::get('aperturaPrograma',[AperturarProgramaController::class, 'index']);
+Route::post('aperturaPrograma',[AperturarProgramaController::class, 'store']);
+Route::get('aperturaPrograma/{id}',[AperturarProgramaController::class, 'show']);
+Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'update']);
+
+//rutas SHOOL SENA para gestión de Fichas:
+Route::post('fichas', [FichaController::class, 'store']);
+Route::get('fichas', [FichaController::class, 'index']);
+Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
+
+
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);

@@ -69,4 +69,8 @@ class Company extends Model
     {
         return $this->belongsTo(City::class, 'idCiudad');
     }
+    public function fichas(): HasMany
+    {
+        return $this->hasMany(Ficha::class, 'idRegional');
+    }
 }

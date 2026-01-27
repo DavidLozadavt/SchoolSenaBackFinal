@@ -10,9 +10,10 @@ use App\Models\Nomina\Sede;
 
 class AsignacionPeriodoPrograma extends Model
 {
-    protected $table = 'asignacionPeriodoPrograma'; 
-    protected $guarded = ['id']; 
-    /** * Relaciones con tablas existentes 
+    // MySQL puede convertir nombres a minúsculas, usar el nombre exacto de la BD
+    protected $table = 'aperturarprograma';
+    protected $guarded = ['id'];
+    /** * Relaciones con tablas existentes
      */
 
     public function periodo(): BelongsTo
@@ -32,7 +33,7 @@ class AsignacionPeriodoPrograma extends Model
     }
 public function jornadas()
     {
-       
+
         return $this->belongsToMany(Jornada::class, 'asignacionJornada', 'idAsignacion', 'idJornada')
                     ->withPivot('id');
     }

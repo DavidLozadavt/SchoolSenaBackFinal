@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             
             $table->foreignId('idAsignacion')
-                  ->constrained('asignacionPeriodoPrograma') 
+                  ->constrained('asignacionperiodoprograma') 
                   ->onDelete('cascade');
 
             $table->foreignId('idJornada')
