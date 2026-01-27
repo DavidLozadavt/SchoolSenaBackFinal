@@ -17,7 +17,7 @@ class FichaController extends Controller
             'observacion' => 'nullable|string|max:1000',
             'idPeriodo' => 'required|exists:periodo,id',
             'idPrograma' => 'required|exists:programa,id',
-            'estado' => 'required|string',
+            'estado' => 'nullable|string',
             'idSede' => 'required|exists:sedes,id',
             'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
 
@@ -44,7 +44,7 @@ class FichaController extends Controller
                 'observacion' => $validated['observacion'] ?? null,
                 'idPeriodo' => $validated['idPeriodo'],
                 'idPrograma' => $validated['idPrograma'],
-                'estado' => $validated['estado'],
+                'estado' => $validated['estado'] ?? 'EN CURSO',
                 'idSede' => $validated['idSede'],
                 'tipoCalificacion' => $validated['tipoCalificacion'] ?? 'NUMERICO',
 
@@ -86,7 +86,6 @@ class FichaController extends Controller
             ], 500);
         }
     }
-
     public function index()
     {
         $fichas = Ficha::with([
@@ -154,6 +153,29 @@ class FichaController extends Controller
         return response()->json([
             'estado' => $estado,
             'idRegional' => $idRegional,
+            'total' => $fichas->count(),
+            'data' => $fichas
+        ]);
+    }
+    public function fichasPorPrograma(int $idPrograma): JsonResponse
+    {
+        $fichas = Ficha::query()
+            ->whereHas('asignacion', function ($query) use ($idPrograma) {
+                $query->where('idPrograma', $idPrograma);
+            })
+            ->with([
+                'jornada:id,nombreJornada',
+                'sede:id,nombre',
+                'regional:id,razonSocial',
+                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
+                'asignacion.programa:id,nombrePrograma',
+            ])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+
+        return response()->json([
+            'idPrograma' => $idPrograma,
             'total' => $fichas->count(),
             'data' => $fichas
         ]);
