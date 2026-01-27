@@ -19,9 +19,17 @@ class FichaController extends Controller
             'idPrograma' => 'required|exists:programa,id',
             'estado' => 'required|string',
             'idSede' => 'required|exists:sedes,id',
+            'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
+
+            // apertura Fechas:
             'fechaInicialClases' => 'required|date',
             'fechaFinalClases' => 'required|date|after_or_equal:fechaInicialClases',
-            'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
+            'fechaInicialPlanMejoramiento' => 'required|date',
+            'fechaFinalPlanMejoramiento' => 'required|date|after_or_equal:fechaInicialPlanMejoramiento',
+            'fechaInicialInscripciones' => 'required|date',
+            'fechaFinalInscripciones' => 'required|date|after_or_equal:fechaInicialInscripciones',
+            'fechaInicialMatriculas' => 'required|date',
+            'fechaFinalMatriculas' => 'required|date|after_or_equal:fechaInicialMatriculas',
 
             // Ficha
             'idJornada' => 'required|exists:jornadas,id',
@@ -32,19 +40,24 @@ class FichaController extends Controller
         DB::beginTransaction();
 
         try {
-            // 1️⃣ Crear apertura de programa
             $apertura = AperturarPrograma::create([
                 'observacion' => $validated['observacion'] ?? null,
                 'idPeriodo' => $validated['idPeriodo'],
                 'idPrograma' => $validated['idPrograma'],
                 'estado' => $validated['estado'],
                 'idSede' => $validated['idSede'],
+                'tipoCalificacion' => $validated['tipoCalificacion'] ?? 'NUMERICO',
+
                 'fechaInicialClases' => $validated['fechaInicialClases'],
                 'fechaFinalClases' => $validated['fechaFinalClases'],
-                'tipoCalificacion' => $validated['tipoCalificacion'] ?? 'NUMERICO',
+                'fechaInicialPlanMejoramiento' => $validated['fechaInicialPlanMejoramiento'],
+                'fechaFinalPlanMejoramiento' => $validated['fechaFinalPlanMejoramiento'],
+                'fechaInicialInscripciones' => $validated['fechaInicialInscripciones'],
+                'fechaFinalInscripciones' => $validated['fechaFinalInscripciones'],
+                'fechaInicialMatriculas' => $validated['fechaInicialMatriculas'],
+                'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
             ]);
 
-            // 2️⃣ Crear ficha asociada
             $ficha = Ficha::create([
                 'idJornada' => $validated['idJornada'],
                 'idAsignacion' => $apertura->id,
