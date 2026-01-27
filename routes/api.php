@@ -1113,6 +1113,8 @@ Route::post('sedesSena', [ControllersSedeController::class, 'store']);
 Route::get('sedesSena', [ControllersSedeController::class, 'index']);
 Route::get('sedesSena/{id}', [ControllersSedeController::class, 'show']);
 Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
+Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'getSedesByRegional']); //Para filtrar las sedes por regional
+
 
 //rutas SHOOL SENA para gestión de aperturaPrograma:
 Route::get('aperturaPrograma',[AperturarProgramaController::class, 'index']);
