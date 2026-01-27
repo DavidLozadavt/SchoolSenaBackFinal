@@ -20,10 +20,10 @@ return new class extends Migration
             $table->string('codigo', 100)->nullable();
             $table->unsignedInteger('idInstructorLider')->nullable();
             $table->string('documento', 500)->nullable();
-            
+
             // Primero se crea esta la tabla ficha descpues se les agrega los aprendices
             //Porque los aprendices y el vocero pertenecen a la tabla matricula:
-            
+
             //$table->unsignedBigInteger('idAprendizVocero')->nullable();
             //$table->unsignedBigInteger('idAprendizSuplente')->nullable();
             $table->unsignedBigInteger('idInfraestructura')->nullable();
@@ -44,8 +44,8 @@ return new class extends Migration
                   ->references('id')->on('jornadas');
 
             $table->foreign('idAsignacion')
-                  ->references('id')->on('asignacionperiodoprograma');
-            
+                  ->references('id')->on('aperturarprograma');
+
 
             //$table->foreign('idAprendizVocero')
             //      ->references('id')->on('matricula');
