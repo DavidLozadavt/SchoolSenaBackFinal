@@ -86,6 +86,21 @@ class FichaController extends Controller
             ], 500);
         }
     }
+
+    public function index()
+    {
+        $fichas = Ficha::with([
+            'jornada:id,nombreJornada',
+            'asignacion:id,observacion,idPeriodo,idPrograma,estado,idSede,fechaInicialClases,fechaFinalClases,fechaInicialInscripciones,fechaFinalInscripciones,fechaInicialMatriculas,fechaFinalMatriculas,fechaInicialPlanMejoramiento,fechaFinalPlanMejoramiento,tipoCalificacion',
+            'infraestructura',
+            'asignacion.programa:id,nombrePrograma',
+            'sede:id,nombre',
+            'regional:id,razonSocial',
+        ])->get();
+
+        return response()->json($fichas);
+    }
+
     public function fichasPorRegional(
         Request $request,
         int $idRegional
@@ -115,7 +130,7 @@ class FichaController extends Controller
             'JUSTIFICADO',
         ];
 
-        $estado = $request->query('estado', 'ACTIVO'); // default
+        $estado = $request->query('estado', 'EN CURSO'); // default
 
         if (!in_array($estado, $estadosPermitidos, true)) {
             return response()->json([
