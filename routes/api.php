@@ -1125,6 +1125,7 @@ Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
 
 
 
