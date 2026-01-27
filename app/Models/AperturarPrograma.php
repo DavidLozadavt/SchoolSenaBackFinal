@@ -10,8 +10,8 @@ class AperturarPrograma extends Model
     use HasFactory;
 
     // MySQL puede convertir nombres a minúsculas, usar el nombre exacto de la BD
-    protected $table = 'asignacionperiodoprograma';
-    
+    protected $table = 'aperturarprograma';
+
     protected $hidden = [
         'created_at',
         'updated_at',
