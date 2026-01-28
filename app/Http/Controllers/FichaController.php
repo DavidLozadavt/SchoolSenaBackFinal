@@ -99,7 +99,6 @@ class FichaController extends Controller
 
         return response()->json($fichas);
     }
-
     public function fichasPorRegional(
         Request $request,
         int $idRegional
@@ -178,6 +177,15 @@ class FichaController extends Controller
             'idPrograma' => $idPrograma,
             'total' => $fichas->count(),
             'data' => $fichas
+        ]);
+    }
+    public function validarCodigo($codigo)
+    {
+        $existe = Ficha::where('codigo', $codigo)->exists();
+
+        return response()->json([
+            'codigo' => $codigo,
+            'existe' => $existe
         ]);
     }
 }
