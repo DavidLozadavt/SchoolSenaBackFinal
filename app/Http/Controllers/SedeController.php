@@ -106,4 +106,18 @@ class SedeController extends Controller
             ], 500);
         }
     }
+    public function getSedesByRegional($idRegional)
+    {
+        $sedes = Sede::where('idEmpresa', $idRegional)
+            ->with([
+                'ciudad:id,descripcion',
+                'empresa:id,razonSocial'
+            ])
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $sedes
+        ]);
+    }
 }
