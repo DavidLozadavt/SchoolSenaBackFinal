@@ -124,4 +124,25 @@ class CentrosFormacionController extends Controller
             ], 500);
         }
     }
+    public function showCentrosByRegional($idRegional)
+    {
+        $centros = CentrosFormacion::select(
+            'id',
+            'nombre',
+            'idEmpresa',
+            'idCiudad'
+        )
+            ->where('idEmpresa', $idRegional)
+            ->with([
+                'ciudad:id,descripcion',
+                'empresa:id,razonSocial'
+            ])
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Centros de formación obtenidos correctamente',
+            'data' => $centros
+        ]);
+    }
 }
