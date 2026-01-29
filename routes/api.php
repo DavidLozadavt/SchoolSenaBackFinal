@@ -1127,7 +1127,12 @@ Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
+<<<<<<< HEAD
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+=======
+Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
+Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
+>>>>>>> 47140c11e232bcfe2fabad69f6adabe971edc8f4
 
 
 

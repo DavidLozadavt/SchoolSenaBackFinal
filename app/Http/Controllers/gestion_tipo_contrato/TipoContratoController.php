@@ -33,11 +33,15 @@ class TipoContratoController extends Controller
         $tipoContrato->descripcion = $request->input('descripcion');
         $tipoContrato->save();
 
-
-        $proceso = new Proceso();
-        $proceso->nombreProceso = $tipoContrato->nombreTipoContrato;
-        $proceso->descripcion = $tipoContrato->descripcion;
-        $proceso->save();
+        // Verificar si ya existe un proceso con ese nombre antes de crear uno nuevo
+        $proceso = Proceso::where('nombreProceso', $tipoContrato->nombreTipoContrato)->first();
+        
+        if (!$proceso) {
+            $proceso = new Proceso();
+            $proceso->nombreProceso = $tipoContrato->nombreTipoContrato;
+            $proceso->descripcion = $tipoContrato->descripcion;
+            $proceso->save();
+        }
 
         return response()->json($tipoContrato, 201);
     }
@@ -63,11 +67,28 @@ class TipoContratoController extends Controller
      */
     public function update(Request $request, $id)
     {
-
         $tipoContrato = ContractType::findOrFail($id);
+        $nombreAnterior = $tipoContrato->nombreTipoContrato;
+        
         $tipoContrato->nombreTipoContrato = $request->input('nombreTipoContrato');
         $tipoContrato->descripcion = $request->input('descripcion');
         $tipoContrato->save();
+
+        // Actualizar o crear el proceso correspondiente
+        $proceso = Proceso::where('nombreProceso', $nombreAnterior)->first();
+        
+        if ($proceso) {
+            // Si existe, actualizarlo
+            $proceso->nombreProceso = $tipoContrato->nombreTipoContrato;
+            $proceso->descripcion = $tipoContrato->descripcion;
+            $proceso->save();
+        } else {
+            // Si no existe, crearlo
+            $proceso = new Proceso();
+            $proceso->nombreProceso = $tipoContrato->nombreTipoContrato;
+            $proceso->descripcion = $tipoContrato->descripcion;
+            $proceso->save();
+        }
 
         return response()->json($tipoContrato);
     }

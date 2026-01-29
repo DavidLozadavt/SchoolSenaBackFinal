@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Programa extends Model
 {
@@ -57,5 +58,10 @@ class Programa extends Model
             'idPrograma',
             'idTipoDocumento'
         )->withPivot('activo')->withTimestamps();
+    }
+
+    public function aperturarProgramas(): HasMany
+    {
+        return $this->hasMany(AperturarPrograma::class, 'idPrograma');
     }
 }
