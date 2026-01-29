@@ -24,6 +24,7 @@ class FichaController extends Controller
             'idPrograma' => 'required|exists:programa,id',
             'estado' => 'nullable|string',
             'idSede' => 'required|exists:sedes,id',
+            'idInfraestructura' => 'nullable|exists:infraestructura,id',
             'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
 
             // apertura Fechas:
@@ -68,6 +69,7 @@ class FichaController extends Controller
                 'idAsignacion' => $apertura->id,
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
+                'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'idRegional' => $validated['idRegional'],
                 'porcentajeEjecucion' => 100,
             ]);
