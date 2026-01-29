@@ -3,8 +3,12 @@
 namespace App\Http\Controllers\gestion_centros_formacion;
 
 use App\Http\Controllers\Controller;
+use App\Models\ActivationCompanyUser;
 use App\Models\CentrosFormacion;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\JsonResponse;
 
 class CentrosFormacionController extends Controller
 {
@@ -124,4 +128,71 @@ class CentrosFormacionController extends Controller
             ], 500);
         }
     }
+    public function showCentrosByRegional($idRegional)
+    {
+        $centros = CentrosFormacion::select(
+            'id',
+            'nombre',
+            'idEmpresa',
+            'idCiudad'
+        )
+            ->where('idEmpresa', $idRegional)
+            ->with([
+                'ciudad:id,descripcion',
+                'empresa:id,razonSocial'
+            ])
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Centros de formación obtenidos correctamente',
+            'data' => $centros
+        ]);
+    }
+    public function storeWithUser(Request $request)
+{
+    try {
+        DB::beginTransaction();
+
+        $nuevoCentro = new CentrosFormacion();
+        $nuevoCentro->nombre = $request->nombre;
+        $nuevoCentro->direccion = $request->direccion;
+        $nuevoCentro->telefono = $request->telefono;
+        $nuevoCentro->correo = $request->correo;
+        $nuevoCentro->subdirector = $request->subdirector;
+        $nuevoCentro->correosubdirector = $request->correosubdirector;
+        $nuevoCentro->idCiudad = $request->idCiudad;
+        $nuevoCentro->idEmpresa = $request->idEmpresa;
+        $nuevoCentro->save();
+
+        $user = new User();
+        $user->email = $request->email;
+        $user->contrasena = bcrypt('123'); // mismo enfoque
+        $user->idCentroFormacion = $nuevoCentro->id;
+        $user->save();
+
+        $activeUser = new ActivationCompanyUser();
+        $activeUser->user_id = $user->id;
+        $activeUser->state_id = 1;
+        $activeUser->company_id = $request->idEmpresa;
+        $activeUser->fechaInicio = now();
+        $activeUser->fechaFin = '2040-01-15';
+        $activeUser->save();
+
+        DB::commit();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Centro, usuario y activación creados correctamente',
+            'data' => $nuevoCentro
+        ], 201);
+
+    } catch (\Throwable $th) {
+        DB::rollBack();
+        return response()->json([
+            'error' => $th->getMessage()
+        ], 500);
+    }
+}
+
 }

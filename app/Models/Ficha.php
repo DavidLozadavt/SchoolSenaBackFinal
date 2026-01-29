@@ -52,4 +52,9 @@ class Ficha extends Model
     {
         return $this->belongsTo(Company::class, 'idRegional');
     }
+
+    public function instructorLider()
+    {
+        return $this->belongsTo(Contract::class, 'idInstructorLider');
+    }
 }

@@ -9,6 +9,12 @@ class WebController extends Controller
 {
     public function index()
     {
-        return File::get(public_path() . '/index.html');
+        $path = public_path() . '/index.html';
+        if (!File::exists($path)) {
+            return response()->json([
+                'message' => 'Archivo no encontrado'
+            ], 404);
+        }
+        return File::get($path);
     }
 }
