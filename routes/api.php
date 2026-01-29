@@ -1103,6 +1103,7 @@ Route::patch('regional/{id}', [RegionalController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
 Route::get('centrosFormacion/regional/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegional']);
+Route::post('centrosFormacion/user/', [CentrosFormacionController::class, 'storeWithUser']);
 Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);
 Route::get('centrosFormacion', [CentrosFormacionController::class, 'index']);
 Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show']);
