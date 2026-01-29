@@ -188,20 +188,6 @@ class FichaController extends Controller
             'data' => $fichas
         ]);
     }
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-    public function validarCodigo($codigo)
-    {
-        $existe = Ficha::where('codigo', $codigo)->exists();
-
-        return response()->json([
-            'codigo' => $codigo,
-            'existe' => $existe
-        ]);
-    }
-=======
->>>>>>> e732853316fd2031faa22691aba1b87b3dfe24b6
 
     /**
      * Filtra programas por regional y sede
@@ -419,7 +405,7 @@ class FichaController extends Controller
             ], 500);
         }
     }
-<<<<<<< HEAD
+
     public function validarCodigo($codigo)
     {
         $existe = Ficha::where('codigo', $codigo)->exists();
@@ -429,7 +415,4 @@ class FichaController extends Controller
             'existe' => $existe
         ]);
     }
-=======
->>>>>>> 47140c11e232bcfe2fabad69f6adabe971edc8f4
->>>>>>> e732853316fd2031faa22691aba1b87b3dfe24b6
 }
