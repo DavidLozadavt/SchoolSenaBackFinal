@@ -103,7 +103,7 @@ class FichaController extends Controller
             'sede:id,nombre',
             'regional:id,razonSocial',
             'instructorLider:id,idpersona',
-            'instructorLider.persona:id,nombre1,nombre2,apellido1,apellido2,identificacion',
+            'instructorLider.persona', // Cargar persona completa para que funcione rutaFotoUrl
         ])->get();
 
         return response()->json($fichas);
@@ -177,17 +177,44 @@ class FichaController extends Controller
                 'regional:id,razonSocial',
                 'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
                 'asignacion.programa:id,nombrePrograma',
-                'instructorLider:id,idpersona',
-                'instructorLider.persona:id,nombre1,nombre2,apellido1,apellido2,identificacion',
+                'instructorLider:id,idpersona', // Especificar campos para que Laravel resuelva correctamente la relación
+                'instructorLider.persona', // Luego cargar persona completa para que funcione rutaFotoUrl y todos los campos
             ])
             ->orderBy('created_at', 'desc')
             ->get();
 
+        // Forzar carga manual de instructorLider si el eager loading falló
+        $idsInstructores = $fichas->pluck('idInstructorLider')->filter()->unique();
+        if ($idsInstructores->isNotEmpty()) {
+            $contracts = Contract::with('persona')
+                ->whereIn('id', $idsInstructores)
+                ->get()
+                ->keyBy('id');
+            
+            foreach ($fichas as $ficha) {
+                if ($ficha->idInstructorLider && isset($contracts[$ficha->idInstructorLider])) {
+                    $ficha->setRelation('instructorLider', $contracts[$ficha->idInstructorLider]);
+                }
+            }
+        }
+
+        // Forzar serialización explícita para asegurar que las relaciones se incluyan
+        $fichasArray = $fichas->map(function ($ficha) {
+            $fichaArray = $ficha->toArray();
+            // Asegurar que instructorLider esté en el array
+            if ($ficha->instructorLider) {
+                $fichaArray['instructorLider'] = $ficha->instructorLider->toArray();
+                if ($ficha->instructorLider->persona) {
+                    $fichaArray['instructorLider']['persona'] = $ficha->instructorLider->persona->toArray();
+                }
+            }
+            return $fichaArray;
+        })->toArray();
 
         return response()->json([
             'idPrograma' => $idPrograma,
             'total' => $fichas->count(),
-            'data' => $fichas
+            'data' => $fichasArray
         ]);
     }
 
@@ -290,7 +317,7 @@ class FichaController extends Controller
             // Usar método directo con whereIn para mayor confiabilidad
             if (!empty($contratosConPrograma)) {
                 $instructores = Contract::with([
-                    'persona:id,nombre1,nombre2,apellido1,apellido2,identificacion',
+                    'persona', // Cargar persona completa para que funcione el accessor rutaFotoUrl
                     'nivelEducativo:id,nombreNivel',
                     'areasConocimiento:id,nombreAreaConocimiento'
                 ])
@@ -388,7 +415,7 @@ class FichaController extends Controller
             // Cargar relaciones para la respuesta
             $ficha->load([
                 'instructorLider:id,idpersona',
-                'instructorLider.persona:id,nombre1,nombre2,apellido1,apellido2,identificacion'
+                'instructorLider.persona' // Cargar persona completa para que funcione rutaFotoUrl
             ]);
 
             return response()->json([
