@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Infraestructura;
 use App\Models\TipoInfraestructura;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class InfraestructuraController extends Controller
 {
@@ -97,8 +99,25 @@ class InfraestructuraController extends Controller
     // Listar todos los tipos de infraestructura (para selects)
     public function tipos()
     {
-        $tipos = TipoInfraestructura::orderBy('nombre')->get();
+        try {
+            // Verificar que el modelo use la tabla correcta
+            $model = new TipoInfraestructura();
+            $tableName = $model->getTable();
+            
+            // Si por alguna razón no está usando la tabla correcta, forzar
+            if ($tableName !== 'tiposinfraestructura') {
+                Log::warning("TipoInfraestructura está usando tabla incorrecta: {$tableName}, forzando 'tiposinfraestructura'");
+                $tipos = DB::table('tiposinfraestructura')->orderBy('nombre')->get();
+            } else {
+                $tipos = TipoInfraestructura::orderBy('nombre')->get();
+            }
 
-        return response()->json(['data' => $tipos]);
+            return response()->json(['data' => $tipos]);
+        } catch (\Exception $e) {
+            Log::error('Error en tipos(): ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['error' => 'Error al obtener tipos de infraestructura'], 500);
+        }
     }
 }

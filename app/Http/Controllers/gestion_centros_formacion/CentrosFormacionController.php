@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ActivationCompanyUser;
 use App\Models\CentrosFormacion;
 use App\Models\User;
+use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -131,13 +132,19 @@ class CentrosFormacionController extends Controller
     }
     public function showCentrosByRegional($idRegional)
     {
+        // Validar que el idRegional coincida con la empresa del usuario autenticado
+        $companyId = KeyUtil::idCompany();
+        
+        // Si el idRegional no coincide con la empresa del usuario, usar la empresa del usuario
+        $empresaId = ($idRegional == $companyId) ? $idRegional : $companyId;
+        
         $centros = CentrosFormacion::select(
             'id',
             'nombre',
             'idEmpresa',
             'idCiudad'
         )
-            ->where('idEmpresa', $idRegional)
+            ->where('idEmpresa', $empresaId)
             ->with([
                 'ciudad:id,descripcion',
                 'empresa:id,razonSocial'

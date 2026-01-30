@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\DB;
 use App\Models\ContratoTransaccion;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log;
 use App\Models\ActivationCompanyUser;
 use App\Models\ActividadRiesgoProfesional;
 use App\Models\AsignacionProcesoTipoDocumento;
@@ -462,6 +463,12 @@ class ContratacionController extends Controller
                 throw new \Exception("No se encontro la persona", 505);
             }
 
+            // Actualizar el centro de formación del usuario si se proporciona
+            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                $user->idCentroFormacion = $request->input('idCentroFormacion');
+                $user->save();
+            }
+
             $persona = Person::find($persona_id);
 
             if (!$persona) {
@@ -855,7 +862,10 @@ class ContratacionController extends Controller
      */
     public function getAllContratos()
     {
+        $companyId = KeyUtil::idCompany();
+        
         $contratos = Contract::with('persona', 'salario.rol', 'transacciones.pago', 'estado', 'area')
+            ->where('idempresa', $companyId)
             ->where('idEstado', '!=', 14)
             ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
             ->orderBy('fechaContratacion')
@@ -887,6 +897,9 @@ class ContratacionController extends Controller
             'persona.CiudadNac',
             'persona.tipoIdentificacion',
             'persona.observacionesPreocupacionales',
+            'persona.usuario.centroFormacion',
+            'persona.usuario.centroFormacion.ciudad',
+            'persona.usuario.centroFormacion.empresa',
             'salario.rol',
             'tipoContrato',
             'empresa',
@@ -2025,6 +2038,12 @@ class ContratacionController extends Controller
 
             $activationUser->saveWithCompany();
 
+            // Actualizar el centro de formación del usuario si se proporciona
+            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                $user->idCentroFormacion = $request->input('idCentroFormacion');
+                $user->save();
+            }
+
             DB::commit();
         } catch (\Throwable $th) {
             DB::rollBack();
@@ -2171,11 +2190,19 @@ class ContratacionController extends Controller
      */
     public function getProgramas()
     {
-        $programas = Programa::with('nivel', 'tipoFormacion', 'estado')
-            ->where('idCompany', KeyUtil::idCompany())
-            ->orderBy('nombrePrograma', 'asc')
-            ->get();
-        return response()->json($programas);
+        try {
+            // Obtener todos los programas sin filtrar por empresa
+            $programas = Programa::with('nivel', 'tipoFormacion', 'estado')
+                ->orderBy('nombrePrograma', 'asc')
+                ->get();
+            
+            return response()->json($programas);
+        } catch (\Exception $e) {
+            Log::error('Error en getProgramas: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['error' => 'Error al obtener programas', 'message' => $e->getMessage()], 500);
+        }
     }
 
     /**
