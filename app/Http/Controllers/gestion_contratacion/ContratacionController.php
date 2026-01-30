@@ -2184,6 +2184,41 @@ class ContratacionController extends Controller
     }
 
     /**
+     * Crea una nueva área de conocimiento.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function storeAreaConocimiento(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'nombreAreaConocimiento' => 'required|string|max:255|unique:area_conocimiento,nombreAreaConocimiento'
+            ]);
+
+            $area = AreaConocimiento::create([
+                'nombreAreaConocimiento' => $validated['nombreAreaConocimiento']
+            ]);
+
+            return response()->json([
+                'message' => 'Área de conocimiento creada correctamente',
+                'data' => $area
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error al crear área de conocimiento: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Error al crear área de conocimiento',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Obtiene todos los programas disponibles.
      *
      * @return \Illuminate\Http\JsonResponse
