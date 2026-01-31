@@ -1111,6 +1111,7 @@ Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show'])
 Route::patch('centrosFormacion/{id}', [CentrosFormacionController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Sedes:
+Route::get('sedes/centro-formacion/{idCentroFormacion}', [ControllersSedeController::class, 'getSedesByCentroFormacion']);
 Route::get('sedesSena/users', [ControllersSedeController::class, 'getUsersSena']);
 Route::post('sedesSena', [ControllersSedeController::class, 'store']);
 Route::get('sedesSena', [ControllersSedeController::class, 'index']);
