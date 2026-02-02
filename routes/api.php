@@ -1066,6 +1066,7 @@ Route::post('store_cuenta_cobrar_poliza', [PolizasController::class, 'storeCuent
 Route::get('programas_recursos_crear', [PensumController::class, 'getMetadata']);
 Route::post('programas_guardar', [PensumController::class, 'store']);
 Route::get('programas', [PensumController::class, 'index']);
+Route::get('programasporRegional/{idRegional}', [PensumController::class, 'indexByRegional']);
 Route::put('programas_actualizar/{id}', [PensumController::class, 'update']);
 Route::delete('programas_eliminar/{id}', [PensumController::class, 'destroy']);
 Route::get('asignacion_detalle/{id}', [PensumController::class, 'getInformacionApertura']);
