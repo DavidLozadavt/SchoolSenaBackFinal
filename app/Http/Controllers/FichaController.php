@@ -42,6 +42,7 @@ class FichaController extends Controller
             'idJornada' => 'required|exists:jornadas,id',
             'idRegional' => 'required|exists:empresa,id',
             'codigo' => 'required|string|unique:ficha,codigo',
+            'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100'
         ]);
 
         DB::beginTransaction();
@@ -72,7 +73,7 @@ class FichaController extends Controller
                 'idSede' => $validated['idSede'],
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'idRegional' => $validated['idRegional'],
-                'porcentajeEjecucion' => 100,
+                'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
             ]);
 
 
@@ -510,6 +511,7 @@ class FichaController extends Controller
             // Ficha
             'idJornada' => 'required|exists:jornadas,id',
             'idRegional' => 'required|exists:empresa,id',
+            'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'codigo' => [
                 'required',
                 'string',
@@ -553,6 +555,7 @@ class FichaController extends Controller
                 'idSede' => $validated['idSede'],
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'idRegional' => $validated['idRegional'],
+                'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
             ]);
 
             DB::commit();
