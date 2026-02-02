@@ -121,6 +121,8 @@ use App\Http\Controllers\SedeController as ControllersSedeController;
 use App\Http\Controllers\gestion_sede_institucional\SedeInstitucionalController;
 use App\Http\Controllers\InfraestructuraController;
 
+use App\Http\Controllers\TrabajadoresController;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -443,6 +445,74 @@ Route::post('store_comment_sub_response', [BoardTaskController::class, 'storeSub
 Route::post('store_mencion_check_item', [BoardTaskController::class, 'sendEmailMentionCheckList']);
 Route::post('store_mencion_comment', [BoardTaskController::class, 'sendEmailMentionComment']);
 Route::post('store_mencion_comment_reponse', [BoardTaskController::class, 'sendEmailMentionCommentResponse']);
+
+
+
+//GestionTipoContrato
+Route::apiResource('tipo_contrato', TipoContratoController::class);
+Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
+//rutas para cargar los trabajadores y  ejecutar su procedimiento almacenado
+Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
+// Route::post('ejecutarProcedimiento', [TrabajadoresController::class, 'ejecutarProcedimiento']);
+
+
+
+// Gestion Contratación
+Route::group([
+    'middleware' => 'auth:api'
+], function () {
+
+    Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
+
+    Route::get('contrato-tipos-identificacion', [ContratacionController::class, 'tiposIdentificacion']);
+    Route::get('contrato-tipos-contrato', [ContratacionController::class, 'tipoContrato']);
+    Route::get('contrato-persona/{identificacion}', [ContratacionController::class, 'getPersonaByIdentificacion']);
+    Route::post('contrato-persona', [ContratacionController::class, 'storePersona']);
+    Route::put('contrato-persona', [ContratacionController::class, 'storePersona']);
+    Route::post('update_rol_contrato', [ContratacionController::class, 'updateSueldo']);
+
+    Route::post('contrato', [ContratacionController::class, 'storeContrato']);
+    Route::get('contrato-tipo-documento', [ContratacionController::class, 'tipoDocumento']);
+    Route::get('contrato-roles', [ContratacionController::class, 'getRoles']);
+    Route::get('contratos', [ContratacionController::class, 'getAllContratos']);
+    Route::get('contrato/{identificacion}', [ContratacionController::class, 'getContratoByIdentificacion']);
+    Route::get('contrato_by_id/{id}', [ContratacionController::class, 'getContratoById']);
+    Route::post('contrato-documento', [ContratacionController::class, 'storeDocumentoContrato']);
+    Route::post('rol-contrato', [ContratacionController::class, 'storeRol']);
+    Route::get('contrato_trazabilidad/{id}', [ContratacionController::class, 'getOneContratoById']);
+    Route::get('areas-conocimiento-contrato', [ContratacionController::class, 'getAreasConocimiento']);
+
+    Route::post('interrumpir_contrato', [ContratacionController::class, 'interrumpirContrato']);
+    Route::post('extender_contrato', [ContratacionController::class, 'extenderContrato']);
+
+
+    //GestionTipoContrato
+    Route::apiResource('tipo_contrato', TipoContratoController::class);
+});
+
+//GestionTipoContrato
+Route::apiResource('tipo_contrato', TipoContratoController::class);
+Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
+//rutas para cargar los trabajadores y  ejecutar su procedimiento almacenado
+Route::post('cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV'])->middleware('auth:api');
+Route::post('ejecutar_procedimiento_trabajadores', [TrabajadoresController::class, 'ejecutarProcedimiento'])->middleware('auth:api');
+
+//rutas para cargar los estudiantes y ejecutar su procedimiento almacenado
+Route::post('/cargar-estudiantes', [EstudianteController::class, 'cargarEstudiantesDesdeExcel'])->middleware('auth:api');
+Route::post('/procedimientoEstudiantes', [EstudianteController::class, 'ejecutarProcedimientoEstudiantes'])->middleware('auth:api');
+
+
+//rutas para cargar los productos y ejecutar su procedimiento almacenado
+Route::group([
+    'middleware' => 'auth:api',
+
+], function () {
+    Route::post('/cargar-productos', [MigraProductoController::class, 'cargarproductos']);
+    Route::post('procedimientoProductos', [MigraProductoController::class, 'ejecutarProcedimientoProductos']);
+});
+
+//infraestructuras desde archivo plano
+Route::post('/carga-infra', [MigraInfraestructuraController::class, 'cargarInfraEstructura']);
 
 
 
