@@ -234,7 +234,8 @@ Route::get('actividades_riesgo_profesional', [ContratacionController::class, 'ge
 Route::post('store_actividades_riesgo_profesional', [ContratacionController::class, 'storeActividadeRiesgoProfesional']);
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
 Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
-Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas']);
+Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
+Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
 
 
@@ -1201,16 +1202,14 @@ Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'updat
 //rutas SHOOL SENA para gestión de Fichas:
 Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
-Route::get('fichas/{id}', [FichaController::class, 'show']);
-Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
-
 
 
 
