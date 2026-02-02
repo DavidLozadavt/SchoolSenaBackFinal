@@ -53,4 +53,12 @@ class Sede extends Model
     {
         return $this->belongsTo(CentrosFormacion::class, 'idCentroFormacion');
     }
+    public function fichas()
+    {
+        return $this->hasMany(Ficha::class, 'idSede');
+    }
+     public function ambientes()
+    {
+        return $this->hasMany(Infraestructura::class, 'idSede');
+    }
 }
