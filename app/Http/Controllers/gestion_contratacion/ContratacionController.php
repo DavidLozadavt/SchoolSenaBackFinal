@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\DB;
 use App\Models\ContratoTransaccion;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Log;
 use App\Models\ActivationCompanyUser;
 use App\Models\ActividadRiesgoProfesional;
 use App\Models\AsignacionProcesoTipoDocumento;
@@ -142,22 +143,42 @@ class ContratacionController extends Controller
      */
     public function tipoDocumento(Request $request)
     {
-        $nombreProceso = $request->input('nombreProceso');
-        $proceso = Proceso::where('nombreProceso', $nombreProceso)->first();
+        try {
+            $nombreProceso = $request->input('nombreProceso');
+            
+            if (empty($nombreProceso)) {
+                return response()->json(['error' => 'El nombre del proceso es requerido'], 400);
+            }
 
-        if (!$proceso) {
-            return response()->json(['error' => 'No se encontró el proceso especificado'], 404);
+            $proceso = Proceso::where('nombreProceso', $nombreProceso)->first();
+
+            // Si no existe el proceso, intentar crearlo desde el tipo de contrato
+            if (!$proceso) {
+                // Buscar si existe un tipo de contrato con ese nombre
+                $tipoContrato = ContractType::where('nombreTipoContrato', $nombreProceso)->first();
+                
+                if ($tipoContrato) {
+                    // Crear el proceso automáticamente basado en el tipo de contrato
+                    $proceso = new Proceso();
+                    $proceso->nombreProceso = $tipoContrato->nombreTipoContrato;
+                    $proceso->descripcion = $tipoContrato->descripcion ?: 'Proceso creado automáticamente desde tipo de contrato';
+                    $proceso->save();
+                } else {
+                    // Si no existe ni proceso ni tipo de contrato, devolver 404
+                    return response()->json(['error' => 'No se encontró el proceso especificado'], 404);
+                }
+            }
+
+            $tipoDocumentos = AsignacionProcesoTipoDocumento::with('proceso', 'tipoDocumento')
+                ->where('idProceso', $proceso->id)
+                ->get();
+
+            // Si no hay documentos asignados, devolver array vacío en lugar de error 404
+            // Esto permite que el formulario continúe sin documentos requeridos
+            return response()->json($tipoDocumentos);
+        } catch (\Throwable $th) {
+            return response()->json(['error' => 'Error al obtener los tipos de documento: ' . $th->getMessage()], 500);
         }
-
-        $tipoDocumentos = AsignacionProcesoTipoDocumento::with('proceso', 'tipoDocumento')
-            ->where('idProceso', $proceso->id)
-            ->get();
-
-        if ($tipoDocumentos->isEmpty()) {
-            return response()->json(['error' => 'No se encontraron tipos de documento asociados a este proceso'], 404);
-        }
-
-        return response()->json($tipoDocumentos);
     }
 
 
@@ -339,6 +360,9 @@ class ContratacionController extends Controller
             $contrato->idtipoContrato = $request->input('idtipoContrato');
             $contrato->fechaContratacion = $fechaInicio;
 
+            // Inicializar $fechaFinalContrato para evitar errores más adelante
+            $fechaFinalContrato = null;
+            
             if ($contrato->idtipoContrato == 6) {
                 $contrato->fechaFinalContrato = null;
             } else {
@@ -360,9 +384,12 @@ class ContratacionController extends Controller
             $contrato->idSalud = $request->input('idSalud');
 
             $contrato->idCajaCompensacion = $request->input('idCajaCompensacion');
-            $contrato->idCesantias = $request->input('idCesantias');
+            // idCesantias removido - ya no se usa en el formulario
+            if ($request->has('idCesantias') && $request->input('idCesantias')) {
+                $contrato->idCesantias = $request->input('idCesantias');
+            }
             $contrato->tipoCuentaBancaria = $request->input('tipoCuentaBancaria');
-            $contrato->tipoCotizante  = $request->input('tipoCotizante');
+            // tipoCotizante removido - no se envía desde el frontend
             $contrato->numeroCuentaBancaria = $request->input('numeroCuentaBancaria');
             $contrato->idTipoCotizante = $request->input('idTipoCotizante');
             $contrato->idSubTipoCotizante = $request->input('idSubTipoCotizante');
@@ -370,12 +397,23 @@ class ContratacionController extends Controller
             $contrato->tipoSalario = $request->input('tipoSalario');
             $contrato->idTarifaRiesgo = $request->input('idTarifaRiesgo');
             $contrato->idActividadRiesgo = $request->input('idActividadRiesgo');
-            $contrato->idArea = $request->input('idArea');
+            // idArea puede venir como idCaja desde el frontend
+            $contrato->idArea = $request->input('idArea') ?: $request->input('idCaja');
             $contrato->idGrupoNomina = $request->input('idGrupoNomina');
+
+            // Horas contratadas al mes (puede ser opcional)
+            if ($request->has('horasmes')) {
+                $contrato->horasmes = $request->input('horasmes');
+            }
 
             if ($request->has('idNivelEducativo')) {
                 $contrato->idNivelEducativo = $request->input('idNivelEducativo');
             }
+
+            // Tipo de comisiones - campo removido si no existe en la tabla
+            // if ($request->has('tipoComisiones')) {
+            //     $contrato->tipoComisiones = $request->input('tipoComisiones');
+            // }
 
             if ($request->has('observacionPreocupacional')) {
                 $observacionTexto = trim($request->input('observacionPreocupacional'));
@@ -423,6 +461,12 @@ class ContratacionController extends Controller
 
             if (!$user) {
                 throw new \Exception("No se encontro la persona", 505);
+            }
+
+            // Actualizar el centro de formación del usuario si se proporciona
+            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                $user->idCentroFormacion = $request->input('idCentroFormacion');
+                $user->save();
             }
 
             $persona = Person::find($persona_id);
@@ -476,7 +520,16 @@ class ContratacionController extends Controller
             DB::commit();
         } catch (\Throwable $th) {
             DB::rollBack();
-            return response()->json($th->getMessage(), 500);
+            \Log::error('Error al guardar contrato: ' . $th->getMessage(), [
+                'trace' => $th->getTraceAsString(),
+                'request' => $request->all()
+            ]);
+            return response()->json([
+                'error' => 'Error al guardar el contrato',
+                'message' => $th->getMessage(),
+                'file' => $th->getFile(),
+                'line' => $th->getLine()
+            ], 500);
         }
 
         return response()->json($contrato, 201);
@@ -809,7 +862,10 @@ class ContratacionController extends Controller
      */
     public function getAllContratos()
     {
+        $companyId = KeyUtil::idCompany();
+        
         $contratos = Contract::with('persona', 'salario.rol', 'transacciones.pago', 'estado', 'area')
+            ->where('idempresa', $companyId)
             ->where('idEstado', '!=', 14)
             ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
             ->orderBy('fechaContratacion')
@@ -841,6 +897,9 @@ class ContratacionController extends Controller
             'persona.CiudadNac',
             'persona.tipoIdentificacion',
             'persona.observacionesPreocupacionales',
+            'persona.usuario.centroFormacion',
+            'persona.usuario.centroFormacion.ciudad',
+            'persona.usuario.centroFormacion.empresa',
             'salario.rol',
             'tipoContrato',
             'empresa',
@@ -1875,6 +1934,10 @@ class ContratacionController extends Controller
                 $contrato->idGrupoNomina = $request->input('idGrupoNomina');
             }
 
+            if ($request->has('horasmes')) {
+                $contrato->horasmes = $request->input('horasmes');
+            }
+
             if ($request->has('idNivelEducativo')) {
                 $contrato->idNivelEducativo = $request->input('idNivelEducativo');
             }
@@ -1974,6 +2037,12 @@ class ContratacionController extends Controller
             }
 
             $activationUser->saveWithCompany();
+
+            // Actualizar el centro de formación del usuario si se proporciona
+            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                $user->idCentroFormacion = $request->input('idCentroFormacion');
+                $user->save();
+            }
 
             DB::commit();
         } catch (\Throwable $th) {
@@ -2121,11 +2190,19 @@ class ContratacionController extends Controller
      */
     public function getProgramas()
     {
-        $programas = Programa::with('nivel', 'tipoFormacion', 'estado')
-            ->where('idCompany', KeyUtil::idCompany())
-            ->orderBy('nombrePrograma', 'asc')
-            ->get();
-        return response()->json($programas);
+        try {
+            // Obtener todos los programas sin filtrar por empresa
+            $programas = Programa::with('nivel', 'tipoFormacion', 'estado')
+                ->orderBy('nombrePrograma', 'asc')
+                ->get();
+            
+            return response()->json($programas);
+        } catch (\Exception $e) {
+            Log::error('Error en getProgramas: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['error' => 'Error al obtener programas', 'message' => $e->getMessage()], 500);
+        }
     }
 
     /**

@@ -3,8 +3,14 @@
 namespace App\Http\Controllers\gestion_centros_formacion;
 
 use App\Http\Controllers\Controller;
+use App\Models\ActivationCompanyUser;
 use App\Models\CentrosFormacion;
+use App\Models\User;
+use App\Util\KeyUtil;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Illuminate\Support\Str;
 
 class CentrosFormacionController extends Controller
 {
@@ -121,6 +127,94 @@ class CentrosFormacionController extends Controller
                 'status' => 'error',
                 'message' => 'Error al actualizar el centro de formación',
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    public function showCentrosByRegional($idRegional)
+    {
+        // Validar que el idRegional coincida con la empresa del usuario autenticado
+        $companyId = KeyUtil::idCompany();
+        
+        // Si el idRegional no coincide con la empresa del usuario, usar la empresa del usuario
+        $empresaId = ($idRegional == $companyId) ? $idRegional : $companyId;
+        
+        $centros = CentrosFormacion::select(
+            'id',
+            'nombre',
+            'idEmpresa',
+            'idCiudad'
+        )
+            ->where('idEmpresa', $empresaId)
+            ->with([
+                'ciudad:id,descripcion',
+                'empresa:id,razonSocial'
+            ])
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Centros de formación obtenidos correctamente',
+            'data' => $centros
+        ]);
+    }
+    public function storeWithUser(Request $request)
+    {
+        try {
+            $request->validate([
+                'nombre' => 'required|string|max:255',
+                'direccion' => 'required|string|max:255',
+                'telefono' => 'required|string|max:20',
+                'correo' => 'required|string|max:255',
+                'subdirector' => 'required|string|max:255',
+                'correosubdirector' => 'required|string|max:255',
+                'idCiudad' => 'required|exists:ciudad,id',
+                'idEmpresa' => 'required|exists:empresa,id',
+            ]);
+
+            DB::beginTransaction();
+
+            $nuevoCentro = new CentrosFormacion();
+            $nuevoCentro->nombre = $request->nombre;
+            $nuevoCentro->direccion = $request->direccion;
+            $nuevoCentro->telefono = $request->telefono;
+            $nuevoCentro->correo = $request->correo;
+            $nuevoCentro->subdirector = $request->subdirector;
+            $nuevoCentro->correosubdirector = $request->correosubdirector;
+            $nuevoCentro->idCiudad = $request->idCiudad;
+            $nuevoCentro->idEmpresa = $request->idEmpresa;
+            $nuevoCentro->save();
+
+            $emailCentro = Str::of($nuevoCentro->nombre)
+                ->lower()
+                ->ascii()
+                ->replace(' ', '')
+                ->append('@sena.edu.co');
+
+            $user = new User();
+            $user->email = $emailCentro;
+            $user->contrasena = bcrypt('sena123');
+            $user->idCentroFormacion = $nuevoCentro->id;
+            $user->save();
+
+            $activeUser = new ActivationCompanyUser();
+            $activeUser->user_id = $user->id;
+            $activeUser->state_id = 1;
+            $activeUser->company_id = $request->idEmpresa;
+            $activeUser->fechaInicio = now();
+            $activeUser->fechaFin = '2040-01-15';
+            $activeUser->save();
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Centro, usuario y activación creados correctamente',
+                'data' => $nuevoCentro
+            ], 201);
+        } catch (\Throwable $th) {
+            DB::rollBack();
+            return response()->json([
+                'error' => $th->getMessage()
             ], 500);
         }
     }

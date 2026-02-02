@@ -1102,6 +1102,8 @@ Route::get('regional/{id}', [RegionalController::class, 'show']);
 Route::patch('regional/{id}', [RegionalController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
+Route::get('centrosFormacion/regional/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegional']);
+Route::post('centrosFormacion/user/', [CentrosFormacionController::class, 'storeWithUser']);
 Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);
 Route::get('centrosFormacion', [CentrosFormacionController::class, 'index']);
 Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show']);
@@ -1113,6 +1115,8 @@ Route::post('sedesSena', [ControllersSedeController::class, 'store']);
 Route::get('sedesSena', [ControllersSedeController::class, 'index']);
 Route::get('sedesSena/{id}', [ControllersSedeController::class, 'show']);
 Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
+Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'getSedesByRegional']); //Para filtrar las sedes por regional
+
 
 //rutas SHOOL SENA para gestión de aperturaPrograma:
 Route::get('aperturaPrograma',[AperturarProgramaController::class, 'index']);
@@ -1122,7 +1126,17 @@ Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'updat
 
 //rutas SHOOL SENA para gestión de Fichas:
 Route::post('fichas', [FichaController::class, 'store']);
+Route::get('fichas', [FichaController::class, 'index']);
+Route::get('fichas/{id}', [FichaController::class, 'show']);
+Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
+Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
+Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
+Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
+
 
 
 
