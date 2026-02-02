@@ -7,7 +7,8 @@ use App\Http\Controllers\Controller;
 use App\Models\NivelEducativo;
 use App\Models\TipoFormacion;
 use App\Models\EstadoPrograma;
-use App\Models\Programa; 
+use App\Models\Programa;
+use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
 
@@ -76,7 +77,7 @@ public function indexByRegional(int $idRegional)
                 'idNivelEducativo'    => $request->idNivelEducativo,
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
-                'idCompany'           => 1 // Valor fijo por ahora
+                'idCompany'           => KeyUtil::idCompany(), // Valor fijo por ahora
             ]);
 
             $nuevoPrograma->load(['nivel', 'tipoFormacion', 'estado']);

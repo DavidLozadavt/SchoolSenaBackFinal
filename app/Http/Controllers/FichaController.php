@@ -620,4 +620,111 @@ class FichaController extends Controller
             ], 500);
         }
     }
+    /**
+ * Elimina una ficha solo si no está siendo utilizada en otras partes
+ */
+public function destroy($id): JsonResponse
+{
+    DB::beginTransaction();
+    
+    try {
+        // Buscar la ficha
+        $ficha = Ficha::findOrFail($id);
+
+        // Array para almacenar las relaciones que impiden eliminar
+        $relacionesActivas = [];
+
+        // 1. Verificar si tiene instructor líder asignado
+        if ($ficha->idInstructorLider) {
+            $relacionesActivas[] = 'instructor líder asignado';
+        }
+
+        // 2. Verificar si tiene aprendices voceros o suplentes
+        if ($ficha->idAprendizVocero) {
+            $relacionesActivas[] = 'aprendiz vocero asignado';
+        }
+
+        if ($ficha->idAprendizSuplente) {
+            $relacionesActivas[] = 'aprendiz suplente asignado';
+        }
+
+        // 3. Verificar si tiene horarios de materias asignados
+        $cantidadHorarios = DB::table('horarioMateria')
+            ->where('idFicha', $id)
+            ->count();
+        
+        if ($cantidadHorarios > 0) {
+            $relacionesActivas[] = "{$cantidadHorarios} horario(s) de materia(s)";
+        }
+
+        // Si hay relaciones activas, no permitir eliminar
+        if (!empty($relacionesActivas)) {
+            DB::rollBack();
+            
+            $mensaje = 'No se puede eliminar la ficha porque tiene las siguientes relaciones activas: ' 
+                     . implode(', ', $relacionesActivas);
+            
+            return response()->json([
+                'message' => $mensaje,
+                'relaciones' => $relacionesActivas
+            ], 422);
+        }
+
+        // Si llegamos aquí, no hay relaciones que impidan la eliminación
+        // Guardar el ID de la apertura antes de eliminar la ficha
+        $idApertura = $ficha->idAsignacion;
+
+        // Eliminar documento físico si existe
+        if ($ficha->documento) {
+            $rutaDocumento = str_replace('/storage/', '', $ficha->documento);
+            if (Storage::disk('public')->exists($rutaDocumento)) {
+                Storage::disk('public')->delete($rutaDocumento);
+            }
+        }
+
+        // Eliminar la ficha (que tiene FK hacia apertura)
+        $ficha->delete();
+
+        // Eliminar la apertura asociada
+        if ($idApertura) {
+            AperturarPrograma::where('id', $idApertura)->delete();
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'message' => 'Ficha eliminada correctamente'
+        ], 200);
+
+    } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        DB::rollBack();
+        return response()->json([
+            'message' => 'Ficha no encontrada'
+        ], 404);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        
+        // Log del error para debugging
+        Log::error('Error al eliminar ficha', [
+            'id' => $id,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+
+        // Verificar si es error de foreign key constraint
+        if (str_contains($e->getMessage(), 'foreign key constraint') || 
+            str_contains($e->getMessage(), 'Cannot delete or update a parent row')) {
+            return response()->json([
+                'message' => 'No se puede eliminar la ficha porque está siendo utilizada en otros registros del sistema',
+                'error' => 'Violación de restricción de integridad referencial'
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Error al eliminar la ficha',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
 }
