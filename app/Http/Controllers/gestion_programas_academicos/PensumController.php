@@ -44,6 +44,27 @@ $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])->get();
     }
 }
 
+public function indexByRegional(int $idRegional)
+{
+    try {
+        $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])
+            ->where('idCompany', $idRegional)
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $programas
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+
+
 
     public function store(Request $request)
     {

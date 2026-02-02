@@ -12,6 +12,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class FichaController extends Controller
 {
@@ -41,6 +43,8 @@ class FichaController extends Controller
             'idJornada' => 'required|exists:jornadas,id',
             'idRegional' => 'required|exists:empresa,id',
             'codigo' => 'required|string|unique:ficha,codigo',
+            'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
+            'documento' => 'nullable|file|mimes:pdf|max:5120',
         ]);
 
         DB::beginTransaction();
@@ -64,14 +68,23 @@ class FichaController extends Controller
                 'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
             ]);
 
+            $rutaDocumento = null;
+
+            if ($request->hasFile('documento')) {
+                $rutaDocumento = '/storage/' . $request->file('documento')
+                    ->store('fichas/documentos', 'public');
+            }
+
+
             $ficha = Ficha::create([
                 'idJornada' => $validated['idJornada'],
                 'idAsignacion' => $apertura->id,
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
+                'documento' => $rutaDocumento,
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'idRegional' => $validated['idRegional'],
-                'porcentajeEjecucion' => 100,
+                'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
             ]);
 
 
@@ -190,7 +203,7 @@ class FichaController extends Controller
                 ->whereIn('id', $idsInstructores)
                 ->get()
                 ->keyBy('id');
-            
+
             foreach ($fichas as $ficha) {
                 if ($ficha->idInstructorLider && isset($contracts[$ficha->idInstructorLider])) {
                     $ficha->setRelation('instructorLider', $contracts[$ficha->idInstructorLider]);
@@ -238,7 +251,7 @@ class FichaController extends Controller
             $query->whereHas('aperturarProgramas', function ($q) use ($idSede) {
                 $q->where('idSede', $idSede);
             });
-        } 
+        }
         // Si solo se proporciona idRegional, filtrar por sedes de esa regional
         elseif ($idRegional) {
             $query->whereHas('aperturarProgramas', function ($q) use ($idRegional) {
@@ -254,12 +267,12 @@ class FichaController extends Controller
         $programasConDatos = $programas->map(function ($programa) use ($idSede) {
             // Contar fichas del programa en la sede específica
             $cantidadFichas = 0;
-            
+
             if ($idSede) {
                 // Contar fichas que pertenecen a aperturas de este programa en esta sede
                 $cantidadFichas = Ficha::whereHas('asignacion', function ($q) use ($programa, $idSede) {
                     $q->where('idPrograma', $programa->id)
-                      ->where('idSede', $idSede);
+                        ->where('idSede', $idSede);
                 })->count();
             } else {
                 // Si no hay sede específica, contar todas las fichas del programa
@@ -270,7 +283,7 @@ class FichaController extends Controller
 
             // Agregar el conteo de fichas al programa
             $programa->cantidadFichas = $cantidadFichas;
-            
+
             return $programa;
         })->filter(function ($programa) {
             // Filtrar solo programas que tienen al menos 1 ficha
@@ -291,7 +304,7 @@ class FichaController extends Controller
     {
         try {
             $ficha = Ficha::with('asignacion.programa')->findOrFail($idFicha);
-            
+
             if (!$ficha->asignacion || !$ficha->asignacion->idPrograma) {
                 return response()->json([
                     'status' => 'error',
@@ -310,7 +323,7 @@ class FichaController extends Controller
                 ->where('idPrograma', $idPrograma)
                 ->pluck('idContrato')
                 ->toArray();
-            
+
             \Log::info('Contratos con programa ' . $idPrograma . ': ' . count($contratosConPrograma));
             \Log::info('IDs de contratos: ' . json_encode($contratosConPrograma));
 
@@ -331,7 +344,7 @@ class FichaController extends Controller
             }
 
             \Log::info('Instructores encontrados para programa ' . $idPrograma . ': ' . $instructores->count());
-            
+
             // Log adicional para debug
             if ($instructores->count() === 0) {
                 // Verificar contratos activos de la empresa
@@ -339,7 +352,7 @@ class FichaController extends Controller
                     ->where('idempresa', KeyUtil::idCompany())
                     ->count();
                 \Log::info('Total contratos activos de la empresa: ' . $totalContratosActivos);
-                
+
                 // Verificar si hay algún contrato con programas asignados
                 $contratosConProgramas = DB::table('asignacion_contrato_programa')
                     ->join('contrato', 'asignacion_contrato_programa.idContrato', '=', 'contrato.id')
@@ -384,7 +397,7 @@ class FichaController extends Controller
             ]);
 
             $ficha = Ficha::with('asignacion.programa')->findOrFail($idFicha);
-            
+
             if (!$ficha->asignacion || !$ficha->asignacion->idPrograma) {
                 return response()->json([
                     'message' => 'La ficha no tiene un programa asignado'
@@ -444,4 +457,274 @@ class FichaController extends Controller
             'existe' => $existe
         ]);
     }
+    public function show($id): JsonResponse
+    {
+        try {
+            // Buscar la ficha con todas sus relaciones
+            $ficha = Ficha::with([
+                'jornada',
+                'asignacion' => function ($query) {
+                    $query->with([
+                        'periodo',
+                        'programa',
+                        'sede'
+                    ]);
+                },
+                'sede',
+                'infraestructura',
+                'regional'
+            ])->findOrFail($id);
+
+            // Obtener la apertura relacionada
+            $apertura = AperturarPrograma::findOrFail($ficha->idAsignacion);
+
+            return response()->json([
+                'message' => 'Ficha encontrada',
+                'data' => [
+                    'ficha' => $ficha,
+                    'apertura' => $apertura
+                ]
+            ], 200);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'message' => 'Ficha no encontrada',
+                'error' => 'No existe una ficha con el ID proporcionado'
+            ], 404);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Error al obtener la ficha',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    public function update(Request $request, $id): JsonResponse
+    {
+        $validated = $request->validate([
+            // Apertura programa
+            'observacion' => 'nullable|string|max:1000',
+            'idPeriodo' => 'required|exists:periodo,id',
+            'idPrograma' => 'required|exists:programa,id',
+            'estado' => 'nullable|string',
+            'idSede' => 'required|exists:sedes,id',
+            'idInfraestructura' => 'nullable|exists:infraestructura,id',
+            'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
+
+            // Apertura Fechas
+            'fechaInicialClases' => 'required|date',
+            'fechaFinalClases' => 'required|date|after_or_equal:fechaInicialClases',
+            'fechaInicialPlanMejoramiento' => 'required|date',
+            'fechaFinalPlanMejoramiento' => 'required|date|after_or_equal:fechaInicialPlanMejoramiento',
+            'fechaInicialInscripciones' => 'required|date',
+            'fechaFinalInscripciones' => 'required|date|after_or_equal:fechaInicialInscripciones',
+            'fechaInicialMatriculas' => 'required|date',
+            'fechaFinalMatriculas' => 'required|date|after_or_equal:fechaInicialMatriculas',
+
+            // Ficha
+            'idJornada' => 'required|exists:jornadas,id',
+            'idRegional' => 'required|exists:empresa,id',
+            'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
+            'codigo' => [
+                'required',
+                'string',
+                // Validar que el código sea único excepto para esta ficha
+                Rule::unique('ficha', 'codigo')->ignore($id)
+            ],
+            'documento' => 'nullable|file|mimes:pdf|max:5120', // 5MB
+        ]);
+
+        DB::beginTransaction();
+
+        try {
+            // Buscar la ficha
+            $ficha = Ficha::findOrFail($id);
+
+            // Buscar la apertura relacionada
+            $apertura = AperturarPrograma::findOrFail($ficha->idAsignacion);
+
+            // Actualizar la apertura
+            $apertura->update([
+                'observacion' => $validated['observacion'] ?? null,
+                'idPeriodo' => $validated['idPeriodo'],
+                'idPrograma' => $validated['idPrograma'],
+                'estado' => $validated['estado'] ?? 'EN CURSO',
+                'idSede' => $validated['idSede'],
+                'tipoCalificacion' => $validated['tipoCalificacion'] ?? 'NUMERICO',
+
+                'fechaInicialClases' => $validated['fechaInicialClases'],
+                'fechaFinalClases' => $validated['fechaFinalClases'],
+                'fechaInicialPlanMejoramiento' => $validated['fechaInicialPlanMejoramiento'],
+                'fechaFinalPlanMejoramiento' => $validated['fechaFinalPlanMejoramiento'],
+                'fechaInicialInscripciones' => $validated['fechaInicialInscripciones'],
+                'fechaFinalInscripciones' => $validated['fechaFinalInscripciones'],
+                'fechaInicialMatriculas' => $validated['fechaInicialMatriculas'],
+                'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
+            ]);
+
+            $rutaDocumento = $ficha->documento; // conservar el actual
+
+            if ($request->hasFile('documento')) {
+                // 🗑️ eliminar el anterior si existe
+                if ($ficha->documento) {
+                    $rutaAnterior = str_replace('/storage/', '', $ficha->documento);
+                    Storage::disk('public')->delete($rutaAnterior);
+                }
+
+                // 📄 guardar el nuevo
+                $rutaDocumento = '/storage/' . $request->file('documento')
+                    ->store('fichas/documentos', 'public');
+            }
+
+
+            // Actualizar la ficha
+            $ficha->update([
+                'idJornada' => $validated['idJornada'],
+                'codigo' => $validated['codigo'],
+                'idSede' => $validated['idSede'],
+                'idInfraestructura' => $validated['idInfraestructura'] ?? null,
+                'idRegional' => $validated['idRegional'],
+                'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
+                'documento' => $rutaDocumento,
+            ]);
+
+
+
+            DB::commit();
+
+            // Recargar las relaciones
+            $ficha->load([
+                'jornada',
+                'asignacion',
+                'sede',
+                'infraestructura',
+                'regional'
+            ]);
+
+            return response()->json([
+                'message' => 'Ficha actualizada correctamente',
+                'data' => [
+                    'ficha' => $ficha,
+                    'apertura' => $apertura
+                ]
+            ], 200);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Ficha no encontrada',
+                'error' => 'No existe una ficha con el ID proporcionado'
+            ], 404);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Error al actualizar la ficha',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    /**
+ * Elimina una ficha solo si no está siendo utilizada en otras partes
+ */
+public function destroy($id): JsonResponse
+{
+    DB::beginTransaction();
+    
+    try {
+        // Buscar la ficha
+        $ficha = Ficha::findOrFail($id);
+
+        // Array para almacenar las relaciones que impiden eliminar
+        $relacionesActivas = [];
+
+        // 1. Verificar si tiene instructor líder asignado
+        if ($ficha->idInstructorLider) {
+            $relacionesActivas[] = 'instructor líder asignado';
+        }
+
+        // 2. Verificar si tiene aprendices voceros o suplentes
+        if ($ficha->idAprendizVocero) {
+            $relacionesActivas[] = 'aprendiz vocero asignado';
+        }
+
+        if ($ficha->idAprendizSuplente) {
+            $relacionesActivas[] = 'aprendiz suplente asignado';
+        }
+
+        // 3. Verificar si tiene horarios de materias asignados
+        $cantidadHorarios = DB::table('horarioMateria')
+            ->where('idFicha', $id)
+            ->count();
+        
+        if ($cantidadHorarios > 0) {
+            $relacionesActivas[] = "{$cantidadHorarios} horario(s) de materia(s)";
+        }
+
+        // Si hay relaciones activas, no permitir eliminar
+        if (!empty($relacionesActivas)) {
+            DB::rollBack();
+            
+            $mensaje = 'No se puede eliminar la ficha porque tiene las siguientes relaciones activas: ' 
+                     . implode(', ', $relacionesActivas);
+            
+            return response()->json([
+                'message' => $mensaje,
+                'relaciones' => $relacionesActivas
+            ], 422);
+        }
+
+        // Si llegamos aquí, no hay relaciones que impidan la eliminación
+        // Guardar el ID de la apertura antes de eliminar la ficha
+        $idApertura = $ficha->idAsignacion;
+
+        // Eliminar documento físico si existe
+        if ($ficha->documento) {
+            $rutaDocumento = str_replace('/storage/', '', $ficha->documento);
+            if (Storage::disk('public')->exists($rutaDocumento)) {
+                Storage::disk('public')->delete($rutaDocumento);
+            }
+        }
+
+        // Eliminar la ficha (que tiene FK hacia apertura)
+        $ficha->delete();
+
+        // Eliminar la apertura asociada
+        if ($idApertura) {
+            AperturarPrograma::where('id', $idApertura)->delete();
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'message' => 'Ficha eliminada correctamente'
+        ], 200);
+
+    } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        DB::rollBack();
+        return response()->json([
+            'message' => 'Ficha no encontrada'
+        ], 404);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        
+        // Log del error para debugging
+        Log::error('Error al eliminar ficha', [
+            'id' => $id,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+
+        // Verificar si es error de foreign key constraint
+        if (str_contains($e->getMessage(), 'foreign key constraint') || 
+            str_contains($e->getMessage(), 'Cannot delete or update a parent row')) {
+            return response()->json([
+                'message' => 'No se puede eliminar la ficha porque está siendo utilizada en otros registros del sistema',
+                'error' => 'Violación de restricción de integridad referencial'
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Error al eliminar la ficha',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
 }

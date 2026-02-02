@@ -24,6 +24,7 @@ class Sede extends Model
         'telefono',
         'celular',
         'idResponsable',
+        'idCentroFormacion'
     ];
 
     /**
@@ -46,5 +47,18 @@ class Sede extends Model
     public function responsable()
     {
         return $this->belongsTo(User::class, 'idResponsable');
+    }
+    // CEntro de formación al que le pertenece esa sede
+    public function centroformacion()
+    {
+        return $this->belongsTo(CentrosFormacion::class, 'idCentroFormacion');
+    }
+    public function fichas()
+    {
+        return $this->hasMany(Ficha::class, 'idSede');
+    }
+     public function ambientes()
+    {
+        return $this->hasMany(Infraestructura::class, 'idSede');
     }
 }
