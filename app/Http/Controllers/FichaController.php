@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class FichaController extends Controller
@@ -42,7 +43,8 @@ class FichaController extends Controller
             'idJornada' => 'required|exists:jornadas,id',
             'idRegional' => 'required|exists:empresa,id',
             'codigo' => 'required|string|unique:ficha,codigo',
-            'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100'
+            'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
+            'documento' => 'nullable|file|mimes:pdf|max:5120',
         ]);
 
         DB::beginTransaction();
@@ -66,11 +68,20 @@ class FichaController extends Controller
                 'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
             ]);
 
+            $rutaDocumento = null;
+
+            if ($request->hasFile('documento')) {
+                $rutaDocumento = '/storage/' . $request->file('documento')
+                    ->store('fichas/documentos', 'public');
+            }
+
+
             $ficha = Ficha::create([
                 'idJornada' => $validated['idJornada'],
                 'idAsignacion' => $apertura->id,
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
+                'documento' => $rutaDocumento,
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'idRegional' => $validated['idRegional'],
                 'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
@@ -518,6 +529,7 @@ class FichaController extends Controller
                 // Validar que el código sea único excepto para esta ficha
                 Rule::unique('ficha', 'codigo')->ignore($id)
             ],
+            'documento' => 'nullable|file|mimes:pdf|max:5120', // 5MB
         ]);
 
         DB::beginTransaction();
@@ -548,6 +560,21 @@ class FichaController extends Controller
                 'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
             ]);
 
+            $rutaDocumento = $ficha->documento; // conservar el actual
+
+            if ($request->hasFile('documento')) {
+                // 🗑️ eliminar el anterior si existe
+                if ($ficha->documento) {
+                    $rutaAnterior = str_replace('/storage/', '', $ficha->documento);
+                    Storage::disk('public')->delete($rutaAnterior);
+                }
+
+                // 📄 guardar el nuevo
+                $rutaDocumento = '/storage/' . $request->file('documento')
+                    ->store('fichas/documentos', 'public');
+            }
+
+
             // Actualizar la ficha
             $ficha->update([
                 'idJornada' => $validated['idJornada'],
@@ -556,7 +583,10 @@ class FichaController extends Controller
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'idRegional' => $validated['idRegional'],
                 'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
+                'documento' => $rutaDocumento,
             ]);
+
+
 
             DB::commit();
 
