@@ -136,7 +136,6 @@ use App\Http\Controllers\TrabajadoresController;
 
 Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
-
 Route::group([
     'middleware' => 'api',
 ], function () {
@@ -150,6 +149,12 @@ Route::group([
     Route::get('user_mobile', [AuthController::class, 'getUserAppMobile']);
     Route::get('get_users_and_groups', [Gestion_usuarioUserController::class, 'getUsersAndGroups']);
 });
+
+//olvidaste contraseña
+Route::post('password/send-otp', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'sendOtp']);
+Route::post('password/verify-otp', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'verifyOtp']);
+Route::post('password/reset', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'resetPassword']);
+
 
 Route::resource('roles', RolController::class);
 
