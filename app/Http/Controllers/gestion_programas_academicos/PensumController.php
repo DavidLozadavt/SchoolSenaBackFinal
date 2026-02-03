@@ -69,15 +69,31 @@ public function indexByRegional(int $idRegional)
 
     public function store(Request $request)
     {
+        $request->validate([
+            'nombrePrograma'   => 'required|string|max:255',
+            'codigoPrograma'   => 'required|string|max:255',
+            'descripcionPrograma' => 'nullable|string',
+            'idNivelEducativo' => 'required|exists:nivelEducativo,id',
+            'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
+            'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
+            'documento'        => 'nullable|file|mimes:pdf|max:5120',
+        ]);
+
         try {
+            $rutaDocumento = null;
+            if ($request->hasFile('documento')) {
+                $rutaDocumento = '/storage/' . $request->file('documento')->store('programas/documentos', 'public');
+            }
+
             $nuevoPrograma = Programa::create([
                 'nombrePrograma'      => $request->nombrePrograma,
                 'codigoPrograma'      => $request->codigoPrograma,
                 'descripcionPrograma' => $request->descripcionPrograma,
+                'documento'           => $rutaDocumento,
                 'idNivelEducativo'    => $request->idNivelEducativo,
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
-                'idCompany'           => KeyUtil::idCompany(), // Valor fijo por ahora
+                'idCompany'           => KeyUtil::idCompany(),
             ]);
 
             $nuevoPrograma->load(['nivel', 'tipoFormacion', 'estado']);
@@ -99,19 +115,34 @@ public function indexByRegional(int $idRegional)
 
 public function update(Request $request, $id)
 {
+    $request->validate([
+        'nombrePrograma'   => 'required|string|max:255',
+        'codigoPrograma'   => 'required|string|max:255',
+        'descripcionPrograma' => 'nullable|string',
+        'idNivelEducativo' => 'required|exists:nivelEducativo,id',
+        'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
+        'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
+        'documento'        => 'nullable|file|mimes:pdf|max:5120',
+    ]);
+
     try {
         $programa = Programa::findOrFail($id);
-        
-        $programa->update([
+
+        $data = [
             'nombrePrograma'      => $request->nombrePrograma,
             'codigoPrograma'      => $request->codigoPrograma,
             'descripcionPrograma' => $request->descripcionPrograma,
             'idNivelEducativo'    => $request->idNivelEducativo,
             'idTipoFormacion'     => $request->idTipoFormacion,
             'idEstadoPrograma'    => $request->idEstadoPrograma,
-        ]);
+        ];
 
-     
+        if ($request->hasFile('documento')) {
+            $data['documento'] = '/storage/' . $request->file('documento')->store('programas/documentos', 'public');
+        }
+
+        $programa->update($data);
+
         $programa->load(['nivel', 'tipoFormacion', 'estado']);
 
         return response()->json([
