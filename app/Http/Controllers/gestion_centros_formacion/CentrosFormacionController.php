@@ -5,6 +5,7 @@ namespace App\Http\Controllers\gestion_centros_formacion;
 use App\Http\Controllers\Controller;
 use App\Models\ActivationCompanyUser;
 use App\Models\CentrosFormacion;
+use App\Models\Rol;
 use App\Models\User;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
@@ -134,10 +135,10 @@ class CentrosFormacionController extends Controller
     {
         // Validar que el idRegional coincida con la empresa del usuario autenticado
         $companyId = KeyUtil::idCompany();
-        
+
         // Si el idRegional no coincide con la empresa del usuario, usar la empresa del usuario
         $empresaId = ($idRegional == $companyId) ? $idRegional : $companyId;
-        
+
         $centros = CentrosFormacion::select(
             'id',
             'nombre',
@@ -203,6 +204,11 @@ class CentrosFormacionController extends Controller
             $activeUser->fechaInicio = now();
             $activeUser->fechaFin = '2040-01-15';
             $activeUser->save();
+
+            $rol = Rol::find(60);
+            if ($rol) {
+                $activeUser->assignRole($rol);
+            }
 
             DB::commit();
 
