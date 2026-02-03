@@ -11,6 +11,8 @@ use App\Models\Programa;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 
 class PensumController extends Controller
@@ -80,21 +82,22 @@ public function indexByRegional(int $idRegional)
         ]);
 
         try {
-            $rutaDocumento = null;
-            if ($request->hasFile('documento')) {
-                $rutaDocumento = '/storage/' . $request->file('documento')->store('programas/documentos', 'public');
-            }
-
             $nuevoPrograma = Programa::create([
                 'nombrePrograma'      => $request->nombrePrograma,
                 'codigoPrograma'      => $request->codigoPrograma,
                 'descripcionPrograma' => $request->descripcionPrograma,
-                'documento'           => $rutaDocumento,
+                'documento'           => null,
                 'idNivelEducativo'    => $request->idNivelEducativo,
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
                 'idCompany'           => KeyUtil::idCompany(),
             ]);
+
+            if ($request->hasFile('documento')) {
+                $nombreArchivo = Str::limit(Str::slug($request->nombrePrograma), 80) . '_' . $nuevoPrograma->id . '.pdf';
+                $request->file('documento')->storeAs('programas/documentos', $nombreArchivo, 'public');
+                $nuevoPrograma->update(['documento' => '/storage/programas/documentos/' . $nombreArchivo]);
+            }
 
             $nuevoPrograma->load(['nivel', 'tipoFormacion', 'estado']);
 
@@ -138,7 +141,13 @@ public function update(Request $request, $id)
         ];
 
         if ($request->hasFile('documento')) {
-            $data['documento'] = '/storage/' . $request->file('documento')->store('programas/documentos', 'public');
+            if ($programa->documento) {
+                $rutaVieja = str_replace('/storage/', '', $programa->documento);
+                Storage::disk('public')->delete($rutaVieja);
+            }
+            $nombreArchivo = Str::limit(Str::slug($request->nombrePrograma), 80) . '_' . $programa->id . '.pdf';
+            $request->file('documento')->storeAs('programas/documentos', $nombreArchivo, 'public');
+            $data['documento'] = '/storage/programas/documentos/' . $nombreArchivo;
         }
 
         $programa->update($data);

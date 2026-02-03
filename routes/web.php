@@ -30,7 +30,7 @@ Route::get('/planilla-viaje', [ReportController::class, 'generatePDFPlanilla']);
 // Servir archivos de storage (documentos de programa, ficha, etc.) antes del catch-all SPA
 Route::get('storage/{path}', function (string $path) {
     if (!Storage::disk('public')->exists($path)) {
-        return response()->json(['message' => 'Archivo no encontrado'], 404);
+        abort(404);
     }
     $fullPath = Storage::disk('public')->path($path);
     return response()->file($fullPath);
