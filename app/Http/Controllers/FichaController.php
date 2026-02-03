@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class FichaController extends Controller
@@ -42,6 +43,8 @@ class FichaController extends Controller
             'idJornada' => 'required|exists:jornadas,id',
             'idRegional' => 'required|exists:empresa,id',
             'codigo' => 'required|string|unique:ficha,codigo',
+            'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
+            'documento' => 'nullable|file|mimes:pdf|max:5120',
         ]);
 
         DB::beginTransaction();
@@ -65,14 +68,23 @@ class FichaController extends Controller
                 'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
             ]);
 
+            $rutaDocumento = null;
+
+            if ($request->hasFile('documento')) {
+                $rutaDocumento = '/storage/' . $request->file('documento')
+                    ->store('fichas/documentos', 'public');
+            }
+
+
             $ficha = Ficha::create([
                 'idJornada' => $validated['idJornada'],
                 'idAsignacion' => $apertura->id,
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
+                'documento' => $rutaDocumento,
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'idRegional' => $validated['idRegional'],
-                'porcentajeEjecucion' => 100,
+                'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
             ]);
 
 
@@ -510,12 +522,14 @@ class FichaController extends Controller
             // Ficha
             'idJornada' => 'required|exists:jornadas,id',
             'idRegional' => 'required|exists:empresa,id',
+            'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'codigo' => [
                 'required',
                 'string',
                 // Validar que el código sea único excepto para esta ficha
                 Rule::unique('ficha', 'codigo')->ignore($id)
             ],
+            'documento' => 'nullable|file|mimes:pdf|max:5120', // 5MB
         ]);
 
         DB::beginTransaction();
@@ -546,6 +560,21 @@ class FichaController extends Controller
                 'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
             ]);
 
+            $rutaDocumento = $ficha->documento; // conservar el actual
+
+            if ($request->hasFile('documento')) {
+                // 🗑️ eliminar el anterior si existe
+                if ($ficha->documento) {
+                    $rutaAnterior = str_replace('/storage/', '', $ficha->documento);
+                    Storage::disk('public')->delete($rutaAnterior);
+                }
+
+                // 📄 guardar el nuevo
+                $rutaDocumento = '/storage/' . $request->file('documento')
+                    ->store('fichas/documentos', 'public');
+            }
+
+
             // Actualizar la ficha
             $ficha->update([
                 'idJornada' => $validated['idJornada'],
@@ -553,7 +582,11 @@ class FichaController extends Controller
                 'idSede' => $validated['idSede'],
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'idRegional' => $validated['idRegional'],
+                'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
+                'documento' => $rutaDocumento,
             ]);
+
+
 
             DB::commit();
 
@@ -587,4 +620,111 @@ class FichaController extends Controller
             ], 500);
         }
     }
+    /**
+ * Elimina una ficha solo si no está siendo utilizada en otras partes
+ */
+public function destroy($id): JsonResponse
+{
+    DB::beginTransaction();
+    
+    try {
+        // Buscar la ficha
+        $ficha = Ficha::findOrFail($id);
+
+        // Array para almacenar las relaciones que impiden eliminar
+        $relacionesActivas = [];
+
+        // 1. Verificar si tiene instructor líder asignado
+        if ($ficha->idInstructorLider) {
+            $relacionesActivas[] = 'instructor líder asignado';
+        }
+
+        // 2. Verificar si tiene aprendices voceros o suplentes
+        if ($ficha->idAprendizVocero) {
+            $relacionesActivas[] = 'aprendiz vocero asignado';
+        }
+
+        if ($ficha->idAprendizSuplente) {
+            $relacionesActivas[] = 'aprendiz suplente asignado';
+        }
+
+        // 3. Verificar si tiene horarios de materias asignados
+        $cantidadHorarios = DB::table('horarioMateria')
+            ->where('idFicha', $id)
+            ->count();
+        
+        if ($cantidadHorarios > 0) {
+            $relacionesActivas[] = "{$cantidadHorarios} horario(s) de materia(s)";
+        }
+
+        // Si hay relaciones activas, no permitir eliminar
+        if (!empty($relacionesActivas)) {
+            DB::rollBack();
+            
+            $mensaje = 'No se puede eliminar la ficha porque tiene las siguientes relaciones activas: ' 
+                     . implode(', ', $relacionesActivas);
+            
+            return response()->json([
+                'message' => $mensaje,
+                'relaciones' => $relacionesActivas
+            ], 422);
+        }
+
+        // Si llegamos aquí, no hay relaciones que impidan la eliminación
+        // Guardar el ID de la apertura antes de eliminar la ficha
+        $idApertura = $ficha->idAsignacion;
+
+        // Eliminar documento físico si existe
+        if ($ficha->documento) {
+            $rutaDocumento = str_replace('/storage/', '', $ficha->documento);
+            if (Storage::disk('public')->exists($rutaDocumento)) {
+                Storage::disk('public')->delete($rutaDocumento);
+            }
+        }
+
+        // Eliminar la ficha (que tiene FK hacia apertura)
+        $ficha->delete();
+
+        // Eliminar la apertura asociada
+        if ($idApertura) {
+            AperturarPrograma::where('id', $idApertura)->delete();
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'message' => 'Ficha eliminada correctamente'
+        ], 200);
+
+    } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        DB::rollBack();
+        return response()->json([
+            'message' => 'Ficha no encontrada'
+        ], 404);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        
+        // Log del error para debugging
+        Log::error('Error al eliminar ficha', [
+            'id' => $id,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+
+        // Verificar si es error de foreign key constraint
+        if (str_contains($e->getMessage(), 'foreign key constraint') || 
+            str_contains($e->getMessage(), 'Cannot delete or update a parent row')) {
+            return response()->json([
+                'message' => 'No se puede eliminar la ficha porque está siendo utilizada en otros registros del sistema',
+                'error' => 'Violación de restricción de integridad referencial'
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Error al eliminar la ficha',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
 }

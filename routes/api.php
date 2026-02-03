@@ -121,6 +121,8 @@ use App\Http\Controllers\SedeController as ControllersSedeController;
 use App\Http\Controllers\gestion_sede_institucional\SedeInstitucionalController;
 use App\Http\Controllers\InfraestructuraController;
 
+use App\Http\Controllers\TrabajadoresController;
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -232,7 +234,8 @@ Route::get('actividades_riesgo_profesional', [ContratacionController::class, 'ge
 Route::post('store_actividades_riesgo_profesional', [ContratacionController::class, 'storeActividadeRiesgoProfesional']);
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
 Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
-Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas']);
+Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
+Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
 
 
@@ -443,6 +446,74 @@ Route::post('store_comment_sub_response', [BoardTaskController::class, 'storeSub
 Route::post('store_mencion_check_item', [BoardTaskController::class, 'sendEmailMentionCheckList']);
 Route::post('store_mencion_comment', [BoardTaskController::class, 'sendEmailMentionComment']);
 Route::post('store_mencion_comment_reponse', [BoardTaskController::class, 'sendEmailMentionCommentResponse']);
+
+
+
+//GestionTipoContrato
+Route::apiResource('tipo_contrato', TipoContratoController::class);
+Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
+//rutas para cargar los trabajadores y  ejecutar su procedimiento almacenado
+Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
+// Route::post('ejecutarProcedimiento', [TrabajadoresController::class, 'ejecutarProcedimiento']);
+
+
+
+// Gestion Contratación
+Route::group([
+    'middleware' => 'auth:api'
+], function () {
+
+    Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
+
+    Route::get('contrato-tipos-identificacion', [ContratacionController::class, 'tiposIdentificacion']);
+    Route::get('contrato-tipos-contrato', [ContratacionController::class, 'tipoContrato']);
+    Route::get('contrato-persona/{identificacion}', [ContratacionController::class, 'getPersonaByIdentificacion']);
+    Route::post('contrato-persona', [ContratacionController::class, 'storePersona']);
+    Route::put('contrato-persona', [ContratacionController::class, 'storePersona']);
+    Route::post('update_rol_contrato', [ContratacionController::class, 'updateSueldo']);
+
+    Route::post('contrato', [ContratacionController::class, 'storeContrato']);
+    Route::get('contrato-tipo-documento', [ContratacionController::class, 'tipoDocumento']);
+    Route::get('contrato-roles', [ContratacionController::class, 'getRoles']);
+    Route::get('contratos', [ContratacionController::class, 'getAllContratos']);
+    Route::get('contrato/{identificacion}', [ContratacionController::class, 'getContratoByIdentificacion']);
+    Route::get('contrato_by_id/{id}', [ContratacionController::class, 'getContratoById']);
+    Route::post('contrato-documento', [ContratacionController::class, 'storeDocumentoContrato']);
+    Route::post('rol-contrato', [ContratacionController::class, 'storeRol']);
+    Route::get('contrato_trazabilidad/{id}', [ContratacionController::class, 'getOneContratoById']);
+    Route::get('areas-conocimiento-contrato', [ContratacionController::class, 'getAreasConocimiento']);
+
+    Route::post('interrumpir_contrato', [ContratacionController::class, 'interrumpirContrato']);
+    Route::post('extender_contrato', [ContratacionController::class, 'extenderContrato']);
+
+
+    //GestionTipoContrato
+    Route::apiResource('tipo_contrato', TipoContratoController::class);
+});
+
+//GestionTipoContrato
+Route::apiResource('tipo_contrato', TipoContratoController::class);
+Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
+//rutas para cargar los trabajadores y  ejecutar su procedimiento almacenado
+Route::post('cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV'])->middleware('auth:api');
+Route::post('ejecutar_procedimiento_trabajadores', [TrabajadoresController::class, 'ejecutarProcedimiento'])->middleware('auth:api');
+
+//rutas para cargar los estudiantes y ejecutar su procedimiento almacenado
+Route::post('/cargar-estudiantes', [EstudianteController::class, 'cargarEstudiantesDesdeExcel'])->middleware('auth:api');
+Route::post('/procedimientoEstudiantes', [EstudianteController::class, 'ejecutarProcedimientoEstudiantes'])->middleware('auth:api');
+
+
+//rutas para cargar los productos y ejecutar su procedimiento almacenado
+Route::group([
+    'middleware' => 'auth:api',
+
+], function () {
+    Route::post('/cargar-productos', [MigraProductoController::class, 'cargarproductos']);
+    Route::post('procedimientoProductos', [MigraProductoController::class, 'ejecutarProcedimientoProductos']);
+});
+
+//infraestructuras desde archivo plano
+Route::post('/carga-infra', [MigraInfraestructuraController::class, 'cargarInfraEstructura']);
 
 
 
@@ -1066,6 +1137,7 @@ Route::post('store_cuenta_cobrar_poliza', [PolizasController::class, 'storeCuent
 Route::get('programas_recursos_crear', [PensumController::class, 'getMetadata']);
 Route::post('programas_guardar', [PensumController::class, 'store']);
 Route::get('programas', [PensumController::class, 'index']);
+Route::get('programasporRegional/{idRegional}', [PensumController::class, 'indexByRegional']);
 Route::put('programas_actualizar/{id}', [PensumController::class, 'update']);
 Route::delete('programas_eliminar/{id}', [PensumController::class, 'destroy']);
 Route::get('asignacion_detalle/{id}', [PensumController::class, 'getInformacionApertura']);
@@ -1110,12 +1182,15 @@ Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show'])
 Route::patch('centrosFormacion/{id}', [CentrosFormacionController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Sedes:
+Route::get('sedes/centro-formacion/{idCentroFormacion}', [ControllersSedeController::class, 'getSedesByCentroFormacion']);
 Route::get('sedesSena/users', [ControllersSedeController::class, 'getUsersSena']);
 Route::post('sedesSena', [ControllersSedeController::class, 'store']);
 Route::get('sedesSena', [ControllersSedeController::class, 'index']);
 Route::get('sedesSena/{id}', [ControllersSedeController::class, 'show']);
 Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
+Route::delete('sedesSena/{id}', [ControllersSedeController::class, 'destroy']);
 Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'getSedesByRegional']); //Para filtrar las sedes por regional
+
 
 
 //rutas SHOOL SENA para gestión de aperturaPrograma:
@@ -1129,14 +1204,15 @@ Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::get('fichas/{id}', [FichaController::class, 'show']);
 Route::put('fichas/{id}', [FichaController::class, 'update']);
+Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
-
 
 
 

@@ -7,9 +7,12 @@ use App\Http\Controllers\Controller;
 use App\Models\NivelEducativo;
 use App\Models\TipoFormacion;
 use App\Models\EstadoPrograma;
-use App\Models\Programa; 
+use App\Models\Programa;
+use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 
 class PensumController extends Controller
@@ -44,19 +47,57 @@ $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])->get();
     }
 }
 
+public function indexByRegional(int $idRegional)
+{
+    try {
+        $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])
+            ->where('idCompany', $idRegional)
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $programas
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+
+
 
     public function store(Request $request)
     {
+        $request->validate([
+            'nombrePrograma'   => 'required|string|max:255',
+            'codigoPrograma'   => 'required|string|max:255',
+            'descripcionPrograma' => 'nullable|string',
+            'idNivelEducativo' => 'required|exists:nivelEducativo,id',
+            'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
+            'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
+            'documento'        => 'nullable|file|mimes:pdf|max:5120',
+        ]);
+
         try {
             $nuevoPrograma = Programa::create([
                 'nombrePrograma'      => $request->nombrePrograma,
                 'codigoPrograma'      => $request->codigoPrograma,
                 'descripcionPrograma' => $request->descripcionPrograma,
+                'documento'           => null,
                 'idNivelEducativo'    => $request->idNivelEducativo,
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
-                'idCompany'           => 1 // Valor fijo por ahora
+                'idCompany'           => KeyUtil::idCompany(),
             ]);
+
+            if ($request->hasFile('documento')) {
+                $nombreArchivo = Str::limit(Str::slug($request->nombrePrograma), 80) . '_' . $nuevoPrograma->id . '.pdf';
+                $request->file('documento')->storeAs('programas/documentos', $nombreArchivo, 'public');
+                $nuevoPrograma->update(['documento' => '/storage/programas/documentos/' . $nombreArchivo]);
+            }
 
             $nuevoPrograma->load(['nivel', 'tipoFormacion', 'estado']);
 
@@ -77,19 +118,40 @@ $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])->get();
 
 public function update(Request $request, $id)
 {
+    $request->validate([
+        'nombrePrograma'   => 'required|string|max:255',
+        'codigoPrograma'   => 'required|string|max:255',
+        'descripcionPrograma' => 'nullable|string',
+        'idNivelEducativo' => 'required|exists:nivelEducativo,id',
+        'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
+        'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
+        'documento'        => 'nullable|file|mimes:pdf|max:5120',
+    ]);
+
     try {
         $programa = Programa::findOrFail($id);
-        
-        $programa->update([
+
+        $data = [
             'nombrePrograma'      => $request->nombrePrograma,
             'codigoPrograma'      => $request->codigoPrograma,
             'descripcionPrograma' => $request->descripcionPrograma,
             'idNivelEducativo'    => $request->idNivelEducativo,
             'idTipoFormacion'     => $request->idTipoFormacion,
             'idEstadoPrograma'    => $request->idEstadoPrograma,
-        ]);
+        ];
 
-     
+        if ($request->hasFile('documento')) {
+            if ($programa->documento) {
+                $rutaVieja = str_replace('/storage/', '', $programa->documento);
+                Storage::disk('public')->delete($rutaVieja);
+            }
+            $nombreArchivo = Str::limit(Str::slug($request->nombrePrograma), 80) . '_' . $programa->id . '.pdf';
+            $request->file('documento')->storeAs('programas/documentos', $nombreArchivo, 'public');
+            $data['documento'] = '/storage/programas/documentos/' . $nombreArchivo;
+        }
+
+        $programa->update($data);
+
         $programa->load(['nivel', 'tipoFormacion', 'estado']);
 
         return response()->json([

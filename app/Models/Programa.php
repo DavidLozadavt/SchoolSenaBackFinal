@@ -17,6 +17,7 @@ class Programa extends Model
         'nombrePrograma',
         'codigoPrograma',
         'descripcionPrograma',
+        'documento',
         'idNivelEducativo',
         'idTipoFormacion',
         'idEstadoPrograma',
