@@ -13,4 +13,8 @@ class Grado extends Model
     {
         return $this->belongsTo(TipoGrado::class, 'idTipoGrado');
     }
+
+    public function gradoMateria(){
+        return $this->hasMany(GradoPrograma::class, 'idGrado');
+    }
 }

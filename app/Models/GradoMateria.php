@@ -12,7 +12,8 @@ class GradoMateria extends Model
         'rutaDocumento', 
         'idGradoPrograma', 
         'idMateria', 
-        'idDocente'
+        'idDocente',
+        'estado'
     ];
 
     public function gradoPrograma()
@@ -23,5 +24,9 @@ class GradoMateria extends Model
     public function materia()
     {
         return $this->belongsTo(Materia::class, 'idMateria');
+    }
+
+    public function docente(){
+        return $this->belongsTo(ActivationCompanyUser::class, 'idDocente');
     }
 }
