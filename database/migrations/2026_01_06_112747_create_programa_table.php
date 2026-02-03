@@ -20,7 +20,8 @@ return new class extends Migration
             $table->string('nombrePrograma', 255);
             $table->string('codigoPrograma', 255);
             $table->text('descripcionPrograma')->nullable();
-            
+            $table->string('documento', 500)->nullable()->after('descripcionPrograma');
+
             // Estas columnas DEBEN ser unsignedInteger para ser compatibles 
             // con el increments('id') de tus tablas de catálogo
             $table->unsignedInteger('idNivelEducativo');
