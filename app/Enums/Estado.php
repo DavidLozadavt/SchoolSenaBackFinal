@@ -1,0 +1,36 @@
+<?php
+
+namespace App\Enums;
+
+use BenSampo\Enum\Enum;
+
+final class Estado extends Enum
+{
+  const ACTIVO    = "ACTIVO";
+  const INACTIVO  = "INACTIVO";
+  const OCULTO    = "OCULTO";
+  const PENDIENTE = "PENDIENTE";
+  const RECHAZADO = "RECHAZADO";
+  const APROBADO  = "APROBADO";
+  const CANCELADO = "CANCELADO";
+  const REPROBADO = "REPROBADO";
+  const CERRADO   = "CERRADO";
+  const ACEPTADO  = "ACEPTADO";
+  const LEIDO     = "LEIDO";
+  const EN_ESPERA = "EN ESPERA";
+  const INSCRIPCION   = "INSCRIPCION";
+  const MATRICULADO   = "MATRICULADO";
+  const ABIERTO       = "ABIERTO";
+  const ENCURSO       = "EN CURSO";
+  const PORACTUALIZAR = "POR ACTUALIZAR";
+  const CURSANDO      = "CURSANDO";
+  const ENTREVISTA    = "ENTREVISTA"; // PARA MATRICULA
+  const SIN_ENTREVISTA = "SIN ENTREVISTA"; // PARA MATRICULA
+  const JUSTIFICADO    = "JUSTIFICADO"; // -> INASISTENCIA VERIFICACION BY ADMIN
+  const EN_FORMACION   = "EN FORMACION"; // PARA MATRICULA | MATRICULA ACADEMICA
+  const RETIRO_VOLUNTARIO = "RETIRO VOLUNTARIO"; // PARA MATRICULA | MATRICULA ACADEMICA
+  const TRASLADADO = 'TRASLADADO';
+  const APLAZADO = 'APLAZADO';
+  const POR_EVALUAR = 'POR EVALUAR';
+  const DESERCION = 'DESERCION';
+}

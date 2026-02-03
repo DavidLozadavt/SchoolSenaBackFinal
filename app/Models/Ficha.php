@@ -57,4 +57,9 @@ class Ficha extends Model
     {
         return $this->belongsTo(Contract::class, 'idInstructorLider');
     }
+
+    public function horarios()
+    {
+        return $this->hasMany(HorarioMateria::class, 'idFicha', 'id');
+    }
 }

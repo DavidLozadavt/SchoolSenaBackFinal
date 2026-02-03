@@ -181,4 +181,9 @@ class Contract extends Model
     {
         return $this->belongsToMany(Programa::class, 'asignacion_contrato_programa', 'idContrato', 'idPrograma');
     }
+
+    public function horarioMateria()
+    {
+        return $this->hasMany(HorarioMateria::class, 'idContrato', 'id');
+    }
 }

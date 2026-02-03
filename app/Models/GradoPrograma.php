@@ -8,7 +8,7 @@ class GradoPrograma extends Model
 {
     protected $table = 'gradoPrograma';
     
-    protected $fillable = ['idPrograma', 'idGrado', 'cupos'];
+    protected $fillable = ['idPrograma', 'idGrado', 'cupos', 'fechaInicio', 'fechaFin', 'estado'];
 
     public function programa()
     {
