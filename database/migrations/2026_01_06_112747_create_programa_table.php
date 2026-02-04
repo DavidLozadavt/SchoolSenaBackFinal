@@ -20,9 +20,8 @@ return new class extends Migration
             $table->string('nombrePrograma', 255);
             $table->string('codigoPrograma', 255);
             $table->text('descripcionPrograma')->nullable();
-            $table->string('documento', 500)->nullable()->after('descripcionPrograma');
 
-            // Estas columnas DEBEN ser unsignedInteger para ser compatibles 
+            // Estas columnas DEBEN ser unsignedInteger para ser compatibles
             // con el increments('id') de tus tablas de catálogo
             $table->unsignedInteger('idNivelEducativo');
             $table->unsignedInteger('idTipoFormacion');
@@ -34,14 +33,14 @@ return new class extends Migration
             // Definición de Llaves Foráneas (Relaciones)
             $table->foreign('idNivelEducativo', 'programa_idniveleducativo_foreign')
                   ->references('id')->on('nivelEducativo');
-                  
+
             $table->foreign('idTipoFormacion', 'programa_idtipoformacion_foreign')
                   ->references('id')->on('tipoFormacion');
-                  
+
             $table->foreign('idEstadoPrograma', 'programa_idestadoprograma_foreign')
                   ->references('id')->on('estadoPrograma');
-            
-         
+
+
             // $table->foreign('idCompany', 'programa_idcompany_foreign')->references('id')->on('companies');
         });
     }
