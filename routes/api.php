@@ -1248,3 +1248,8 @@ Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destr
 //Route::group(['middleware' => 'auth:api'], function () {
     Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']);
 //});
+
+// PROGRAMAMATERIA
+//Route::group(['middleware' => 'auth:api'], function () {
+    Route::post('trimestres', [HorarioMateriaController::class, '']);
+//});
