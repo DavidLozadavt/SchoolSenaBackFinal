@@ -1231,6 +1231,7 @@ Route::get('sedes-institucionales/{id}', [SedeInstitucionalController::class, 's
 // Rutas de Infraestructura
 Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']); 
 Route::get('sedes/{idSede}/infraestructuras', [InfraestructuraController::class, 'index']);
+Route::get('regionalInfraestructuras/{idRegional}', [InfraestructuraController::class, 'infraestructurasPorRegional']);
 Route::post('infraestructuras', [InfraestructuraController::class, 'store']);
 Route::get('infraestructuras/{id}', [InfraestructuraController::class, 'show']);
 Route::put('infraestructuras/{id}', [InfraestructuraController::class, 'update']);
