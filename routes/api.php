@@ -122,6 +122,9 @@ use App\Http\Controllers\gestion_sede_institucional\SedeInstitucionalController;
 use App\Http\Controllers\InfraestructuraController;
 
 use App\Http\Controllers\TrabajadoresController;
+use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
+use App\Http\Controllers\GradoProgramaController;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -1134,6 +1137,7 @@ Route::get('get_all_categories', [CategoriasProController::class, 'getAllCategor
 Route::get('get_all_categories_company/{id}', [CategoriasProController::class, 'getAllCategoriesWebPage']);
 
 //ruta para traer asociados administradores activos
+Route::get('programasporRegional/{idRegional}', [PensumController::class, 'indexByRegional']);
 Route::get('get_asociados_admin', [PolizasController::class, 'getAsociadosAdmin']);
 Route::post('store_cuenta_cobrar_poliza', [PolizasController::class, 'storeCuentaCobrarPagoPoliza']);
 
@@ -1185,6 +1189,7 @@ Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show'])
 Route::patch('centrosFormacion/{id}', [CentrosFormacionController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Sedes:
+Route::delete('sedesSena/{id}', [ControllersSedeController::class, 'destroy']);
 Route::get('sedes/centro-formacion/{idCentroFormacion}', [ControllersSedeController::class, 'getSedesByCentroFormacion']);
 Route::get('sedesSena/users', [ControllersSedeController::class, 'getUsersSena']);
 Route::post('sedesSena', [ControllersSedeController::class, 'store']);
@@ -1201,6 +1206,9 @@ Route::get('aperturaPrograma/{id}',[AperturarProgramaController::class, 'show'])
 Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Fichas:
+Route::get('fichas/{id}', [FichaController::class, 'show']);
+Route::put('fichas/{id}', [FichaController::class, 'update']);
+Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
@@ -1236,3 +1244,8 @@ Route::post('infraestructuras', [InfraestructuraController::class, 'store']);
 Route::get('infraestructuras/{id}', [InfraestructuraController::class, 'show']);
 Route::put('infraestructuras/{id}', [InfraestructuraController::class, 'update']);
 Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destroy']);
+
+// MALLA CURRICULAR
+//Route::group(['middleware' => 'auth:api'], function () {
+    Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']);
+//});
