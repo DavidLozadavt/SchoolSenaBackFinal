@@ -14,30 +14,25 @@ return new class extends Migration
         if (!Schema::hasTable('otps')) {
             Schema::create('otps', function (Blueprint $table) {
                 $table->id();
-                $table->string('identifier'); // email
-                $table->string('token', 6); // código de 6 dígitos
-                $table->integer('validity')->default(10); // minutos de validez
+                $table->string('identifier');
+                $table->string('token', 6);
+                $table->integer('validity')->default(10); 
                 $table->boolean('valid')->default(true);
                 $table->timestamp('created_at')->useCurrent();
-                $table->timestamp('updated_at')->nullable(); // Agregado
-                
-                // Índices para mejorar rendimiento
+                $table->timestamp('updated_at')->nullable(); 
+             
                 $table->index(['identifier', 'valid']);
                 $table->index('created_at');
             });
         } else {
-            // Si la tabla ya existe, agregar columnas faltantes
-            
-            // 1. Agregar updated_at si no existe
+
             if (!Schema::hasColumn('otps', 'updated_at')) {
                 Schema::table('otps', function (Blueprint $table) {
                     $table->timestamp('updated_at')->nullable()->after('created_at');
                 });
             }
-            
-            // 2. Verificar que created_at tenga valor por defecto
+
             if (Schema::hasColumn('otps', 'created_at')) {
-                // No hacemos nada, solo asegurar que exista
             } else {
                 Schema::table('otps', function (Blueprint $table) {
                     $table->timestamp('created_at')->useCurrent();
