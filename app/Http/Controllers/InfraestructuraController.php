@@ -120,4 +120,15 @@ class InfraestructuraController extends Controller
             return response()->json(['error' => 'Error al obtener tipos de infraestructura'], 500);
         }
     }
+    public function infraestructurasPorRegional($idRegional)
+{
+    $infraestructuras = Infraestructura::with(['tipoInfraestructura', 'sede'])
+        ->whereHas('sede', function ($query) use ($idRegional) {
+            $query->where('idEmpresa', $idRegional);
+        })
+        ->get();
+
+    return response()->json(['data' => $infraestructuras]);
+}
+
 }
