@@ -3,18 +3,24 @@
 namespace App\Http\Controllers\auth;
 
 use App\Http\Controllers\Controller;
+use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
 use App\Models\User;
 use App\Util\KeyUtil;
 use App\Util\QueryUtil;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AuthController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('auth:api', ['except' => ['login']]);
+        $this->middleware('auth:api', ['except' => ['login', 'forgotPassword', 'resetPassword', 'validateResetToken']]);
     }
 
     public function login(Request $request)
