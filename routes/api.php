@@ -136,7 +136,6 @@ use App\Http\Controllers\TrabajadoresController;
 
 Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
-
 Route::group([
     'middleware' => 'api',
 ], function () {
@@ -150,6 +149,11 @@ Route::group([
     Route::get('user_mobile', [AuthController::class, 'getUserAppMobile']);
     Route::get('get_users_and_groups', [Gestion_usuarioUserController::class, 'getUsersAndGroups']);
 });
+
+//olvidaste contraseña
+Route::post('password/send-otp', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'sendOtp']);
+Route::post('password/verify-otp', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'verifyOtp']);
+Route::post('password/reset', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'resetPassword']);
 
 Route::resource('roles', RolController::class);
 
@@ -1137,7 +1141,6 @@ Route::post('store_cuenta_cobrar_poliza', [PolizasController::class, 'storeCuent
 Route::get('programas_recursos_crear', [PensumController::class, 'getMetadata']);
 Route::post('programas_guardar', [PensumController::class, 'store']);
 Route::get('programas', [PensumController::class, 'index']);
-Route::get('programasporRegional/{idRegional}', [PensumController::class, 'indexByRegional']);
 Route::put('programas_actualizar/{id}', [PensumController::class, 'update']);
 Route::delete('programas_eliminar/{id}', [PensumController::class, 'destroy']);
 Route::get('asignacion_detalle/{id}', [PensumController::class, 'getInformacionApertura']);
@@ -1188,9 +1191,7 @@ Route::post('sedesSena', [ControllersSedeController::class, 'store']);
 Route::get('sedesSena', [ControllersSedeController::class, 'index']);
 Route::get('sedesSena/{id}', [ControllersSedeController::class, 'show']);
 Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
-Route::delete('sedesSena/{id}', [ControllersSedeController::class, 'destroy']);
 Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'getSedesByRegional']); //Para filtrar las sedes por regional
-
 
 
 //rutas SHOOL SENA para gestión de aperturaPrograma:
@@ -1202,9 +1203,6 @@ Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'updat
 //rutas SHOOL SENA para gestión de Fichas:
 Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
-Route::get('fichas/{id}', [FichaController::class, 'show']);
-Route::put('fichas/{id}', [FichaController::class, 'update']);
-Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
