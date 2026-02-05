@@ -2,13 +2,12 @@
 
 namespace App\Models;
 
-use App\Traits\FilterCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class ContractType extends Model
 {
-    use HasFactory, FilterCompany;
+    use HasFactory;
 
     protected $table = "tipoContrato";
     public $timestamps = false;

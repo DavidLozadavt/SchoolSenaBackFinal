@@ -473,7 +473,6 @@ Route::group([
     Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
 
     Route::get('contrato-tipos-identificacion', [ContratacionController::class, 'tiposIdentificacion']);
-    Route::get('contrato-tipos-contrato', [ContratacionController::class, 'tipoContrato']);
     Route::get('contrato-persona/{identificacion}', [ContratacionController::class, 'getPersonaByIdentificacion']);
     Route::post('contrato-persona', [ContratacionController::class, 'storePersona']);
     Route::put('contrato-persona', [ContratacionController::class, 'storePersona']);
@@ -1181,6 +1180,7 @@ Route::get('regional/{id}', [RegionalController::class, 'show']);
 Route::patch('regional/{id}', [RegionalController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
+Route::get('centrosFormacion/regional-contratacion/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegionalForContratacion']);
 Route::get('centrosFormacion/regional/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegional']);
 Route::post('centrosFormacion/user/', [CentrosFormacionController::class, 'storeWithUser']);
 Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);

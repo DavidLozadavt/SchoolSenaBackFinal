@@ -218,4 +218,21 @@ class CentrosFormacionController extends Controller
             ], 500);
         }
     }
+
+    public function showCentrosByRegionalForContratacion($idRegional)
+    {
+        // Método específico para contratación: lista todos los centros sin filtrar por empresa
+        $centros = CentrosFormacion::with([
+            'ciudad:id,descripcion',
+            'empresa:id,razonSocial'
+        ])
+        ->orderBy('nombre', 'asc')
+        ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Centros de formación obtenidos correctamente',
+            'data' => $centros
+        ]);
+    }
 }
