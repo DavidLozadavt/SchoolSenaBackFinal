@@ -29,7 +29,17 @@ class RegionalController extends Controller
                     'between:1,9',
                 ],
                 'idCiudad' => 'nullable|exists:ciudad,id',
+                'rutaLogo' => 'nullable|file|mimes:png,jpg,jpeg'
             ]);
+
+            $rutaDocumento = null;
+
+            if ($request->hasFile('rutaLogo')) {
+                $rutaDocumento = '/storage/' . $request
+                    ->file('rutaLogo')
+                    ->store('company/imagen', 'public');
+            }
+
 
             $nuevaRegional = Company::create([
                 'razonSocial' => $request->razonSocial,
@@ -37,7 +47,7 @@ class RegionalController extends Controller
                 'representanteLegal' => $request->representanteLegal,
                 'direccion' => $request->direccion,
                 'email' => $request->email,
-                'rutaLogo' => Company::RUTA_LOGO_DEFAULT,
+                'rutaLogo' => $rutaDocumento ?? Company::RUTA_LOGO_DEFAULT,
                 'digitoVerificacion' => $request->digitoVerificacion,
                 'idCiudad' => $request->idCiudad,
             ]);
