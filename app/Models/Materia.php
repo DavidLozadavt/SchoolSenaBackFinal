@@ -65,4 +65,8 @@ public function asignacionMateriaProgramas()
     {
         return $this->hasMany(GradoMateria::class, 'idMateria');
     }
+    public function agregarMateriaPrograma()
+    {
+        return $this->hasMany(AgregarMateriaPrograma::class, 'idMateria');
+    }
 }
