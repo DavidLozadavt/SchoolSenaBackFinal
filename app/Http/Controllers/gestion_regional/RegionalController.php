@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Company;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Storage;
 
 class RegionalController extends Controller
 {
@@ -105,10 +106,28 @@ class RegionalController extends Controller
                     'between:1,9',
                 ],
                 'idCiudad' => 'nullable|exists:ciudad,id',
+                'rutaLogo' => 'nullable|file|mimes:png,jpg,jpeg' // Agregar validación
             ]);
 
             $regional = Company::findOrFail($id);
 
+            // Manejar la carga del logo
+            if ($request->hasFile('rutaLogo')) {
+                // Opcional: Eliminar el logo anterior si existe y no es el default
+                if ($regional->rutaLogo && $regional->rutaLogo !== Company::RUTA_LOGO_DEFAULT) {
+                    $rutaAnterior = str_replace('/storage/', '', $regional->rutaLogo);
+                    \Storage::disk('public')->delete($rutaAnterior);
+                }
+
+                // Guardar el nuevo logo
+                $rutaDocumento = '/storage/' . $request
+                    ->file('rutaLogo')
+                    ->store('company/imagen', 'public');
+
+                $regional->rutaLogo = $rutaDocumento;
+            }
+
+            // Actualizar los demás campos
             $regional->update($request->only([
                 'razonSocial',
                 'nit',
