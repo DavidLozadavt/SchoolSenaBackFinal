@@ -1178,6 +1178,7 @@ Route::post('regional', [RegionalController::class, 'store']);
 Route::get('regional', [RegionalController::class, 'index']);
 Route::get('regional/{id}', [RegionalController::class, 'show']);
 Route::patch('regional/{id}', [RegionalController::class, 'update']);
+Route::delete('regional/{id}', [RegionalController::class, 'destroy']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
 Route::get('centrosFormacion/regional-contratacion/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegionalForContratacion']);
