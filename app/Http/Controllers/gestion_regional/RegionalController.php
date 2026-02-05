@@ -20,7 +20,7 @@ class RegionalController extends Controller
                     'max:255',
                     Rule::unique('empresa', 'nit'),
                 ],
-                'representanteLegal' => 'required|string|max:20',
+                'representanteLegal' => 'required|string|max:255',
                 'direccion' => 'required|string|max:255',
                 'email' => 'required|string|max:255',
                 'digitoVerificacion' => [
