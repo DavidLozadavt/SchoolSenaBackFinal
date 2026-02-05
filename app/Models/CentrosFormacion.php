@@ -9,7 +9,7 @@ class CentrosFormacion extends Model
 {
     use HasFactory;
 
-    protected $table = 'centrosformacion';
+    protected $table = 'centroFormacion';
 
     protected $fillable = [
         'nombre',
@@ -17,9 +17,10 @@ class CentrosFormacion extends Model
         'telefono',
         'correo',
         'subdirector',
-        'correosubdirector',
+        'correoSubdirector',
         'idCiudad',
-        'idEmpresa'
+        'idEmpresa',
+        'foto'
     ];
 
     public function ciudad()
@@ -30,5 +31,13 @@ class CentrosFormacion extends Model
     public function empresa()
     {
         return $this->belongsTo(Company::class, 'idEmpresa');
+    }
+    public function sedes()
+    {
+        return $this->hasMany(Sede::class, 'idCentroFormacion');
+    }
+    public function usuario()
+    {
+        return $this->hasOne(User::class, 'idCentroFormacion');
     }
 }
