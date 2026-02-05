@@ -65,4 +65,9 @@ class Programa extends Model
     {
         return $this->hasMany(AperturarPrograma::class, 'idPrograma');
     }
+
+    public function agregarMateriaPrograma(): HasMany
+    {
+        return $this->hasMany(AgregarMateriaPrograma::class, 'idPrograma');
+    }
 }
