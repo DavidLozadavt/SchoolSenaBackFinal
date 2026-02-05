@@ -133,19 +133,13 @@ class CentrosFormacionController extends Controller
     }
     public function showCentrosByRegional($idRegional)
     {
-        // Validar que el idRegional coincida con la empresa del usuario autenticado
-        $companyId = KeyUtil::idCompany();
-
-        // Si el idRegional no coincide con la empresa del usuario, usar la empresa del usuario
-        $empresaId = ($idRegional == $companyId) ? $idRegional : $companyId;
-
         $centros = CentrosFormacion::select(
             'id',
             'nombre',
             'idEmpresa',
             'idCiudad'
         )
-            ->where('idEmpresa', $empresaId)
+            ->where('idEmpresa', $idRegional)
             ->with([
                 'ciudad:id,descripcion',
                 'empresa:id,razonSocial'
