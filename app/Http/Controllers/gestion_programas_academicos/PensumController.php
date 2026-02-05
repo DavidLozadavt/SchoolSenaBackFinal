@@ -34,6 +34,53 @@ class PensumController extends Controller
         ], 200);
     }
 
+    public function storeNivelEducativo(Request $request)
+    {
+        try {
+            $request->validate([
+                'nombreNivel' => 'required|string|max:100'
+            ]);
+
+            $nombreNivel = strtoupper(trim($request->nombreNivel));
+            
+            // Buscar si ya existe
+            $nivelExistente = NivelEducativo::where('nombreNivel', $nombreNivel)->first();
+            
+            if ($nivelExistente) {
+                // Si existe, retornar el existente
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Nivel educativo ya existe',
+                    'data' => [
+                        'id' => $nivelExistente->id,
+                        'nombre' => $nivelExistente->nombreNivel
+                    ]
+                ], 200);
+            }
+
+            // Si no existe, crear nuevo
+            $nivelEducativo = NivelEducativo::create([
+                'nombreNivel' => $nombreNivel,
+                'activo' => true
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Nivel educativo creado correctamente',
+                'data' => [
+                    'id' => $nivelEducativo->id,
+                    'nombre' => $nivelEducativo->nombreNivel
+                ]
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al crear nivel educativo',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function index()
 {
     try {

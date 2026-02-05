@@ -1142,6 +1142,7 @@ Route::post('store_cuenta_cobrar_poliza', [PolizasController::class, 'storeCuent
 
 //rutas SCHOOL para gestión de programas académicos
 Route::get('programas_recursos_crear', [PensumController::class, 'getMetadata']);
+Route::post('nivel_educativo', [PensumController::class, 'storeNivelEducativo']);
 Route::post('programas_guardar', [PensumController::class, 'store']);
 Route::get('programas', [PensumController::class, 'index']);
 Route::put('programas_actualizar/{id}', [PensumController::class, 'update']);
