@@ -39,6 +39,11 @@ class Ficha extends Model
         return $this->belongsTo(AperturarPrograma::class, 'idAsignacion');
     }
 
+    public function aperturarPrograma()
+    {
+        return $this->belongsTo(AperturarPrograma::class, 'idAsignacion');
+    }
+
     public function infraestructura()
     {
         return $this->belongsTo(Infraestructura::class, 'idInfraestructura');
