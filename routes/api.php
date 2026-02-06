@@ -125,7 +125,7 @@ use App\Http\Controllers\TrabajadoresController;
 use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
 use App\Http\Controllers\gestion_horarios\GradoProgramaController;
 use App\Http\Controllers\gestion_materias\MateriaController;
-
+use app\Http\Controllers\auth\ForgotPasswordController;
 
 /*
 |--------------------------------------------------------------------------
@@ -155,9 +155,9 @@ Route::group([
 });
 
 //olvidaste contraseña
-Route::post('password/send-otp', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'sendOtp']);
-Route::post('password/verify-otp', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'verifyOtp']);
-Route::post('password/reset', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'resetPassword']);
+Route::post('password/send-otp', [ForgotPasswordController::class, 'sendOtp']);
+Route::post('password/verify-otp', [ForgotPasswordController::class, 'verifyOtp']);
+Route::post('password/reset', [ForgotPasswordController::class, 'resetPassword']);
 
 Route::resource('roles', RolController::class);
 
