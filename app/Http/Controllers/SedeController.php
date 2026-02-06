@@ -3,11 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\CentrosFormacion;
+use App\Models\Company;
 use App\Models\Sede;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Storage;
 
 class SedeController extends Controller
 {
@@ -46,27 +47,25 @@ class SedeController extends Controller
             'telefono'      => 'nullable|string|max:100',
             'celular'       => 'nullable|string|max:100',
             'idResponsable' => 'nullable|exists:usuario,id',
-            'idCentroFormacion' => 'required|exists:centrosformacion,id',
-            'imagen'        => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+            'idCentroFormacion' => 'required|exists:centroFormacion,id',
+            'urlImagen'        => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
-        // 5️⃣ Usar el nombre limpio y bonito
+        $rutaDocumento = null;
+
+        if ($request->hasFile('urlImagen')) {
+            $rutaDocumento = '/storage/' . $request
+                ->file('urlImagen')
+                ->store('sede/imagen', 'public');
+        }
         $validated['nombre'] = $nombreOriginal;
 
-        // 6️⃣ Imagen
-        $urlImagen = Sede::RUTA_FOTO_DEFAULT;
-
-        if ($request->hasFile('imagen')) {
-            $urlImagen = $request->file('imagen')->store('sedes', 'public');
-        }
-
-        $validated['urlImagen'] = $urlImagen;
+        $validated['urlImagen'] = $rutaDocumento ?? Company::RUTA_LOGO_DEFAULT;
 
         $sede = Sede::create($validated);
 
         return response()->json($sede, 201);
     }
-
     public function index()
     {
         $sedes = Sede::select()->whereNotNull('idCiudad')->with([
@@ -82,7 +81,12 @@ class SedeController extends Controller
     }
     public function show($id)
     {
-        $sede = Sede::findOrFail($id);
+        $sede = Sede::with([
+            'ciudad:id,descripcion',
+            'empresa:id,razonSocial',
+            'centroFormacion:id,nombre',
+            'responsable.persona:id,nombre1,apellido1,identificacion'
+        ])->findOrFail($id);
 
         return response()->json([
             'status' => 'success',
@@ -92,15 +96,27 @@ class SedeController extends Controller
     public function update(Request $request, $id)
     {
         try {
+            $sede = Sede::findOrFail($id);
+
+            // Verificación case-insensitive
+            if ($request->has('nombre')) {
+                $nombreNormalizado = mb_strtolower(trim($request->nombre));
+
+                $existe = Sede::whereRaw('LOWER(nombre) = ?', [$nombreNormalizado])
+                    ->where('idCentroFormacion', $request->idCentroFormacion ?? $sede->idCentroFormacion)
+                    ->where('id', '!=', $id)
+                    ->exists();
+
+                if ($existe) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Ya existe una sede con ese nombre en este centro de formación.'
+                    ], 422);
+                }
+            }
+
             $request->validate([
-                'nombre'       => [
-                    'nullable',
-                    'string',
-                    'max:100',
-                    Rule::unique('sedes')->where(function ($query) use ($request) {
-                        return $query->where('idCentroFormacion', $request->idCentroFormacion);
-                    })
-                ],
+                'nombre'       => 'nullable|string|max:100',
                 'jefeInmediato'  => 'nullable|string|max:100',
                 'descripcion'   => 'nullable|string',
                 'idCiudad'      => 'nullable|exists:ciudad,id',
@@ -110,11 +126,26 @@ class SedeController extends Controller
                 'telefono'      => 'nullable|string|max:100',
                 'celular'       => 'nullable|string|max:100',
                 'idResponsable' => 'nullable|exists:usuario,id',
-                'imagen'        => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
+                'urlImagen'     => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
             ]);
 
-            $sede = Sede::findOrFail($id);
+            // Manejo de imagen
+            if ($request->hasFile('urlImagen')) {
+                // Eliminar imagen anterior si existe y no es la default
+                if ($sede->urlImagen && $sede->urlImagen !== Company::RUTA_LOGO_DEFAULT) {
+                    $rutaAnterior = str_replace('/storage/', '', $sede->urlImagen);
+                    Storage::disk('public')->delete($rutaAnterior);
+                }
 
+                // Guardar nueva imagen
+                $rutaDocumento = '/storage/' . $request
+                    ->file('urlImagen')
+                    ->store('sede/imagen', 'public');
+
+                $sede->urlImagen = $rutaDocumento;
+            }
+
+            // Actualizar los demás campos
             $sede->update($request->only([
                 'nombre',
                 'jefeInmediato',
@@ -127,6 +158,9 @@ class SedeController extends Controller
                 'idCiudad',
                 'idEmpresa'
             ]));
+
+            // Refrescar para obtener los datos más recientes
+            $sede->refresh();
 
             return response()->json([
                 'status' => 'success',
@@ -192,26 +226,63 @@ class SedeController extends Controller
         }
     }
     public function destroy($id): JsonResponse
-{
-    $sede = Sede::findOrFail($id);
+    {
+        try {
+            $sede = Sede::findOrFail($id);
 
-    // Verificar si la sede está en uso
-    if (
-        $sede->fichas()->exists() ||
-        $sede->ambientes()->exists()
-    ) {
-        return response()->json([
-            'status'  => 'error',
-            'message' => 'No se puede eliminar la sede porque tiene fichas o ambientes asociados.'
-        ], 409);
+            // Verificar relaciones
+            $tieneRelaciones = false;
+            $mensajeRelaciones = [];
+
+            if ($sede->fichas()->exists()) {
+                $tieneRelaciones = true;
+                $cantidadFichas = $sede->fichas()->count();
+                $mensajeRelaciones[] = "fichas ({$cantidadFichas})";
+            }
+
+            if ($sede->ambientes()->exists()) {
+                $tieneRelaciones = true;
+                $cantidadAmbientes = $sede->ambientes()->count();
+                $mensajeRelaciones[] = "ambientes ({$cantidadAmbientes})";
+            }
+
+            if ($tieneRelaciones) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'No se puede eliminar la sede porque tiene registros relacionados: ' .
+                        implode(', ', $mensajeRelaciones) . '. Debe eliminar primero estos registros.'
+                ], 400);
+            }
+
+            // Eliminar imagen si existe y no es la default
+            if ($sede->urlImagen && $sede->urlImagen !== Company::RUTA_LOGO_DEFAULT) {
+                $ruta = str_replace('/storage/', '', $sede->urlImagen);
+                Storage::disk('public')->delete($ruta);
+            }
+
+            $sede->delete();
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Sede eliminada correctamente.'
+            ], 200);
+        } catch (\Illuminate\Database\QueryException $e) {
+            if ($e->getCode() == '23000') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'No se puede eliminar la sede porque tiene registros relacionados'
+                ], 400);
+            }
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error de base de datos al eliminar la sede'
+            ], 500);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al eliminar la sede'
+            ], 500);
+        }
     }
-
-    $sede->delete();
-
-    return response()->json([
-        'status'  => 'success',
-        'message' => 'Sede eliminada correctamente.'
-    ], 200);
-}
-
 }

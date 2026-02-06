@@ -5,6 +5,7 @@ namespace App\Http\Controllers\gestion_centros_formacion;
 use App\Http\Controllers\Controller;
 use App\Models\ActivationCompanyUser;
 use App\Models\CentrosFormacion;
+use App\Models\Company;
 use App\Models\Rol;
 use App\Models\User;
 use App\Util\KeyUtil;
@@ -12,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 class CentrosFormacionController extends Controller
 {
@@ -24,10 +26,19 @@ class CentrosFormacionController extends Controller
                 'telefono' => 'required|string|max:20',
                 'correo' => 'required|string|max:255',
                 'subdirector' => 'required|string|max:255',
-                'correosubdirector' => 'required|string|max:255',
+                'correoSubdirector' => 'required|string|max:255',
                 'idCiudad' => 'required|exists:ciudad,id',
                 'idEmpresa' => 'required|exists:empresa,id',
+                'foto' => 'nullable|file|mimes:png,jpg,jpeg'
             ]);
+
+            $rutaDocumento = null;
+
+            if ($request->hasFile('foto')) {
+                $rutaDocumento = '/storage/' . $request
+                    ->file('foto')
+                    ->store('centrosFormacion/imagen', 'public');
+            }
 
             $nuevoCentro = CentrosFormacion::create([
                 'nombre' => $request->nombre,
@@ -35,9 +46,10 @@ class CentrosFormacionController extends Controller
                 'telefono' => $request->telefono,
                 'correo' => $request->correo,
                 'subdirector' => $request->subdirector,
-                'correosubdirector' => $request->correosubdirector,
+                'correoSubdirector' => $request->correoSubdirector,
                 'idCiudad' => $request->idCiudad,
                 'idEmpresa' => $request->idEmpresa,
+                'foto' => $rutaDocumento ?? Company::RUTA_LOGO_DEFAULT
             ]);
             return response()->json([
                 'status' => 'success',
@@ -60,7 +72,8 @@ class CentrosFormacionController extends Controller
             'telefono',
             'correo',
             'subdirector',
-            'correosubdirector',
+            'correoSubdirector',
+            'foto',
             'idCiudad',
             'idEmpresa'
         )
@@ -100,12 +113,29 @@ class CentrosFormacionController extends Controller
                 'telefono' => 'sometimes|string|max:20',
                 'correo' => 'sometimes|email|max:255',
                 'subdirector' => 'sometimes|string|max:255',
-                'correosubdirector' => 'sometimes|email|max:255',
+                'correoSubdirector' => 'sometimes|email|max:255',
                 'idCiudad' => 'sometimes|exists:ciudad,id',
                 'idEmpresa' => 'sometimes|exists:empresa,id',
+                'foto' => 'nullable|file|mimes:png,jpg,jpeg'
             ]);
 
             $centro = CentrosFormacion::findOrFail($id);
+
+            // Manejar la carga del logo
+            if ($request->hasFile('foto')) {
+                if ($centro->foto && $centro->foto !== Company::RUTA_LOGO_DEFAULT) {
+                    $rutaAnterior = str_replace('/storage/', '', $centro->foto);
+                    Storage::disk('public')->delete($rutaAnterior);
+                }
+
+                $rutaDocumento = '/storage/' . $request
+                    ->file('foto')
+                    ->store('centrosFormacion/imagen', 'public');
+
+                $centro->foto = $rutaDocumento;
+            }
+
+
 
             $centro->update($request->only([
                 'nombre',
@@ -113,10 +143,13 @@ class CentrosFormacionController extends Controller
                 'telefono',
                 'correo',
                 'subdirector',
-                'correosubdirector',
+                'correoSubdirector',
                 'idCiudad',
-                'idEmpresa'
+                'idEmpresa',
+
             ]));
+
+            $centro->save();
 
             return response()->json([
                 'status' => 'success',
@@ -161,10 +194,20 @@ class CentrosFormacionController extends Controller
                 'telefono' => 'required|string|max:20',
                 'correo' => 'required|string|max:255',
                 'subdirector' => 'required|string|max:255',
-                'correosubdirector' => 'required|string|max:255',
+                'correoSubdirector' => 'required|string|max:255',
                 'idCiudad' => 'required|exists:ciudad,id',
                 'idEmpresa' => 'required|exists:empresa,id',
+                'foto' => 'nullable|file|mimes:png,jpg,jpeg'
             ]);
+
+
+            $rutaDocumento = null;
+
+            if ($request->hasFile('foto')) {
+                $rutaDocumento = '/storage/' . $request
+                    ->file('foto')
+                    ->store('centrosFormacion/imagen', 'public');
+            }
 
             DB::beginTransaction();
 
@@ -174,9 +217,10 @@ class CentrosFormacionController extends Controller
             $nuevoCentro->telefono = $request->telefono;
             $nuevoCentro->correo = $request->correo;
             $nuevoCentro->subdirector = $request->subdirector;
-            $nuevoCentro->correosubdirector = $request->correosubdirector;
+            $nuevoCentro->correoSubdirector = $request->correoSubdirector;
             $nuevoCentro->idCiudad = $request->idCiudad;
             $nuevoCentro->idEmpresa = $request->idEmpresa;
+            $nuevoCentro->foto = $rutaDocumento ?? Company::RUTA_LOGO_DEFAULT;
             $nuevoCentro->save();
 
             $emailCentro = Str::of($nuevoCentro->nombre)
@@ -199,7 +243,8 @@ class CentrosFormacionController extends Controller
             $activeUser->fechaFin = '2040-01-15';
             $activeUser->save();
 
-            $rol = Rol::find(60);
+            $rol = Rol::where('name', 'ADMINISTRADOR SENA')->first();
+
             if ($rol) {
                 $activeUser->assignRole($rol);
             }
@@ -226,13 +271,65 @@ class CentrosFormacionController extends Controller
             'ciudad:id,descripcion',
             'empresa:id,razonSocial'
         ])
-        ->orderBy('nombre', 'asc')
-        ->get();
+            ->orderBy('nombre', 'asc')
+            ->get();
 
         return response()->json([
             'status' => 'success',
             'message' => 'Centros de formación obtenidos correctamente',
             'data' => $centros
         ]);
+    }
+    public function destroy($id)
+    {
+        DB::beginTransaction();
+
+        try {
+            $centro = CentrosFormacion::with(['usuario'])
+                ->findOrFail($id);
+
+            // ✅ Verificación con el nombre correcto de la columna
+            $sedesCount = DB::table('sedes')
+                ->where('idCentroFormacion', $centro->id)
+                ->count();
+
+            if ($sedesCount > 0) {
+                DB::rollBack();
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'No se puede eliminar el centro de formación porque tiene ' . $sedesCount . ' sede(s) asociada(s)'
+                ], 409);
+            }
+
+            // Usuario asociado
+            if ($centro->usuario) {
+                ActivationCompanyUser::where('user_id', $centro->usuario->id)->delete();
+                $centro->usuario->delete();
+            }
+
+            // Imagen
+            if ($centro->foto && $centro->foto !== Company::RUTA_LOGO_DEFAULT) {
+                $ruta = str_replace('/storage/', '', $centro->foto);
+                Storage::disk('public')->delete($ruta);
+            }
+
+            // Centro
+            $centro->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Centro de formación eliminado correctamente'
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al eliminar el centro de formación',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }
