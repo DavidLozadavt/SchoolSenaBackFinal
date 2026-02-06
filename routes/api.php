@@ -124,6 +124,7 @@ use App\Http\Controllers\InfraestructuraController;
 use App\Http\Controllers\TrabajadoresController;
 use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
 use App\Http\Controllers\GradoProgramaController;
+use App\Http\Controllers\auth\ForgotPasswordController;
 
 
 /*
