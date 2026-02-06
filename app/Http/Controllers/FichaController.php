@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Ficha;
 use App\Models\AperturarPrograma;
+use App\Models\Company;
 use App\Models\Contract;
 use App\Models\Programa;
+use App\Models\Sede;
 use App\Models\Status;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
@@ -68,13 +70,36 @@ class FichaController extends Controller
                 'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
             ]);
 
+            // Crear la carpeta para la ficha usando el código
+            $sanitize = function ($string) {
+                $string = trim($string); // quita espacios al inicio y fin
+                $string = preg_replace('/\s+/', '_', $string); // espacios → _
+                return preg_replace(
+                    '/[^a-zA-Z0-9áéíóúÁÉÍÓÚüÜñÑ\-_]/u',
+                    '',
+                    $string
+                );
+            };
+
+            $sede = Sede::findOrFail($validated['idSede']);
+            $programa = Programa::findOrFail($validated['idPrograma']);
+            $codigoFicha = $validated['codigo'];
+            //Limpiar los nombres:
+            $sedeName = $sanitize($sede->nombre);
+            $programaName = $sanitize($programa->nombrePrograma);
+
+            $carpetaFicha = "documentos/programas/{$programaName}/fichas/{$sedeName}/{$codigoFicha}/evidenciasFicha";
+
+            // Crear la carpeta en el disco public si no existe:
+
+            Storage::disk('public')->makeDirectory($carpetaFicha);
+
             $rutaDocumento = null;
 
             if ($request->hasFile('documento')) {
                 $rutaDocumento = '/storage/' . $request->file('documento')
-                    ->store('fichas/documentos', 'public');
+                    ->store("documentos/programas/{$programaName}/fichas/{$sedeName}/{$codigoFicha}/documento", 'public');
             }
-
 
             $ficha = Ficha::create([
                 'idJornada' => $validated['idJornada'],
@@ -544,6 +569,12 @@ class FichaController extends Controller
             // Buscar la apertura relacionada
             $apertura = AperturarPrograma::findOrFail($ficha->idAsignacion);
 
+
+            // Guardar valores antiguos (ANTES de actualizar)
+            $oldCodigo   = $ficha->codigo;
+            $oldSede     = $ficha->idSede;
+            $oldPrograma = $apertura->idPrograma;
+
             // Actualizar la apertura
             $apertura->update([
                 'observacion' => $validated['observacion'] ?? null,
@@ -563,19 +594,102 @@ class FichaController extends Controller
                 'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
             ]);
 
-            $rutaDocumento = $ficha->documento; // conservar el actual
+            $rutaDocumento = $ficha->documento;
 
             if ($request->hasFile('documento')) {
-                // 🗑️ eliminar el anterior si existe
+
+                // eliminar el anterior
                 if ($ficha->documento) {
                     $rutaAnterior = str_replace('/storage/', '', $ficha->documento);
                     Storage::disk('public')->delete($rutaAnterior);
                 }
 
-                // 📄 guardar el nuevo
-                $rutaDocumento = '/storage/' . $request->file('documento')
-                    ->store('fichas/documentos', 'public');
+                // volver a construir la ruta como en el store
+                $sanitize = function ($string) {
+                    $string = trim($string);
+                    $string = preg_replace('/\s+/', '_', $string);
+                    return preg_replace(
+                        '/[^a-zA-Z0-9áéíóúÁÉÍÓÚüÜñÑ\-_]/u',
+                        '',
+                        $string
+                    );
+                };
+
+                $sede = Sede::findOrFail($validated['idSede']);
+                $programa = Programa::findOrFail($validated['idPrograma']);
+
+                $sedeName = $sanitize($sede->nombre);
+                $programaName = $sanitize($programa->nombrePrograma);
+                $codigoFicha = $validated['codigo'];
+
+                $ruta = "documentos/programas/{$programaName}/fichas/{$sedeName}/{$codigoFicha}/documento";
+
+                $nombreArchivo = "ficha_{$codigoFicha}.pdf";
+
+                $request->file('documento')->storeAs(
+                    $ruta,
+                    $nombreArchivo,
+                    'public'
+                );
+
+                $rutaDocumento = "/storage/{$ruta}/{$nombreArchivo}";
             }
+
+
+            // 🔁 MOVER DOCUMENTO SI CAMBIA PROGRAMA / SEDE / CÓDIGO
+            // (solo si NO suben un nuevo PDF)
+            if (
+                !$request->hasFile('documento') &&
+                $ficha->documento &&
+                (
+                    $validated['codigo'] !== $oldCodigo ||
+                    $validated['idSede'] !== $oldSede ||
+                    $validated['idPrograma'] !== $oldPrograma
+                )
+            ) {
+                // función sanitize
+                $sanitize = function ($string) {
+                    $string = trim($string);
+                    $string = preg_replace('/\s+/', '_', $string);
+                    return preg_replace(
+                        '/[^a-zA-Z0-9áéíóúÁÉÍÓÚüÜñÑ\-_]/u',
+                        '',
+                        $string
+                    );
+                };
+
+                // 🔹 RUTA VIEJA
+                $rutaVieja = str_replace('/storage/', '', $ficha->documento);
+
+                // 🔹 NUEVA RUTA
+                $sedeNueva     = Sede::findOrFail($validated['idSede']);
+                $programaNuevo = Programa::findOrFail($validated['idPrograma']);
+
+                $sedeName     = $sanitize($sedeNueva->nombre);
+                $programaName = $sanitize($programaNuevo->nombrePrograma);
+                $codigoFicha  = $validated['codigo'];
+
+                $nuevaCarpeta = "documentos/programas/{$programaName}/fichas/{$sedeName}/{$codigoFicha}/documento";
+
+                // crear carpeta si no existe
+                Storage::disk('public')->makeDirectory($nuevaCarpeta);
+
+                // ⚠️ conservar nombre original del archivo
+                $nombreArchivo = basename($rutaVieja);
+
+                $rutaNueva = "{$nuevaCarpeta}/{$nombreArchivo}";
+
+                // 🚚 mover archivo
+                if (Storage::disk('public')->exists($rutaVieja)) {
+                    Storage::disk('public')->move($rutaVieja, $rutaNueva);
+
+                    // actualizar ruta final
+                    $rutaDocumento = "/storage/{$rutaNueva}";
+                }
+            }
+
+
+
 
 
             // Actualizar la ficha
@@ -624,110 +738,110 @@ class FichaController extends Controller
         }
     }
     /**
- * Elimina una ficha solo si no está siendo utilizada en otras partes
- */
-public function destroy($id): JsonResponse
-{
-    DB::beginTransaction();
-    
-    try {
-        // Buscar la ficha
-        $ficha = Ficha::findOrFail($id);
+     * Elimina una ficha solo si no está siendo utilizada en otras partes
+     */
+    public function destroy($id): JsonResponse
+    {
+        DB::beginTransaction();
 
-        // Array para almacenar las relaciones que impiden eliminar
-        $relacionesActivas = [];
+        try {
+            // Buscar la ficha
+            $ficha = Ficha::findOrFail($id);
 
-        // 1. Verificar si tiene instructor líder asignado
-        if ($ficha->idInstructorLider) {
-            $relacionesActivas[] = 'instructor líder asignado';
-        }
+            // Array para almacenar las relaciones que impiden eliminar
+            $relacionesActivas = [];
 
-        // 2. Verificar si tiene aprendices voceros o suplentes
-        if ($ficha->idAprendizVocero) {
-            $relacionesActivas[] = 'aprendiz vocero asignado';
-        }
-
-        if ($ficha->idAprendizSuplente) {
-            $relacionesActivas[] = 'aprendiz suplente asignado';
-        }
-
-        // 3. Verificar si tiene horarios de materias asignados
-        $cantidadHorarios = DB::table('horarioMateria')
-            ->where('idFicha', $id)
-            ->count();
-        
-        if ($cantidadHorarios > 0) {
-            $relacionesActivas[] = "{$cantidadHorarios} horario(s) de materia(s)";
-        }
-
-        // Si hay relaciones activas, no permitir eliminar
-        if (!empty($relacionesActivas)) {
-            DB::rollBack();
-            
-            $mensaje = 'No se puede eliminar la ficha porque tiene las siguientes relaciones activas: ' 
-                     . implode(', ', $relacionesActivas);
-            
-            return response()->json([
-                'message' => $mensaje,
-                'relaciones' => $relacionesActivas
-            ], 422);
-        }
-
-        // Si llegamos aquí, no hay relaciones que impidan la eliminación
-        // Guardar el ID de la apertura antes de eliminar la ficha
-        $idApertura = $ficha->idAsignacion;
-
-        // Eliminar documento físico si existe
-        if ($ficha->documento) {
-            $rutaDocumento = str_replace('/storage/', '', $ficha->documento);
-            if (Storage::disk('public')->exists($rutaDocumento)) {
-                Storage::disk('public')->delete($rutaDocumento);
+            // 1. Verificar si tiene instructor líder asignado
+            if ($ficha->idInstructorLider) {
+                $relacionesActivas[] = 'instructor líder asignado';
             }
-        }
 
-        // Eliminar la ficha (que tiene FK hacia apertura)
-        $ficha->delete();
+            // 2. Verificar si tiene aprendices voceros o suplentes
+            if ($ficha->idAprendizVocero) {
+                $relacionesActivas[] = 'aprendiz vocero asignado';
+            }
 
-        // Eliminar la apertura asociada
-        if ($idApertura) {
-            AperturarPrograma::where('id', $idApertura)->delete();
-        }
+            if ($ficha->idAprendizSuplente) {
+                $relacionesActivas[] = 'aprendiz suplente asignado';
+            }
 
-        DB::commit();
+            // 3. Verificar si tiene horarios de materias asignados
+            $cantidadHorarios = DB::table('horarioMateria')
+                ->where('idFicha', $id)
+                ->count();
 
-        return response()->json([
-            'message' => 'Ficha eliminada correctamente'
-        ], 200);
+            if ($cantidadHorarios > 0) {
+                $relacionesActivas[] = "{$cantidadHorarios} horario(s) de materia(s)";
+            }
 
-    } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-        DB::rollBack();
-        return response()->json([
-            'message' => 'Ficha no encontrada'
-        ], 404);
+            // Si hay relaciones activas, no permitir eliminar
+            if (!empty($relacionesActivas)) {
+                DB::rollBack();
 
-    } catch (\Throwable $e) {
-        DB::rollBack();
-        
-        // Log del error para debugging
-        Log::error('Error al eliminar ficha', [
-            'id' => $id,
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString()
-        ]);
+                $mensaje = 'No se puede eliminar la ficha porque tiene las siguientes relaciones activas: '
+                    . implode(', ', $relacionesActivas);
 
-        // Verificar si es error de foreign key constraint
-        if (str_contains($e->getMessage(), 'foreign key constraint') || 
-            str_contains($e->getMessage(), 'Cannot delete or update a parent row')) {
+                return response()->json([
+                    'message' => $mensaje,
+                    'relaciones' => $relacionesActivas
+                ], 422);
+            }
+
+            // Si llegamos aquí, no hay relaciones que impidan la eliminación
+            // Guardar el ID de la apertura antes de eliminar la ficha
+            $idApertura = $ficha->idAsignacion;
+
+            // Eliminar documento físico si existe
+            if ($ficha->documento) {
+                $rutaDocumento = str_replace('/storage/', '', $ficha->documento);
+                if (Storage::disk('public')->exists($rutaDocumento)) {
+                    Storage::disk('public')->delete($rutaDocumento);
+                }
+            }
+
+            // Eliminar la ficha (que tiene FK hacia apertura)
+            $ficha->delete();
+
+            // Eliminar la apertura asociada
+            if ($idApertura) {
+                AperturarPrograma::where('id', $idApertura)->delete();
+            }
+
+            DB::commit();
+
             return response()->json([
-                'message' => 'No se puede eliminar la ficha porque está siendo utilizada en otros registros del sistema',
-                'error' => 'Violación de restricción de integridad referencial'
-            ], 422);
-        }
+                'message' => 'Ficha eliminada correctamente'
+            ], 200);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Ficha no encontrada'
+            ], 404);
+        } catch (\Throwable $e) {
+            DB::rollBack();
 
-        return response()->json([
-            'message' => 'Error al eliminar la ficha',
-            'error' => $e->getMessage()
-        ], 500);
+            // Log del error para debugging
+            Log::error('Error al eliminar ficha', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            // Verificar si es error de foreign key constraint
+            if (
+                str_contains($e->getMessage(), 'foreign key constraint') ||
+                str_contains($e->getMessage(), 'Cannot delete or update a parent row')
+            ) {
+                return response()->json([
+                    'message' => 'No se puede eliminar la ficha porque está siendo utilizada en otros registros del sistema',
+                    'error' => 'Violación de restricción de integridad referencial'
+                ], 422);
+            }
+
+            return response()->json([
+                'message' => 'Error al eliminar la ficha',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
-}
 }
