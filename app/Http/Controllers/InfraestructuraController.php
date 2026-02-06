@@ -23,7 +23,7 @@ class InfraestructuraController extends Controller
     // Mostrar una infraestructura específica
     public function show($id)
     {
-        $infraestructura = Infraestructura::with('tipoInfraestructura')->find($id);
+        $infraestructura = Infraestructura::with('tipoInfraestructura', 'sede')->find($id);
 
         if (!$infraestructura) {
             return response()->json(['message' => 'No encontrada'], 404);
@@ -67,12 +67,14 @@ class InfraestructuraController extends Controller
         $request->validate([
             'nombreInfraestructura' => 'required|string|max:255',
             'capacidad' => 'required|integer|min:1',
+            'idSede' => 'required|exists:sedes,id',
             'idTipoInfraestructura' => 'required|exists:tiposinfraestructura,id',
         ]);
 
         $infraestructura->update([
             'nombreInfraestructura' => $request->nombreInfraestructura,
             'capacidad' => $request->capacidad,
+            'idSede' => $request->idSede,
             'idTipoInfraestructura' => $request->idTipoInfraestructura,
         ]);
 
@@ -103,7 +105,7 @@ class InfraestructuraController extends Controller
             // Verificar que el modelo use la tabla correcta
             $model = new TipoInfraestructura();
             $tableName = $model->getTable();
-            
+
             // Si por alguna razón no está usando la tabla correcta, forzar
             if ($tableName !== 'tiposinfraestructura') {
                 Log::warning("TipoInfraestructura está usando tabla incorrecta: {$tableName}, forzando 'tiposinfraestructura'");
@@ -121,14 +123,13 @@ class InfraestructuraController extends Controller
         }
     }
     public function infraestructurasPorRegional($idRegional)
-{
-    $infraestructuras = Infraestructura::with(['tipoInfraestructura', 'sede'])
-        ->whereHas('sede', function ($query) use ($idRegional) {
-            $query->where('idEmpresa', $idRegional);
-        })
-        ->get();
+    {
+        $infraestructuras = Infraestructura::with(['tipoInfraestructura', 'sede'])
+            ->whereHas('sede', function ($query) use ($idRegional) {
+                $query->where('idEmpresa', $idRegional);
+            })
+            ->get();
 
-    return response()->json(['data' => $infraestructuras]);
-}
-
+        return response()->json(['data' => $infraestructuras]);
+    }
 }
