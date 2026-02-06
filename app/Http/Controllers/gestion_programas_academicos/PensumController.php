@@ -51,7 +51,6 @@ public function indexByRegional(int $idRegional)
 {
     try {
         $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])
-            ->where('idCompany', $idRegional)
             ->get();
 
         return response()->json([
