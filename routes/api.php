@@ -123,7 +123,8 @@ use App\Http\Controllers\InfraestructuraController;
 
 use App\Http\Controllers\TrabajadoresController;
 use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
-use App\Http\Controllers\GradoProgramaController;
+use App\Http\Controllers\gestion_horarios\GradoProgramaController;
+use App\Http\Controllers\gestion_materias\MateriaController;
 
 
 /*
@@ -1250,4 +1251,10 @@ Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destr
 // MALLA CURRICULAR
 //Route::group(['middleware' => 'auth:api'], function () {
     Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']);
+    Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']);
+//});
+
+// MATERIAS
+//Route::group(['middleware' => 'auth:api'], function () {
+    Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']);
 //});
