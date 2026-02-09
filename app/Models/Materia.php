@@ -69,4 +69,8 @@ public function asignacionMateriaProgramas()
     {
         return $this->hasMany(AgregarMateriaPrograma::class, 'idMateria');
     }
+
+    public function areaConocimiento () {
+        return $this->belongsTo(AreaConocimiento::class, 'idAreaConocimiento');
+    }
 }
