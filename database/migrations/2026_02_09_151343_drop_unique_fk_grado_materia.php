@@ -21,14 +21,14 @@ return new class extends Migration
 
         });
 
-        Schema::tbale('gradoMateria', function (Blueprint $table)
+        Schema::table('gradoMateria', function (Blueprint $table)
         {
             // eliminar unique
             $table->dropUnique('gradomateria_idmateria_idgradoprograma_unique');
 
         });
 
-        Schema::tbale('gradoMateria', function (Blueprint $table)
+        Schema::table('gradoMateria', function (Blueprint $table)
         {
             // Volver a crear foreign keys
             $table->foreign('idGradoPrograma')->references('id')->on('gradoPrograma');
