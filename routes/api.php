@@ -1215,7 +1215,7 @@ Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
-Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
