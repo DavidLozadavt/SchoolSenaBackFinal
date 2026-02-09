@@ -106,7 +106,6 @@ class PensumController extends Controller
 
             // Crear estructura de carpetas para el programa
             $carpetasPrograma = [
-                "documentos/programas/{$programaName}/documentosGenerales/documentos",
                 "documentos/programas/{$programaName}/documentosGenerales/actividades",
                 "documentos/programas/{$programaName}/fichas",
             ];
@@ -120,12 +119,13 @@ class PensumController extends Controller
 
             if ($request->hasFile('documento')) {
 
-                $ruta = "documentos/programas/{$programaName}/documentosGenerales/documentos";
+                $ruta = "programas/documentos";
 
-                $nombreArchivo =
-                    Str::limit(Str::slug($sanitize('nombrePrograma')), 80)
-                    . '_' . $nuevoPrograma->id
-                    . '.pdf';
+                if (!Storage::disk('public')->exists($ruta)) {
+                    Storage::disk('public')->makeDirectory($ruta);
+                }
+
+                $nombreArchivo = Str::limit($programaName, 80) . '_' . $nuevoPrograma->id . '.pdf';
 
                 $request->file('documento')->storeAs(
                     $ruta,
@@ -134,7 +134,7 @@ class PensumController extends Controller
                 );
 
                 $nuevoPrograma->update([
-                    'documento' => "storage/{$ruta}/{$nombreArchivo}"
+                    'documento' => '/storage/' . $ruta . '/' . $nombreArchivo
                 ]);
             }
 
@@ -194,20 +194,17 @@ class PensumController extends Controller
 
                 // Eliminar documento anterior si existe
                 if ($programa->documento) {
-                    $rutaVieja = str_replace('storage/', '', $programa->documento);
+                    $rutaVieja = preg_replace('#^/?(storage/)?#', '', $programa->documento);
                     Storage::disk('public')->delete($rutaVieja);
                 }
 
-                $ruta = "documentos/programas/{$programaName}/documentosGenerales/documentos";
+                $ruta = "programas/documentos";
 
                 if (!Storage::disk('public')->exists($ruta)) {
                     Storage::disk('public')->makeDirectory($ruta);
                 }
 
-                $nombreArchivo =
-                    Str::limit(Str::slug($request->nombrePrograma), 80)
-                    . '_' . $programa->id
-                    . '.pdf';
+                $nombreArchivo = Str::limit($programaName, 80) . '_' . $programa->id . '.pdf';
 
                 $request->file('documento')->storeAs(
                     $ruta,
@@ -215,7 +212,7 @@ class PensumController extends Controller
                     'public'
                 );
 
-                $data['documento'] = "storage/{$ruta}/{$nombreArchivo}";
+                $data['documento'] = '/storage/' . $ruta . '/' . $nombreArchivo;
             }
 
             $programa->update($data);
