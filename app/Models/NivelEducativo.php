@@ -10,4 +10,9 @@ class NivelEducativo extends Model
     protected $table = 'nivelEducativo';
     
     protected $hidden = ['created_at', 'updated_at', 'activo']; 
+
+    public function areas()
+    {
+        return $this->hasMany(AreaConocimiento::class, 'idNivelEducativo');
+    }
 }

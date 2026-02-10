@@ -203,11 +203,14 @@ class FichaController extends Controller
             'data' => $fichas
         ]);
     }
-    public function fichasPorPrograma(int $idPrograma): JsonResponse
+    public function fichasPorPrograma(int $idPrograma, int $idCentro): JsonResponse
     {
         $fichas = Ficha::query()
             ->whereHas('asignacion', function ($query) use ($idPrograma) {
                 $query->where('idPrograma', $idPrograma);
+            })
+            ->whereHas('sede', function ($sede) use ($idCentro) {
+                $sede->where('idCentroFormacion', $idCentro);
             })
             ->with([
                 'jornada:id,nombreJornada',
