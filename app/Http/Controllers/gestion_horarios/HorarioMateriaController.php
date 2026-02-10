@@ -25,14 +25,9 @@ use App\Mail\EmailDocenteHorarioMateria;
 use App\Models\AsignacionPeriodoPrograma;
 use App\Http\Controllers\MateriaController;
 use App\Models\Ficha;
-use App\Models\GradoPrograma;
-use Illuminate\Contracts\Database\Eloquent\Builder;
-use PhpParser\Node\Stmt\TryCatch;
 
 class HorarioMateriaController extends Controller
 {
-
-    use CalculateEndDate;
 
     private array $relations;
     private array $columns;
@@ -761,49 +756,6 @@ class HorarioMateriaController extends Controller
     }
 
     /**
-     * Update infrastructure to horario materia
-     *
-     * @param Request $request
-     * @param string $id
-     * @return JsonResponse
-     */
-    public function updateInfraestructuraHorarioMateria(Request $request, string $id): JsonResponse
-    {
-        $data = $request->all();
-        $horarioMateria = HorarioMateria::findOrFail($id);
-
-        if ($this->getDataHorarioMaterias($data)->isEmpty()) {
-            return response()->json([
-                'message' => 'No hay horarios de materias para asignar la infraestructura',
-            ], 422);
-        }
-
-        $horarioMateriaExistInfraestructura = $this->validateInfraestructuraHorarioMateria($horarioMateria, $data['idInfraestructura'], $data['idGradoPrograma']);
-        $horarioMateriaExist = $horarioMateriaExistInfraestructura->getData();
-        if ($horarioMateriaExist->isExist) {
-            return response()->json([
-                'message'        => 'Ya hay una infraestructura asignada a este horario',
-                'horarioMateria' => $horarioMateriaExist->horarioMateria,
-            ], 422);
-        }
-
-        $horarioMateria->update([
-            'idInfraestructura' => $data['idInfraestructura'],
-        ]);
-
-        $horarioMateria->load(
-            'infraestructura.sede.ciudad',
-            'dia',
-            'materia.grado',
-            'materia.materia',
-            'asignacionPeriodoProgramaJornada.jornada',
-            'contrato.persona'
-        );
-
-        return response()->json($horarioMateria, 200);
-    }
-
-    /**
      * Validate time of horarioMateria
      *
      * @param mixed $horariosMateria
@@ -967,49 +919,6 @@ class HorarioMateriaController extends Controller
         ]);
     }
 
-    /**
-     * Validate infrastructure to assign horarioMateria
-     *
-     * @param HorarioMateria $horarioMateria
-     * @param mixed $idInfraestructura
-     * @return JsonResponse
-     */
-    public function validateInfraestructuraHorarioMateria(HorarioMateria $horarioMateria, mixed $idInfraestructura, mixed $idGradoPrograma): JsonResponse
-    {
-
-        $conflictingHorario = HorarioMateria::with(
-            'infraestructura.sede.ciudad',
-            'dia',
-            'materia.grado',
-            'materia.materia',
-            'asignacionPeriodoProgramaJornada.jornada',
-            'contrato.persona'
-        )
-            ->where('id', '<>', $horarioMateria->id)
-            ->where('idInfraestructura', '<>', $idInfraestructura)
-            ->where('idDia', $horarioMateria->idDia)
-            ->whereHas('materia.grado', function ($query) use ($idGradoPrograma) {
-                $query->where('idGradoPrograma', $idGradoPrograma);
-            })
-            ->where(function ($query) use ($horarioMateria) {
-                $query->where(function ($query) use ($horarioMateria) {
-                    $query->whereTime('horaInicial', '>=', $horarioMateria->horaInicial)
-                        ->whereTime('horaInicial', '<', $horarioMateria->horaFinal);
-                })->orWhere(function ($query) use ($horarioMateria) {
-                    $query->whereTime('horaFinal', '>', $horarioMateria->horaInicial)
-                        ->whereTime('horaFinal', '<=', $horarioMateria->horaFinal);
-                })->orWhere(function ($query) use ($horarioMateria) {
-                    $query->whereTime('horaInicial', '<', $horarioMateria->horaInicial)
-                        ->whereTime('horaFinal', '>', $horarioMateria->horaFinal);
-                });
-            })
-            ->first();
-
-        return response()->json([
-            'isExist' => !is_null($conflictingHorario),
-            'horarioMateria' => $conflictingHorario
-        ]);
-    }
 
     /**
      * Send email with data horarioMateria
@@ -1163,9 +1072,24 @@ class HorarioMateriaController extends Controller
             return response()->json(['message' => 'No se proporcionó ninguna ficha'], 400);
         }
 
+        $fichaPrograma = Ficha::where('id', $idFicha)
+            ->with('aperturarPrograma')
+            ->firstOrFail();
+
+        $idPrograma = $fichaPrograma->aperturarPrograma->idPrograma;
+        
+        if (!$idPrograma) {
+            return response()->json([
+                'message' => 'La ficha no tiene un programa asociado',
+                'id' => $idPrograma
+            ], 200);
+        }
+
         // Traemos los horarios con sus relaciones
         $horarios = HorarioMateria::where('idFicha', $idFicha)
-            ->where('estado', EstadoHorarioMateria::ASIGNADO)
+            ->whereHas('gradoMateria.gradoPrograma', function ($q) use ($idPrograma) {
+                $q->where('idPrograma', $idPrograma);
+            })
             ->with([
                 'gradoMateria.materia',
                 'gradoMateria.gradoPrograma.grado',
@@ -1176,7 +1100,7 @@ class HorarioMateriaController extends Controller
             ->get();
 
         if ($horarios->isEmpty()) {
-            return response()->json(['message' => 'No se encontraron trimestres', 'data' => [] ], 200);
+            return response()->json(['message' => 'No se encontraron materias asignadas', 'data' => [] ], 200);
         }
 
         // Reorganizamos la data
@@ -1195,7 +1119,13 @@ class HorarioMateriaController extends Controller
                 $gradoPrograma = $horariosPorGrado->first()
                     ->gradoMateria
                     ->gradoPrograma;
-                 
+
+                if (!$gradoPrograma) {
+                    return [
+                        'grado' => null,
+                        'materias' => []
+                    ];
+                }
 
                 return [
                     'grado' => [

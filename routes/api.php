@@ -123,8 +123,9 @@ use App\Http\Controllers\InfraestructuraController;
 
 use App\Http\Controllers\TrabajadoresController;
 use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
-use App\Http\Controllers\GradoProgramaController;
-
+use App\Http\Controllers\gestion_horarios\GradoProgramaController;
+use App\Http\Controllers\gestion_materias\MateriaController;
+use app\Http\Controllers\auth\ForgotPasswordController;
 
 /*
 |--------------------------------------------------------------------------
@@ -154,9 +155,9 @@ Route::group([
 });
 
 //olvidaste contraseña
-Route::post('password/send-otp', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'sendOtp']);
-Route::post('password/verify-otp', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'verifyOtp']);
-Route::post('password/reset', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'resetPassword']);
+Route::post('password/send-otp', [ForgotPasswordController::class, 'sendOtp']);
+Route::post('password/verify-otp', [ForgotPasswordController::class, 'verifyOtp']);
+Route::post('password/reset', [ForgotPasswordController::class, 'resetPassword']);
 
 Route::resource('roles', RolController::class);
 
@@ -1212,7 +1213,7 @@ Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
-Route::get('fichas/programa/{idPrograma}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
@@ -1248,4 +1249,10 @@ Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destr
 // MALLA CURRICULAR
 //Route::group(['middleware' => 'auth:api'], function () {
     Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']);
+    Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']);
+//});
+
+// MATERIAS
+//Route::group(['middleware' => 'auth:api'], function () {
+    Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']);
 //});

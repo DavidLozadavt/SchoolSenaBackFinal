@@ -23,7 +23,7 @@ class CentrosFormacionController extends Controller
             $request->validate([
                 'nombre' => 'required|string|max:255',
                 'direccion' => 'required|string|max:255',
-                'telefono' => 'required|string|max:20',
+                'telefono' => 'required|string|max:255',
                 'correo' => 'required|string|max:255',
                 'subdirector' => 'required|string|max:255',
                 'correoSubdirector' => 'required|string|max:255',
@@ -110,7 +110,7 @@ class CentrosFormacionController extends Controller
             $request->validate([
                 'nombre' => 'sometimes|string|max:255',
                 'direccion' => 'sometimes|string|max:255',
-                'telefono' => 'sometimes|string|max:20',
+                'telefono' => 'sometimes|string|max:255',
                 'correo' => 'sometimes|email|max:255',
                 'subdirector' => 'sometimes|string|max:255',
                 'correoSubdirector' => 'sometimes|email|max:255',
@@ -191,7 +191,7 @@ class CentrosFormacionController extends Controller
             $request->validate([
                 'nombre' => 'required|string|max:255',
                 'direccion' => 'required|string|max:255',
-                'telefono' => 'required|string|max:20',
+                'telefono' => 'required|string|max:255',
                 'correo' => 'required|string|max:255',
                 'subdirector' => 'required|string|max:255',
                 'correoSubdirector' => 'required|string|max:255',

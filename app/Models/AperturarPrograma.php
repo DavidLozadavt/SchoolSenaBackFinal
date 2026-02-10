@@ -72,9 +72,9 @@ class AperturarPrograma extends Model
     {
         return $this->belongsTo(Sede::class, 'idSede');
     }
-
+    
     public function fichas()
     {
-        return $this->hasMany(Ficha::class, 'idAsignacion');
+        return $this->hasMany(Ficha::class, 'idAsignacion', 'id');
     }
 }
