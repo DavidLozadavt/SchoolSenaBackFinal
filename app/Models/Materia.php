@@ -26,7 +26,8 @@ class Materia extends Model
         'idMateriaPadre', 
         'codigo', 
         'creditos', 
-        'horas'
+        'horas',
+        'idCompany'
     ];
 
     protected $hidden = [
@@ -60,5 +61,17 @@ public function asignacionMateriaProgramas()
     public function padre()
     {
         return $this->belongsTo(Materia::class, 'idMateriaPadre');
+    }
+    public function gradoMateria()
+    {
+        return $this->hasMany(GradoMateria::class, 'idMateria');
+    }
+    public function agregarMateriaPrograma()
+    {
+        return $this->hasMany(AgregarMateriaPrograma::class, 'idMateria');
+    }
+
+    public function areaConocimiento () {
+        return $this->belongsTo(AreaConocimiento::class, 'idAreaConocimiento');
     }
 }

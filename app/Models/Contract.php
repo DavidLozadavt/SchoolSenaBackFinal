@@ -12,6 +12,7 @@ use App\Models\Nomina\Vacacion;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Contract extends Model
@@ -164,5 +165,25 @@ class Contract extends Model
     public function novedades()
     {
         return $this->hasMany(Novedad::class, 'idContrato', 'id');
+    }
+
+    public function nivelEducativo()
+    {
+        return $this->belongsTo(NivelEducativo::class, 'idNivelEducativo');
+    }
+
+    public function areasConocimiento(): BelongsToMany
+    {
+        return $this->belongsToMany(AreaConocimiento::class, 'asignacion_contrato_area_conocimiento', 'idContrato', 'idAreaConocimiento');
+    }
+
+    public function programas(): BelongsToMany
+    {
+        return $this->belongsToMany(Programa::class, 'asignacion_contrato_programa', 'idContrato', 'idPrograma');
+    }
+
+    public function horarioMateria()
+    {
+        return $this->hasMany(HorarioMateria::class, 'idContrato', 'id');
     }
 }

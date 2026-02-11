@@ -7,6 +7,7 @@ use App\Models\Nomina\HistorialConfiguracionNomina;
 use App\Models\Nomina\Sede;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -15,6 +16,18 @@ class Company extends Model
     use HasFactory;
 
     protected $table = "empresa";
+
+    protected $fillable = [
+        'razonSocial',
+        'nit',
+        'representanteLegal',
+        'direccion',
+        'email',
+        'rutaLogo',
+        'digitoVerificacion',
+        'idCiudad',
+    ];
+
 
     const RUTA_LOGO_DEFAULT = "/default/logoweb.png";
     const RUTA_LOGO = "company";
@@ -51,5 +64,13 @@ class Company extends Model
     public function historialConfiguracionesNomina(): HasMany
     {
         return $this->hasMany(HistorialConfiguracionNomina::class, 'idEmpresa');
+    }
+    public function ciudad()
+    {
+        return $this->belongsTo(City::class, 'idCiudad');
+    }
+    public function fichas(): HasMany
+    {
+        return $this->hasMany(Ficha::class, 'idRegional');
     }
 }

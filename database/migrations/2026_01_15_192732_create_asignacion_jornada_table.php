@@ -10,14 +10,12 @@ return new class extends Migration
     {
         Schema::create('asignacionJornada', function (Blueprint $table) {
             $table->id();
-            
+
             $table->foreignId('idAsignacion')
-                  ->constrained('asignacionPeriodoPrograma') 
-                  ->onDelete('cascade');
+                  ->constrained('aperturarprograma');
 
             $table->foreignId('idJornada')
-                  ->constrained('jornadas')
-                  ->onDelete('cascade');
+                  ->constrained('jornadas');
 
             $table->timestamps();
         });

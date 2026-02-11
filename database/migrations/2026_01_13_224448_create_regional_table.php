@@ -20,7 +20,7 @@ return new class extends Migration
             $table->string('direccion');
 
             //Foreingkey de departamentos:
-            $table->unsignedInteger('idDepartamento');
+            $table->unsignedInteger('idDepartamento')->unique();
             //Definición de la llave foranea:
             $table->foreign('idDepartamento', 'regional_iddepartamento_foreign')
                   ->references('id')->on('departamento');

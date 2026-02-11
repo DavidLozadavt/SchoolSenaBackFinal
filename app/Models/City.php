@@ -16,5 +16,9 @@ class City extends Model
         return $this->belongsTo(Country::class, 'iddepartamento', 'id');
     } 
    
+    public function empresas()
+{
+    return $this->hasMany(Company::class, 'idCiudad');
+}
 
 }

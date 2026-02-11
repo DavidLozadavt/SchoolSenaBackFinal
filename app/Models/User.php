@@ -9,6 +9,7 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 use Tymon\JWTAuth\Contracts\JWTSubject;
+use App\Models\CentrosFormacion;
 
 class User extends Authenticatable  implements JWTSubject
 {
@@ -25,6 +26,7 @@ class User extends Authenticatable  implements JWTSubject
         'name',
         'email',
         'password',
+        'idCentroFormacion'
     ];
 
     /**
@@ -63,6 +65,11 @@ class User extends Authenticatable  implements JWTSubject
     {
         return $this->hasMany(ActivationCompanyUser::class, 'user_id');
     }
+
+    public function centroFormacion()
+    {
+        return $this->belongsTo(CentrosFormacion::class, 'idCentroFormacion');
+    }
     
 
     public function cards()
@@ -95,4 +102,10 @@ class User extends Authenticatable  implements JWTSubject
     {
         return [];
     }
+
+    public function usuario()
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
 }
