@@ -149,6 +149,45 @@ class GradoProgramaController extends Controller
         }
     }
 
+    public function addCompetenciasTrimestre(Request $request)
+    {
+        DB::beginTransaction();
+        try{
+            $datos = $request->validate([
+                'idGradoPrograma' => 'required|integer',
+                'materias' => 'required|array',
+            ]);
+
+            // en el array de materias solo contiene los ids
+                foreach ($datos['materias'] as $nueva) {
+                    $newGradoMateria = GradoMateria::create([
+                        'idGradoPrograma' => $datos['idGradoPrograma'],
+                        'idMateria' => $nueva['id'],
+                        'estado' => 'PENDIENTE'
+                    ]);
+
+                    // crear el horarioMateria vacio con el id de la ficha
+                    HorarioMateria::create([
+                        'estado' => 'PENDIENTE',
+                        'idFicha' => $datos['idFicha'],
+                        'idGradoMateria' => $newGradoMateria->id
+                    ]);
+                }
+
+            DB::commit();
+            return response()->json([
+                'message' => 'Competencias agregadas exitosamente'
+            ], 201);
+
+        }catch(\Throwable $e){
+            DB::rollBack();
+            return response()->json([
+                'message' => 'No se pudo agregar las competencias',
+                'error' => $e->getMessage()
+            ],400);
+        }
+    }
+
     /**
      * Store a newly created resource in storage.
      *
