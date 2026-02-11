@@ -125,7 +125,7 @@ use App\Http\Controllers\TrabajadoresController;
 use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
 use App\Http\Controllers\gestion_horarios\GradoProgramaController;
 use App\Http\Controllers\gestion_materias\MateriaController;
-use app\Http\Controllers\auth\ForgotPasswordController;
+use App\Http\Controllers\auth\ForgotPasswordController;
 
 /*
 |--------------------------------------------------------------------------
@@ -159,8 +159,10 @@ Route::post('password/send-otp', [ForgotPasswordController::class, 'sendOtp']);
 Route::post('password/verify-otp', [ForgotPasswordController::class, 'verifyOtp']);
 Route::post('password/reset', [ForgotPasswordController::class, 'resetPassword']);
 
+Route::get('profile/access-check', [Gestion_usuarioUserController::class, 'checkProfileAccess'])->middleware('auth:api');
 Route::resource('roles', RolController::class);
 
+Route::put('update_active_user/{id}', [UserController::class, 'updateActivationCompanyUser']);
 
 Route::get('list_companies', [CompanyController::class, 'index']);
 Route::post('company_update', [CompanyController::class, 'update']);
@@ -462,17 +464,14 @@ Route::post('store_mencion_comment_reponse', [BoardTaskController::class, 'sendE
 Route::apiResource('tipo_contrato', TipoContratoController::class);
 Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
 //rutas para cargar los trabajadores y  ejecutar su procedimiento almacenado
-Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
-// Route::post('ejecutarProcedimiento', [TrabajadoresController::class, 'ejecutarProcedimiento']);
 
-
+Route::post('cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV'])->middleware('auth:api');
+Route::post('ejecutar_procedimiento_trabajadores', [TrabajadoresController::class, 'ejecutarProcedimiento'])->middleware('auth:api');
 
 // Gestion Contratación
 Route::group([
     'middleware' => 'auth:api'
 ], function () {
-
-    Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
 
     Route::get('contrato-tipos-identificacion', [ContratacionController::class, 'tiposIdentificacion']);
     Route::get('contrato-persona/{identificacion}', [ContratacionController::class, 'getPersonaByIdentificacion']);
@@ -502,9 +501,6 @@ Route::group([
 //GestionTipoContrato
 Route::apiResource('tipo_contrato', TipoContratoController::class);
 Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
-//rutas para cargar los trabajadores y  ejecutar su procedimiento almacenado
-Route::post('cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV'])->middleware('auth:api');
-Route::post('ejecutar_procedimiento_trabajadores', [TrabajadoresController::class, 'ejecutarProcedimiento'])->middleware('auth:api');
 
 //rutas para cargar los estudiantes y ejecutar su procedimiento almacenado
 Route::post('/cargar-estudiantes', [EstudianteController::class, 'cargarEstudiantesDesdeExcel'])->middleware('auth:api');

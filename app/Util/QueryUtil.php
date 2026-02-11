@@ -37,11 +37,12 @@ class QueryUtil
         $now = Carbon::now();
         return $query
             ->where(function ($query) use ($now) {
-                $query->where('state_id', Status::ID_ACTIVE)
+                   $query->whereIn('state_id', [1,18])
+
                     ->whereDate('fechaInicio', '<=', $now)
                     ->whereDate('fechaFin', '>=', $now);
-            })
-            ->orWhere('state_id', Status::ID_PENDIENTE);
+            });
+
     }
 
     public static function createWithCompany(array $request): array
