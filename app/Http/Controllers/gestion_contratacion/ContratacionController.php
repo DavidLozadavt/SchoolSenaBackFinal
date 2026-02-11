@@ -2184,6 +2184,34 @@ class ContratacionController extends Controller
     }
 
     /**
+     * Obtiene las áreas de conocimiento para asinar a una nueva competencia
+     * teniendo en cuenta el programa y nivel educativo.
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAreasConocimientoPrograma(int $idPrograma)
+    {
+        $programa = Programa::find($idPrograma);
+
+        if (!$programa) {
+            return response()->json([
+                'message' => 'No se encontró el programa',
+                'data' => []
+            ], 404);
+        }
+
+        $areas = AreaConocimiento::where(
+            'idNivelEducativo',
+            $programa->idNivelEducativo
+        )->get();
+
+        return response()->json([
+            'message' => 'Áreas obtenidas correctamente',
+            'data' => $areas
+        ], 200);
+    }
+
+    /**
      * Crea una nueva área de conocimiento.
      *
      * @param Request $request

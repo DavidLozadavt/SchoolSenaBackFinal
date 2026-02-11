@@ -242,6 +242,7 @@ Route::get('actividades_riesgo_profesional', [ContratacionController::class, 'ge
 Route::post('store_actividades_riesgo_profesional', [ContratacionController::class, 'storeActividadeRiesgoProfesional']);
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
 Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
+Route::get('areas-conocimiento/programa/{idPrograma}', [ContratacionController::class, 'getAreasConocimientoPrograma']);
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
 Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
@@ -1250,11 +1251,16 @@ Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destr
 
 // MALLA CURRICULAR
 //Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']);
-    Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']);
+    Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']); // trae todos los trimestres con las competencias de la ficha
+    Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']); // crear nuevo trimestre con minimo una competencia asignada
+    Route::post('trimestres-ficha/competencias', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // asignar nuevas competencias a un trimestre
 //});
 
 // MATERIAS
 //Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']);
+    Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
+    Route::get('materias-hijas/{idMateriaPadre}', [MateriaController::class, 'getCompeteciasHijas']); // materias hijas (raps-resultados)
+    Route::post('materias', [MateriaController::class, 'crearCompetencia']);
+    Route::put('materias/{id}', [MateriaController::class, 'update']);
+    Route::get('materias/{id}', [MateriaController::class, 'getById']);
 //});
