@@ -36,15 +36,14 @@ class MateriaController extends Controller
     public function getAllCompetencesByProgram($idPrograma): JsonResponse
     {
         try{
-/*             if(isEmpty($idPrograma)){
-                return response()->json([
-                'message' => 'No se pudieron cargar las competencias',
-                'error' => 'Programa no proporcionado'
-            ]);
-            } */
         $materias = AgregarMateriaPrograma::where('idPrograma', $idPrograma)
-            ->with('materia')
-            ->get();
+            ->with('materia', function ($query) 
+                {
+                    $query->whereNull('idMateriaPadre');
+                })
+            ->get()
+            ->pluck('materia')
+            ->values();
         return response()->json($materias);
         }catch(\Throwable $error){
             return response()->json([
@@ -208,20 +207,32 @@ class MateriaController extends Controller
      */
     public function update(Request $request, int $id)
     {
-        $data = $request->all();
         try {
+            DB::beginTransaction();
+
+            $datos = $request->all();
+
             $materia = Materia::findOrFail($id);
-            if (KeyUtil::idCompany() != $materia->idCompany) {
-                throw new Exception("Materia no encontrada", 404);
-            }
-            $materiaData = QueryUtil::createWithCompany($data['materia']);
-            $materia->update($materiaData);
-            $materia->load($data['relations'] ?? $this->relations);
-            return response()->json($materia);
-        } catch (QueryException $th) {
-            QueryUtil::handleQueryException($th);
-        } catch (Exception $th) {
-            QueryUtil::showExceptions($th);
+
+            $materia->update([
+                'nombreMateria' => $datos['nombreMateria'],
+                'descripcion' => $datos['descripcion'],
+                'idAreaConocimiento' => $datos['idAreaConocimiento']
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Competencia actualizada correctamente'
+            ], 200);
+
+        } catch (\Throwable $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'No se pudo actualizar la competencia',
+                'error' => $e->getMessage()
+            ], 400);
         }
     }
 
@@ -243,4 +254,71 @@ class MateriaController extends Controller
         }
     }
 
+    public function getCompeteciasHijas(int $idMateriaPadre)
+    {
+        if(!$idMateriaPadre){
+            return response()->json([
+                    'message' => 'Materias hijas obtenidas correctamente'
+                ], 400);
+        }
+
+        $materias = Materia::where('idMateriaPadre', $idMateriaPadre)->get();
+
+        return response()->json([
+            'message' => 'Materias hijas obtenidas correctamente',
+            'data' => $materias
+        ], 200);
+    }
+
+    public function crearCompetencia(Request $request) 
+    {
+        try{
+            $datos = $request->all();
+            DB::beginTransaction();
+                $compe = Materia::create([
+                    'nombreMateria' => $datos['nombreMateria'],
+                    'descripcion' => $datos['descripcion'],
+                    'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                    'idCompany' => $datos['idCompany'],
+                    'idEmpresa' => $datos['idCompany']
+                ]);
+
+                AgregarMateriaPrograma::create([
+                    'idMateria' => $compe->id,
+                    'idPrograma' => $datos['idPrograma']
+                ]);
+            DB::commit();
+            return response()->json([
+                'message' => 'Competencia creada correctamente'
+            ],201);
+        }catch(\Throwable $e){
+            DB::rollBack();
+            return response()->json([
+                'message' => 'No se pudo crear la competencia',
+                'error' => $e->getMessage()
+            ],400);
+        }
+    }
+
+    public function getById(int $id){
+
+        $materia = Materia::select(
+            'id',
+            'nombreMateria',
+            'descripcion',
+            'idAreaConocimiento'
+        )->find($id);
+
+        if(!$materia){
+            return response()->json([
+                'message' => 'NO se encontro la competencia',
+                'data' => null
+            ],404);
+        }
+
+        return response()->json([
+            'message' => 'Competencia encontrada correctamente',
+            'data' => $materia
+        ],200);
+    }
 }

@@ -26,7 +26,8 @@ class Materia extends Model
         'idMateriaPadre', 
         'codigo', 
         'creditos', 
-        'horas'
+        'horas',
+        'idCompany'
     ];
 
     protected $hidden = [

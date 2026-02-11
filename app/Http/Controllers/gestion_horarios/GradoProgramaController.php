@@ -123,7 +123,7 @@ class GradoProgramaController extends Controller
                 foreach ($datos['materias'] as $nueva) {
                     $newGradoMateria = GradoMateria::create([
                         'idGradoPrograma' => $gradoPrograma->id,
-                        'idMateria' => $nueva,
+                        'idMateria' => $nueva['id'],
                         'estado' => 'PENDIENTE'
                     ]);
 

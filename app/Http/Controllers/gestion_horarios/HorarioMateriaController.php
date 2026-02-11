@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\gestion_horarios;
 
+use App\Enums\EstadoGradoPrograma;
 use DateTime;
 use Exception;
 use Carbon\Carbon;
@@ -1123,8 +1124,35 @@ class HorarioMateriaController extends Controller
                 if (!$gradoPrograma) {
                     return [
                         'grado' => null,
-                        'materias' => []
+                        'materias' => [],
+                        'idGradoPrograma' => null
                     ];
+                }
+
+                $hoy = Carbon::today();
+
+                $estadoActual = $gradoPrograma->estado;
+
+                if (!in_array($estadoActual, [
+                    EstadoGradoPrograma::FINALIZADO, 
+                    EstadoGradoPrograma::CANCELADO, 
+                    EstadoGradoPrograma::INTERRUMPIDO
+                ])) {
+
+                    if ($hoy->lt(Carbon::parse($gradoPrograma->fechaInicio))) {
+                        $gradoPrograma->estado = EstadoGradoPrograma::PENDIENTE;
+                    }
+                    elseif ($hoy->between(
+                        Carbon::parse($gradoPrograma->fechaInicio),
+                        Carbon::parse($gradoPrograma->fechaFin)
+                    )) {
+                        $gradoPrograma->estado = EstadoGradoPrograma::EN_CURSO;
+                    }
+                    else {
+                        $gradoPrograma->estado = EstadoGradoPrograma::FINALIZADO;
+                    }
+
+                    $gradoPrograma->save();
                 }
 
                 return [
@@ -1135,6 +1163,7 @@ class HorarioMateriaController extends Controller
                         'fechaInicio' => $gradoPrograma->fechaInicio,
                         'fechaFin' => $gradoPrograma->fechaFin,
                         'estado' => $gradoPrograma->estado,
+                        'idGradoPrograma' => $gradoPrograma->id
                     ],
                     // Agrupamos ahora por materia
                     'materias' => $horariosPorGrado
@@ -1304,5 +1333,46 @@ class HorarioMateriaController extends Controller
 
         return $contador;
     }
+
+    /*
+        asigna nuevas competencias al trimestre
+    */
+        public function addCompetenciasTrimestre(Request $request)
+        {
+            try{
+                $datos = $request->all();
+
+                if(!$datos['idTrimestre']){
+                    return response()->json([
+                    'message' => 'No se ha proporcionado el trimestre'
+                ], 400);
+                }
+
+            DB::beginTransaction();
+                foreach($datos['competencia'] as $competencia){
+                    $newGradoMateria = GradoMateria::create([
+                        'idGradoPrograma' => $datos['idTrimestre'],
+                        'idMateria' => $competencia->id,
+                        'estado' => 'PENDIENTE'
+                    ]);
+
+                    HorarioMateria::create([
+                        'estado' => 'PENDIENTE',
+                        'idGradoMateria' => $newGradoMateria->id,
+                        'idFicha' => $datos['idFicha']
+                    ]);
+                }
+            DB::commit();
+                return response()->json([
+                    'message' => 'Competencias asignadas correctamente'
+                ], 201);
+            }catch(\Throwable $e){
+            DB::rollBack();
+                return response()->json([
+                    'message' => 'Ha ocurrido un error al asignar las competencias',
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
 
 }
