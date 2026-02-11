@@ -1240,6 +1240,7 @@ Route::delete('sedes-institucionales/{id}', [SedeInstitucionalController::class,
 Route::get('sedes-institucionales/{id}', [SedeInstitucionalController::class, 'show']);
 
 // Rutas de Infraestructura
+Route::post('tiposInfraestructuras', [InfraestructuraController::class, 'storeTiposInfraestructura']); // Tipo de infraestructura
 Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']); 
 Route::get('sedes/{idSede}/infraestructuras', [InfraestructuraController::class, 'index']);
 Route::get('regionalInfraestructuras/{idRegional}', [InfraestructuraController::class, 'infraestructurasPorRegional']);
