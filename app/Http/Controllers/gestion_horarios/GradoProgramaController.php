@@ -155,6 +155,7 @@ class GradoProgramaController extends Controller
         try{
             $datos = $request->validate([
                 'idGradoPrograma' => 'required|integer',
+                'idFicha' => 'required|integer',
                 'materias' => 'required|array',
             ]);
 
