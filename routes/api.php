@@ -126,6 +126,7 @@ use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
 use App\Http\Controllers\gestion_horarios\GradoProgramaController;
 use App\Http\Controllers\gestion_materias\MateriaController;
 use App\Http\Controllers\auth\ForgotPasswordController;
+use App\Http\Controllers\TmpRapController;
 
 /*
 |--------------------------------------------------------------------------
@@ -1220,7 +1221,8 @@ Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCo
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 
-
+//Juicios evaluativos:
+Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
