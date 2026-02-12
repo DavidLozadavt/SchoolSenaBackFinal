@@ -23,6 +23,21 @@ class Ficha extends Model
         'porcentajeEjecucion',
     ];
 
+
+    const RUTA_DOCUMENTO = "documento";
+
+    protected $appends = ['rutaDocumentoUrl'];
+
+    public function getRutaDocumentoUrlAttribute()
+    {
+        if (
+            isset($this->attributes['documento']) &&
+            isset($this->attributes['documento'][0])
+        ) {
+            return url($this->attributes['documento']);
+        }
+        return null;
+    }
     /*
     |--------------------------------------------------------------------------
     | Relaciones
