@@ -475,6 +475,7 @@ Route::group([
 ], function () {
 
     Route::get('contrato-tipos-identificacion', [ContratacionController::class, 'tiposIdentificacion']);
+    Route::get('contrato-tipos-contrato', [ContratacionController::class, 'tiposContrato']);
     Route::get('contrato-persona/{identificacion}', [ContratacionController::class, 'getPersonaByIdentificacion']);
     Route::post('contrato-persona', [ContratacionController::class, 'storePersona']);
     Route::put('contrato-persona', [ContratacionController::class, 'storePersona']);
@@ -1177,17 +1178,14 @@ Route::post('regional', [RegionalController::class, 'store']);
 Route::get('regional', [RegionalController::class, 'index']);
 Route::get('regional/{id}', [RegionalController::class, 'show']);
 Route::patch('regional/{id}', [RegionalController::class, 'update']);
-Route::delete('regional/{id}', [RegionalController::class, 'destroy']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
-Route::get('centrosFormacion/regional-contratacion/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegionalForContratacion']);
 Route::get('centrosFormacion/regional/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegional']);
 Route::post('centrosFormacion/user/', [CentrosFormacionController::class, 'storeWithUser']);
 Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);
 Route::get('centrosFormacion', [CentrosFormacionController::class, 'index']);
 Route::get('centrosFormacion/{id}', [CentrosFormacionController::class, 'show']);
 Route::patch('centrosFormacion/{id}', [CentrosFormacionController::class, 'update']);
-Route::delete('centrosFormacion/{id}', [CentrosFormacionController::class, 'destroy']);
 
 //rutas SHOOL SENA para gestión de Sedes:
 Route::delete('sedesSena/{id}', [ControllersSedeController::class, 'destroy']);
