@@ -1180,6 +1180,7 @@ Route::delete('regional/{id}', [RegionalController::class, 'destroy']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
 Route::get('centrosFormacion/regional-contratacion/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegionalForContratacion']);
+Route::get('contratos/flujo-vt', [ContratacionController::class, 'getContratosFlujoVT']);
 Route::get('centrosFormacion/regional/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegional']);
 Route::post('centrosFormacion/user/', [CentrosFormacionController::class, 'storeWithUser']);
 Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);

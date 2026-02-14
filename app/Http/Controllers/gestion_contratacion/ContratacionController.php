@@ -42,6 +42,8 @@ use App\Models\TipoTerminacionContrato;
 use App\Models\AreaConocimiento;
 use App\Models\Programa;
 use App\Models\NivelEducativo;
+use App\Models\Company;
+use App\Models\CentrosFormacion;
 
 class ContratacionController extends Controller
 {
@@ -860,23 +862,304 @@ class ContratacionController extends Controller
      *
      * @return \Illuminate\Http\JsonResponse
      */
-    public function getAllContratos()
-    {
-        $companyId = KeyUtil::idCompany();
+public function getAllContratos(Request $request)
+{
+    try {
+        $user = auth()->user();
         
-        $contratos = Contract::with('persona', 'salario.rol', 'transacciones.pago', 'estado', 'area')
-            ->where('idempresa', $companyId)
-            ->where('idEstado', '!=', 14)
-            ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
-            ->orderBy('fechaContratacion')
-            ->get();
-
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+        
+        // Obtener los roles del usuario
+        $userRoles = [];
+        $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
+        
+        if ($activationUser) {
+            $userRoles = $activationUser->roles->pluck('name')->toArray();
+        }
+        
+        Log::info('=== getAllContratos - INICIO ===');
+        Log::info('Usuario ID: ' . $user->id);
+        Log::info('Roles del usuario: ' . json_encode($userRoles));
+        Log::info('Parámetros recibidos: ' . json_encode($request->all()));
+        
+        // Iniciar la consulta base
+        $query = Contract::with(
+            'persona',
+            'salario.rol',
+            'transacciones.pago',
+            'estado',
+            'area'
+        )
+        ->where('idEstado', '!=', 14)
+        ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
+        ->orderBy('fechaContratacion');
+ 
+        // Verificar consulta base
+        Log::info('Consulta base creada');
+ 
+        //Validar roles específicos o dar contratos por centro
+        if (in_array('ADMINISTRADOR VT', $userRoles)) {
+            Log::info('Es ADMINISTRADOR VT');
+            
+            // ADMINISTRADOR VT: puede filtrar por empresa y centro
+            if ($request->has('idCompany') && $request->input('idCompany')) {
+                $idCompany = $request->input('idCompany');
+                
+                // Filtrar por AMBOS campos de empresa para compatibilidad
+                $query->where(function($q) use ($idCompany) {
+                    $q->where('idCompany', $idCompany)
+                      ->orWhere('idempresa', $idCompany);
+                });
+                
+                Log::info('Aplicando filtro por empresa (idCompany o idempresa): ' . $idCompany);
+            } else {
+                Log::info('No se recibió idCompany o está vacío');
+            }
+            
+            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                $idCentroFormacion = $request->input('idCentroFormacion');
+                $query->where('idCentroFormacion', $idCentroFormacion);
+                Log::info('Aplicando filtro idCentroFormacion: ' . $idCentroFormacion);
+            } else {
+                Log::info('No se recibió idCentroFormacion o está vacío - mostrar todos los de la empresa');
+            }
+        }
+        elseif (in_array('ADMINISTRADOR REGIONAL', $userRoles)) {
+            Log::info('Es ADMINISTRADOR REGIONAL');
+            
+            // ADMINISTRADOR REGIONAL: puede filtrar por centro
+            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                $idCentroFormacion = $request->input('idCentroFormacion');
+                $query->where('idCentroFormacion', $idCentroFormacion);
+                Log::info('Aplicando filtro idCentroFormacion: ' . $idCentroFormacion);
+            } else {
+                Log::info('No se recibió idCentroFormacion - mostrar todos los centros');
+            }
+        }
+        else {
+            //PARA TODOS LOS DEMÁS: Solo dar contratos por idCentroFormacion
+            Log::info('Usuario sin rol administrativo específico - filtrando por centro asignado');
+            
+            if ($user->idCentroFormacion) {
+                $query->where('idCentroFormacion', $user->idCentroFormacion);
+                Log::info('Aplicando filtro por centro asignado: ' . $user->idCentroFormacion);
+            } else {
+                Log::info('Usuario no tiene centro asignado - sin contratos');
+                return response()->json(['error' => 'No tienes centro asignado'], 403);
+            }
+        }
+ 
+        // LOGGING: Obtener SQL y resultados
+        $sql = $query->toSql();
+        Log::info('SQL generado: ' . $sql);
+        Log::info('Bindings: ' . json_encode($query->getBindings()));
+        
+        $contratos = $query->get();
+        Log::info('Contratos encontrados: ' . $contratos->count());
+        
+        // LOGGING: Mostrar detalles de los contratos
+        if ($contratos->count() > 0) {
+            Log::info('Primer contrato encontrado:');
+            $primerContrato = $contratos->first();
+            Log::info('ID: ' . $primerContrato->id);
+            Log::info('idCompany: ' . ($primerContrato->idCompany ?? 'NULL'));
+            Log::info('idempresa: ' . ($primerContrato->idempresa ?? 'NULL'));
+            Log::info('idCentroFormacion: ' . ($primerContrato->idCentroFormacion ?? 'NULL'));
+            Log::info('idEstado: ' . ($primerContrato->idEstado ?? 'NULL'));
+            
+            // Mostrar todos los contratos con sus filtros
+            Log::info('Todos los contratos encontrados:');
+            foreach ($contratos as $index => $contrato) {
+                Log::info("Contrato " . ($index + 1) . ": ID={$contrato->id}, idCompany={$contrato->idCompany}, idempresa={$contrato->idempresa}, idCentroFormacion={$contrato->idCentroFormacion}");
+            }
+        } else {
+            Log::info('No se encontraron contratos con los filtros aplicados');
+            
+            // DEBUG: Mostrar contratos sin filtros para comparar
+            Log::info('DEBUG: Verificando contratos sin filtros...');
+            $contratosSinFiltros = Contract::with('persona', 'salario.rol', 'estado', 'area')
+                ->where('idEstado', '!=', 14)
+                ->limit(5)
+                ->get();
+            
+            Log::info('Contratos sin filtros (primeros 5): ' . $contratosSinFiltros->count());
+            foreach ($contratosSinFiltros as $contrato) {
+                Log::info("DEBUG - Contrato: ID={$contrato->id}, idCompany={$contrato->idCompany}, idempresa={$contrato->idempresa}, idCentroFormacion={$contrato->idCentroFormacion}");
+            }
+        }
+ 
+        Log::info('=== getAllContratos - FIN ===');
+        
         return response()->json($contratos);
+        
+    } catch (\Exception $e) {
+        Log::error('Error en getAllContratos: ' . $e->getMessage());
+        Log::error('Stack trace: ' . $e->getTraceAsString());
+        return response()->json([
+            'error' => 'Error al obtener los contratos',
+            'message' => $e->getMessage()
+        ], 500);
     }
+}
+ 
+/**
+ * Endpoint específico para ADMINISTRADOR VT - Flujo completo
+ * Empresa → Centros → Contratos filtrados
+ */
+public function getContratosFlujoVT(Request $request)
+{
+    try {
+        $user = auth()->user();
+        
+        Log::info('=== getContratosFlujoVT (ADMINISTRADOR VT) ===', ['method' => 'getContratosFlujoVT']);
+        Log::info('Usuario: ' . $user->id, ['user_id' => $user->id]);
+        Log::info('Parámetros recibidos:', $request->all());
+        
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+        
+        // Verificar que sea ADMINISTRADOR VT
+        $userRoles = [];
+        $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
+        
+        if ($activationUser) {
+            $userRoles = $activationUser->roles->pluck('name')->toArray();
+        }
+        
+        Log::info('Roles del usuario:', ['roles' => $userRoles]);
+        
+        // VALIDAR QUE SEA ADMINISTRADOR VT
+        if (!in_array('ADMINISTRADOR VT', $userRoles)) {
+            Log::info('Usuario no es ADMINISTRADOR VT', ['roles' => $userRoles]);
+            return response()->json(['error' => 'Este endpoint es solo para ADMINISTRADOR VT'], 403);
+        }
 
+        // Validar parámetros
+        $request->validate([
+            'idCompany' => 'required|integer|exists:empresa,id',
+            'idCentroFormacion' => 'nullable|integer|exists:centroFormacion,id'
+        ]);
 
+        $idCompany = $request->input('idCompany');
+        $idCentroFormacion = $request->input('idCentroFormacion');
 
+        Log::info('Filtrando contratos', ['idCompany' => $idCompany, 'idCentroFormacion' => $idCentroFormacion]);
 
+        // 1. Obtener información de la empresa
+        $empresa = Company::find($idCompany);
+        Log::info('Empresa encontrada:', ['empresa' => $empresa ? $empresa->razonSocial : 'No encontrada']);
+
+        // 2. Obtener centros de formación de esa empresa
+        $centrosQuery = CentrosFormacion::where('idEmpresa', $idCompany)
+            ->with(['ciudad:id,descripcion', 'empresa:id,razonSocial'])
+            ->orderBy('nombre', 'asc');
+
+        // Si se proporciona idCentroFormacion, filtrar también por centro
+        if ($idCentroFormacion) {
+            $centrosQuery->where('id', $idCentroFormacion);
+            Log::info('Aplicando filtro adicional por idCentroFormacion', ['idCentroFormacion' => $idCentroFormacion]);
+        }
+
+        $centros = $centrosQuery->get();
+        Log::info('Centros encontrados:', ['count' => $centros->count()]);
+
+        // 3. Obtener contratos filtrados
+        $contratosQuery = Contract::with(
+            'persona',
+            'salario.rol',
+            'transacciones.pago',
+            'estado',
+            'area'
+        )
+        ->where('idEstado', '!=', 14)
+        ->where(function($q) use ($idCompany) {
+            $q->where('idCompany', $idCompany)
+              ->orWhere('idempresa', $idCompany);
+        }) //Filtrar por AMBOS campos
+        ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
+        ->orderBy('fechaContratacion');
+
+        // Si se proporciona idCentroFormacion, filtrar también por centro
+        if ($idCentroFormacion) {
+            $contratosQuery->where('idCentroFormacion', $idCentroFormacion);
+            Log::info('Aplicando filtro adicional por idCentroFormacion', ['idCentroFormacion' => $idCentroFormacion]);
+        }
+
+        $contratos = $contratosQuery->get();
+        Log::info('Contratos encontrados:', ['count' => $contratos->count()]);
+
+        // 4. Preparar respuesta completa
+        $response = [
+            'status' => 'success',
+            'message' => 'Datos obtenidos correctamente',
+            'data' => [
+                'empresa' => [
+                    'id' => $empresa->id,
+                    'razonSocial' => $empresa->razonSocial
+                ],
+                'centros' => $centros->map(function($centro) {
+                    return [
+                        'id' => $centro->id,
+                        'nombre' => $centro->nombre,
+                        'direccion' => $centro->direccion,
+                        'telefono' => $centro->telefono,
+                        'ciudad' => $centro->ciudad?->descripcion,
+                        'empresa' => $centro->empresa?->razonSocial
+                    ];
+                }),
+                'contratos' => $contratos->map(function($contrato) {
+                    return [
+                        'id' => $contrato->id,
+                        'persona' => [
+                            'nombreCompleto' => trim(($contrato->persona->nombre1 ?? '') . ' ' . 
+                                              ($contrato->persona->nombre2 ?? '') . ' ' . 
+                                              ($contrato->persona->apellido1 ?? '') . ' ' . 
+                                              ($contrato->persona->apellido2 ?? '')),
+                            'identificacion' => $contrato->persona->identificacion
+                        ],
+                        'salario' => [
+                            'rol' => $contrato->salario?->rol?->name
+                        ],
+                        'area' => [
+                            'nombre' => $contrato->area?->nombre
+                        ],
+                        'estado' => [
+                            'estado' => $contrato->estado?->estado
+                        ],
+                        'fechaContratacion' => $contrato->fechaContratacion,
+                        'fechaFinalContrato' => $contrato->fechaFinalContrato,
+                        'idCompany' => $contrato->idCompany,
+                        'idempresa' => $contrato->idempresa,
+                        'idCentroFormacion' => $contrato->idCentroFormacion
+                    ];
+                })
+            ],
+            'filters' => [
+                'idCompany' => $idCompany,
+                'idCentroFormacion' => $idCentroFormacion,
+                'hasCentroFilter' => $idCentroFormacion ? true : false
+            ],
+            'counts' => [
+                'centros' => $centros->count(),
+                'contratos' => $contratos->count()
+            ]
+        ];
+
+        Log::info('Respuesta preparada con éxito', ['status' => 'success']);
+        return response()->json($response);
+
+    } catch (\Exception $e) {
+        Log::error('Error en getContratosFlujoVT: ' . $e->getMessage(), ['error' => $e->getMessage()]);
+        return response()->json([
+            'error' => 'Error al obtener los datos',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+    
     /**
      * Obtiene un contrato por su ID, incluyendo información detallada y otros contratos relacionados
      * en donde el idContrato sea igual a $id.
