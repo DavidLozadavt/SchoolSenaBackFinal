@@ -27,7 +27,7 @@ class Sede extends Model
     ];
 
     const RUTA_FOTO = "urlImagen";
-    const RUTA_FOTO_DEFAULT = "sedes/user.svg";
+    const RUTA_FOTO_DEFAULT = "/default/logoweb.png";
 
     protected $appends = ['rutaFotoUrl'];
 

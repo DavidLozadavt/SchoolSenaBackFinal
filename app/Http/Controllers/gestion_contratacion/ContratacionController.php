@@ -2504,22 +2504,31 @@ public function getContratosFlujoVT(Request $request)
     {
         try {
             $validated = $request->validate([
-                'nombreAreaConocimiento' => 'required|string|max:255|unique:area_conocimiento,nombreAreaConocimiento'
+                'nombreAreaConocimiento' => 'required|string|max:255'
             ]);
 
+            $nombreArea = trim($validated['nombreAreaConocimiento']);
+            
+            // Buscar si ya existe
+            $areaExistente = AreaConocimiento::where('nombreAreaConocimiento', $nombreArea)->first();
+            
+            if ($areaExistente) {
+                // Si existe, retornar el existente
+                return response()->json([
+                    'message' => 'Área de conocimiento ya existe',
+                    'data' => $areaExistente
+                ], 200);
+            }
+
+            // Si no existe, crear nuevo
             $area = AreaConocimiento::create([
-                'nombreAreaConocimiento' => $validated['nombreAreaConocimiento']
+                'nombreAreaConocimiento' => $nombreArea
             ]);
 
             return response()->json([
                 'message' => 'Área de conocimiento creada correctamente',
                 'data' => $area
             ], 201);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'message' => 'Error de validación',
-                'errors' => $e->errors()
-            ], 422);
         } catch (\Exception $e) {
             Log::error('Error al crear área de conocimiento: ' . $e->getMessage());
             return response()->json([
@@ -2541,6 +2550,14 @@ public function getContratosFlujoVT(Request $request)
             $programas = Programa::with('nivel', 'tipoFormacion', 'estado')
                 ->orderBy('nombrePrograma', 'asc')
                 ->get();
+            
+            // Contar fichas reales para cada programa
+            $programas->each(function ($programa) {
+                $fichasCount = \App\Models\Ficha::whereHas('asignacion', function ($query) use ($programa) {
+                    $query->where('idPrograma', $programa->id);
+                })->count();
+                $programa->fichas = $fichasCount;
+            });
             
             return response()->json($programas);
         } catch (\Exception $e) {
