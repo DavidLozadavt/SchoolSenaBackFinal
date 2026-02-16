@@ -9,6 +9,7 @@ use Exception;
 use App\Http\Controllers\Controller;
 use App\Models\GradoMateria;
 use App\Models\HorarioMateria;
+use App\Models\Materia;
 use App\Models\TipoGrado;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -100,7 +101,7 @@ class GradoProgramaController extends Controller
             ]);
 
             // consultar el id del tipo de grado(TRIMESTRE)
-                $tipoGrado = TipoGrado::where('nombreTipoGrado', 'TRIMESTRE')->firstOrFail();
+            $tipoGrado = TipoGrado::where('nombreTipoGrado', 'TRIMESTRE')->firstOrFail();
             // buscar el grado con ese tipo de grado
             $grado = Grado::where('idTipoGrado', $tipoGrado->id)
                 ->where('numeroGrado', $datos['numeroGrado'])
@@ -133,6 +134,23 @@ class GradoProgramaController extends Controller
                         'idFicha' => $datos['idFicha'],
                         'idGradoMateria' => $newGradoMateria->id
                     ]);
+
+                    // buscamos los raps de la competencia y los asigamos tambien
+                    $raps = Materia::where('idMateriaPadre', $nueva['id'])->get();
+    
+                    foreach ($raps as $rap) {
+                        $gradoMateriaRap = GradoMateria::create([
+                            'idGradoPrograma' => $gradoPrograma->id,
+                            'idMateria' => $rap->id,
+                            'estado' => 'PENDIENTE'
+                        ]);
+                        
+                        HorarioMateria::create([
+                            'estado' => 'PENDIENTE',
+                            'idFicha' => $datos['idFicha'],
+                            'idGradoMateria' => $gradoMateriaRap->id
+                        ]);
+                    }
                 }
 
             DB::commit();
@@ -173,6 +191,22 @@ class GradoProgramaController extends Controller
                         'idFicha' => $datos['idFicha'],
                         'idGradoMateria' => $newGradoMateria->id
                     ]);
+
+                    $raps = Materia::where('idMateriaPadre', $nueva['id'])->get();
+    
+                    foreach ($raps as $rap) {
+                        $gradoMateriaRap = GradoMateria::create([
+                            'idGradoPrograma' => $datos['idGradoPrograma'],
+                            'idMateria' => $rap->id,
+                            'estado' => 'PENDIENTE'
+                        ]);
+                        
+                        HorarioMateria::create([
+                            'estado' => 'PENDIENTE',
+                            'idFicha' => $datos['idFicha'],
+                            'idGradoMateria' => $gradoMateriaRap->id
+                        ]);
+                    }
                 }
 
             DB::commit();

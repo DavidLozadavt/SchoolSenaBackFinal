@@ -23,4 +23,8 @@ class AreaConocimiento extends Model
     public function materias () {
         return $this->hasMany(Materia::class, 'idAreaConocimiento', 'id');
     }
+
+    public function asignacionContrato () {
+        return $this->hasMany(Contract::class, 'idAreaConocimiento', 'id');
+    }
 }

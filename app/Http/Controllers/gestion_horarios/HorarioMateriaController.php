@@ -1168,12 +1168,17 @@ class HorarioMateriaController extends Controller
                     // Agrupamos ahora por materia
                     'materias' => $horariosPorGrado
                         ->groupBy('gradoMateria.idMateria')
-                        ->map(function ($horariosPorMateria) {
-
+                        ->filter(function ($horariosPorMateria) {
                             $materia = $horariosPorMateria->first()
                                 ->gradoMateria
                                 ->materia;
 
+                                return is_null($materia->idMateriaPadre);
+                        })
+                        ->map(function($horariosPorMateria) {
+                            $materia = $horariosPorMateria->first()
+                                ->gradoMateria
+                                ->materia;
                             // AQUÍ CALCULAMOS LAS HORAS DE ESTA MATERIA
                             $horasData = $this->calcularHorasMateria($horariosPorMateria);
 
