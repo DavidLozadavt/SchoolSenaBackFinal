@@ -125,7 +125,8 @@ use App\Http\Controllers\TrabajadoresController;
 use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
 use App\Http\Controllers\gestion_horarios\GradoProgramaController;
 use App\Http\Controllers\gestion_materias\MateriaController;
-use app\Http\Controllers\auth\ForgotPasswordController;
+use App\Http\Controllers\auth\ForgotPasswordController;
+use App\Http\Controllers\TmpRapController;
 
 /*
 |--------------------------------------------------------------------------
@@ -159,8 +160,10 @@ Route::post('password/send-otp', [ForgotPasswordController::class, 'sendOtp']);
 Route::post('password/verify-otp', [ForgotPasswordController::class, 'verifyOtp']);
 Route::post('password/reset', [ForgotPasswordController::class, 'resetPassword']);
 
+Route::get('profile/access-check', [Gestion_usuarioUserController::class, 'checkProfileAccess'])->middleware('auth:api');
 Route::resource('roles', RolController::class);
 
+Route::put('update_active_user/{id}', [UserController::class, 'updateActivationCompanyUser']);
 
 Route::get('list_companies', [CompanyController::class, 'index']);
 Route::post('company_update', [CompanyController::class, 'update']);
@@ -242,6 +245,7 @@ Route::get('actividades_riesgo_profesional', [ContratacionController::class, 'ge
 Route::post('store_actividades_riesgo_profesional', [ContratacionController::class, 'storeActividadeRiesgoProfesional']);
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
 Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
+Route::get('areas-conocimiento/programa/{idPrograma}', [ContratacionController::class, 'getAreasConocimientoPrograma']);
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
 Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
@@ -461,17 +465,14 @@ Route::post('store_mencion_comment_reponse', [BoardTaskController::class, 'sendE
 Route::apiResource('tipo_contrato', TipoContratoController::class);
 Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
 //rutas para cargar los trabajadores y  ejecutar su procedimiento almacenado
-Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
-// Route::post('ejecutarProcedimiento', [TrabajadoresController::class, 'ejecutarProcedimiento']);
 
-
+Route::post('cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV'])->middleware('auth:api');
+Route::post('ejecutar_procedimiento_trabajadores', [TrabajadoresController::class, 'ejecutarProcedimiento'])->middleware('auth:api');
 
 // Gestion Contratación
 Route::group([
     'middleware' => 'auth:api'
 ], function () {
-
-    Route::post('/cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV']);
 
     Route::get('contrato-tipos-identificacion', [ContratacionController::class, 'tiposIdentificacion']);
     Route::get('contrato-tipos-contrato', [ContratacionController::class, 'tiposContrato']);
@@ -502,9 +503,6 @@ Route::group([
 //GestionTipoContrato
 Route::apiResource('tipo_contrato', TipoContratoController::class);
 Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
-//rutas para cargar los trabajadores y  ejecutar su procedimiento almacenado
-Route::post('cargar-trabajadores', [TrabajadoresController::class, 'cargarDesdeCSV'])->middleware('auth:api');
-Route::post('ejecutar_procedimiento_trabajadores', [TrabajadoresController::class, 'ejecutarProcedimiento'])->middleware('auth:api');
 
 //rutas para cargar los estudiantes y ejecutar su procedimiento almacenado
 Route::post('/cargar-estudiantes', [EstudianteController::class, 'cargarEstudiantesDesdeExcel'])->middleware('auth:api');
@@ -1182,6 +1180,8 @@ Route::get('regional/{id}', [RegionalController::class, 'show']);
 Route::patch('regional/{id}', [RegionalController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
+Route::get('centrosFormacion/regional-contratacion/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegionalForContratacion']);
+Route::get('contratos/flujo-vt', [ContratacionController::class, 'getContratosFlujoVT']);
 Route::get('centrosFormacion/regional/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegional']);
 Route::post('centrosFormacion/user/', [CentrosFormacionController::class, 'storeWithUser']);
 Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);
@@ -1223,6 +1223,8 @@ Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
 
+//Juicios evaluativos:
+Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
@@ -1239,6 +1241,7 @@ Route::delete('sedes-institucionales/{id}', [SedeInstitucionalController::class,
 Route::get('sedes-institucionales/{id}', [SedeInstitucionalController::class, 'show']);
 
 // Rutas de Infraestructura
+Route::post('tiposInfraestructuras', [InfraestructuraController::class, 'storeTiposInfraestructura']); // Tipo de infraestructura
 Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']); 
 Route::get('sedes/{idSede}/infraestructuras', [InfraestructuraController::class, 'index']);
 Route::get('regionalInfraestructuras/{idRegional}', [InfraestructuraController::class, 'infraestructurasPorRegional']);
@@ -1249,11 +1252,18 @@ Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destr
 
 // MALLA CURRICULAR
 //Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']);
-    Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']);
+    Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']); // trae todos los trimestres con las competencias de la ficha
+    Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']); // crear nuevo trimestre con minimo una competencia asignada
+    Route::post('competencias/trimestre', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // agregar competencias a un trimestre ya creado
+    Route::post('trimestres-ficha/competencias', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // asignar nuevas competencias a un trimestre
 //});
 
 // MATERIAS
 //Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']);
+    Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
+    Route::get('materias/raps', [MateriaController::class, 'getCompetenciasHijas']); // materias hijas (raps-resultados)
+    Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
+    Route::post('materias', [MateriaController::class, 'crearCompetencia']);
+    Route::put('materias/{id}', [MateriaController::class, 'update']);
+    Route::get('materias/{id}', [MateriaController::class, 'getById']);
 //});

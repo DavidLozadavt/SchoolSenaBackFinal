@@ -122,6 +122,21 @@ class InfraestructuraController extends Controller
             return response()->json(['error' => 'Error al obtener tipos de infraestructura'], 500);
         }
     }
+    public function storeTiposInfraestructura(Request $request)
+    {
+        $request->validate([
+            'nombre' => 'required|string|max:255|unique:tiposinfraestructura,nombre'
+        ]);
+
+        $Tinfraestructura = TipoInfraestructura::create([
+            'nombre' => $request->nombre,
+        ]);
+
+        return response()->json([
+            'message' => 'Infraestructura creada correctamente',
+            'data' => $Tinfraestructura
+        ], 201);
+    }
     public function infraestructurasPorRegional($idRegional)
     {
         $infraestructuras = Infraestructura::with(['tipoInfraestructura', 'sede'])
