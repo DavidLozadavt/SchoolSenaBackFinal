@@ -1180,6 +1180,8 @@ Route::get('regional/{id}', [RegionalController::class, 'show']);
 Route::patch('regional/{id}', [RegionalController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
+Route::get('centrosFormacion/regional-contratacion/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegionalForContratacion']);
+Route::get('contratos/flujo-vt', [ContratacionController::class, 'getContratosFlujoVT']);
 Route::get('centrosFormacion/regional/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegional']);
 Route::post('centrosFormacion/user/', [CentrosFormacionController::class, 'storeWithUser']);
 Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);
@@ -1257,7 +1259,8 @@ Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destr
 // MATERIAS
 //Route::group(['middleware' => 'auth:api'], function () {
     Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
-    Route::get('materias-hijas/{idMateriaPadre}', [MateriaController::class, 'getCompeteciasHijas']); // materias hijas (raps-resultados)
+    Route::get('materias/raps', [MateriaController::class, 'getCompetenciasHijas']); // materias hijas (raps-resultados)
+    Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
     Route::post('materias', [MateriaController::class, 'crearCompetencia']);
     Route::put('materias/{id}', [MateriaController::class, 'update']);
     Route::get('materias/{id}', [MateriaController::class, 'getById']);
