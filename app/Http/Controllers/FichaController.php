@@ -218,6 +218,7 @@ class FichaController extends Controller
                 'regional:id,razonSocial',
                 'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
                 'asignacion.programa:id,nombrePrograma',
+                'asignacion.programa.grados', //Ya puedo capturar en idgrado
                 'instructorLider:id,idpersona', // Especificar campos para que Laravel resuelva correctamente la relación
                 'instructorLider.persona', // Luego cargar persona completa para que funcione rutaFotoUrl y todos los campos
             ])
