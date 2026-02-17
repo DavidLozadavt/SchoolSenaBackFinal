@@ -84,7 +84,7 @@ class PensumController extends Controller
     public function index()
     {
         try {
-            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])->get();
+            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'grados'])->get();
             return response()->json([
                 'status' => 'success',
                 'data' => $programas

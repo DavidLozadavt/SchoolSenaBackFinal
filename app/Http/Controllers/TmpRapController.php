@@ -28,6 +28,14 @@ class TmpRapController extends Controller
         $fechaReporte  = $hoja->getCell('C2')->getValue();
         $filaInicial   = 14;
 
+        if (!$idCompany) {
+            return response()->json([
+                'error' => 'El idCompany es null',
+                'detalle' => $idCompany
+            ], 422);
+        }
+
+
         $fechaReporteFormateada = DateTime::createFromFormat('d/m/Y', $fechaReporte);
         $fechaReporteFormateada = ($fechaReporteFormateada !== false)
             ? $fechaReporteFormateada->format('Y-m-d')
@@ -120,7 +128,7 @@ class TmpRapController extends Controller
                 'idSede' => $request->input('idSede'),
                 'created_at' => now(),
                 'updated_at' => now(),
-                'idUser' => $idUser ,
+                'idUser' => $idUser,
             ]);
 
             $password = bcrypt('123');
@@ -151,8 +159,7 @@ class TmpRapController extends Controller
             ->orderBy('created_at', 'desc')
             ->orderBy('id', 'desc')
             ->first();
-            
+
         return response()->json($data);
     }
-
 }
