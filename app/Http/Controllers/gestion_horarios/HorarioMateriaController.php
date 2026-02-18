@@ -466,42 +466,52 @@ class HorarioMateriaController extends Controller
      * @param string $id
      * @return JsonResponse
      */
-    public function updateTeacherHorarioMateria(Request $request, string $id): JsonResponse
+    public function updateTeacherHorarioMateria(Request $request): JsonResponse
     {
-        $data           = $request->all();
-        $idContrato     = $data['idContrato'];
+        $idContrato = $request->input('idContrato');
+        $horarios = $request->input('horarios');
 
-        $horarioMateria = HorarioMateria::findOrFail($id);
-
-        //$contract         = Contrato::find($idContrato);
-        $contractIdFather = $contract->idContrato ?? $idContrato; // Contrato padre
-
-        if ($this->getDataHorarioMaterias($data)->isEmpty()) {
+        if (!$idContrato || !is_array($horarios)) {
             return response()->json([
-                'message' => 'No hay horarios de materias para asignar al docente',
-            ], 422);
+                'message' => 'El contrato y la lista de horarios son obligatorios'
+            ], 400);
         }
 
-        $horarioMateriaExistResponse = $this->validateHorariosByDocente($horarioMateria, $contractIdFather);
-        $horarioMateriaExist = $horarioMateriaExistResponse->getData();
-        if ($horarioMateriaExist->isExist) {
+        try {
+            DB::beginTransaction();
+
+            foreach ($horarios as $h) {
+                $horarioMateria = HorarioMateria::findOrFail($h['id']);
+
+                // Validar cruces para el docente
+                $validacion = $this->validateHorariosByDocente($horarioMateria, $idContrato);
+                $resultado = $validacion->getData();
+
+                if ($resultado->isExist) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => "El docente ya tiene una clase asignada para el mismo horario."
+                    ], 422);
+                }
+
+                $horarioMateria->update([
+                    'idContrato' => $idContrato,
+                    'estado' => EstadoHorarioMateria::ASIGNADO
+                ]);
+            }
+
+            DB::commit();
+
             return response()->json([
-                'message'        => 'El docente ya se encuentra asignado a otra materia',
-                'horarioMateria' => $horarioMateriaExist->horarioMateria,
-            ], 422);
+                'message' => 'Instructor asignado correctamente a todos los horarios seleccionados'
+            ], 200);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Error al asignar el instructor',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        horariomateria::where('idGradoMateria', $horarioMateria->idGradoMateria)
-            ->whereNotNull(['horaInicial', 'horaFinal', 'idDia'])
-            ->update(['idContrato' => $contractIdFather]);
-
-        $horarioMateria->update([
-            'idContrato' => $contractIdFather,
-        ]);
-
-        $this->getDataAndSendEmail($horarioMateria);
-
-        return response()->json($horarioMateria->load(['asignacionPeriodoProgramaJornada.jornada']), 200);
     }
 
     /**
@@ -583,7 +593,7 @@ class HorarioMateriaController extends Controller
             'dia',
             'materia.grado',
             'materia.materia',
-            'asignacionPeriodoProgramaJornada.jornada',
+            'ficha.jornada',
             'contrato.persona'
         )
             ->when($horarioMateria->id, function ($query) use ($horarioMateria) {
