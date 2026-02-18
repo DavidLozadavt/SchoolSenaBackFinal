@@ -27,7 +27,7 @@ return new class extends Migration
 
             $table->foreign('idGrupo')
                   ->references('id')
-                  ->on('grupogenerales');
+                  ->on('grupoGenerales');
         });
     }
 

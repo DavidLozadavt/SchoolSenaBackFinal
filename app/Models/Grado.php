@@ -35,7 +35,7 @@ class Grado extends Model
     {
         return $this->belongsToMany(
             Programa::class,
-            'gradoprograma',  // Tabla pivot
+            'gradoPrograma',  // Tabla pivot
             'idGrado',        // FK de este modelo en la tabla pivot
             'idPrograma'      // FK del modelo relacionado en la tabla pivot
         )->withPivot('cupos', 'fechaInicio', 'fechaFin', 'estado')
