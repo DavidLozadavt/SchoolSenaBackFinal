@@ -36,7 +36,7 @@ return new class extends Migration
 
             $table->foreign('idGradoMateria', 'matriculaAcademica_gradoMateria_FK')
                 ->references('id')
-                ->on('gradomateria');
+                ->on('gradoMateria');
 
             $table->foreign('idMatricula')
                 ->references('id')

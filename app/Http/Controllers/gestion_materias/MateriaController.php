@@ -38,17 +38,16 @@ class MateriaController extends Controller
 
     public function getAllCompetencesByProgram($idPrograma): JsonResponse
     {
-        try{
-        $materias = AgregarMateriaPrograma::where('idPrograma', $idPrograma)
-            ->with('materia', function ($query) 
-                {
+        try {
+            $materias = AgregarMateriaPrograma::where('idPrograma', $idPrograma)
+                ->with('materia', function ($query) {
                     $query->whereNull('idMateriaPadre');
                 })
-            ->get()
-            ->pluck('materia')
-            ->values();
-        return response()->json($materias);
-        }catch(\Throwable $error){
+                ->get()
+                ->pluck('materia')
+                ->values();
+            return response()->json($materias);
+        } catch (\Throwable $error) {
             return response()->json([
                 'message' => 'No se pudieron cargar las competencias',
                 'error' => $error->getMessage()
@@ -64,59 +63,59 @@ class MateriaController extends Controller
      */
     public static function getSubMateriasByPadre(Request $request, string $id): JsonResponse
     {
-        $idAsignacionPeriodoProgramaJornada = $request->idAsignacionPeriodoProgramaJornada;
+        $idFicha = $request->idFicha;
         $idGradoPrograma                    = $request->idGradoPrograma;
 
-        $asignacionPeriodoProgramaJornada   = Ficha::findOrFail($idAsignacionPeriodoProgramaJornada);
+        $idAperturarPrograma   = Ficha::findOrFail($idFicha);
 
         $subMaterias = Materia::with([
-            'grados' => function ($query) use ($idAsignacionPeriodoProgramaJornada, $idGradoPrograma) {
+            'grados' => function ($query) use ($idFicha, $idGradoPrograma) {
                 $query->where('idGradoPrograma', $idGradoPrograma)
-                    ->whereHas('horarios', function ($subQuery) use ($idAsignacionPeriodoProgramaJornada) {
-                        $subQuery->whereIn('id', function ($maxQuery) use ($idAsignacionPeriodoProgramaJornada) {
+                    ->whereHas('horarios', function ($subQuery) use ($idFicha) {
+                        $subQuery->whereIn('id', function ($maxQuery) use ($idFicha) {
                             $maxQuery->select(DB::raw('MAX(id)'))
                                 ->from('horarioMateria')
-                                ->where('idAsignacionPeriodoJornada', $idAsignacionPeriodoProgramaJornada)
+                                ->where('idAsignacionPeriodoJornada', $idFicha)
                                 ->groupBy('idAsignacionPeriodoJornada', 'idGradoMateria');
                         });
                     })
-                    ->with(['horarios' => function ($subQuery) use ($idAsignacionPeriodoProgramaJornada) {
-                        $subQuery->whereIn('id', function ($maxQuery) use ($idAsignacionPeriodoProgramaJornada) {
+                    ->with(['horarios' => function ($subQuery) use ($idFicha) {
+                        $subQuery->whereIn('id', function ($maxQuery) use ($idFicha) {
                             $maxQuery->select(DB::raw('MAX(id)'))
                                 ->from('horarioMateria')
-                                ->where('idAsignacionPeriodoJornada', $idAsignacionPeriodoProgramaJornada)
+                                ->where('idAsignacionPeriodoJornada', $idFicha)
                                 ->groupBy('idAsignacionPeriodoJornada', 'idGradoMateria');
                         })->with([
                             'infraestructura.sede',
                             'infraestructura.inventario',
                             'dia.jornadas',
-                            'asignacionPeriodoProgramaJornada.asignacionPeriodoPrograma.programa',
+                            'idAperturarPrograma.asignacionPeriodoPrograma.programa',
                             'contrato.persona',
                             'sesionMaterias.asistencia.matriculaAcademica',
                             'sesionMaterias.calificacionSesiones',
                         ]);
                     }]);
             },
-            'seguimientoMaterias' => function ($query) use ($idAsignacionPeriodoProgramaJornada) {
-                $query->where('idFicha', $idAsignacionPeriodoProgramaJornada);
+            'seguimientoMaterias' => function ($query) use ($idFicha) {
+                $query->where('idFicha', $idFicha);
             },
         ])
-            ->whereHas('grados', function ($query) use ($idAsignacionPeriodoProgramaJornada, $idGradoPrograma) {
+            ->whereHas('grados', function ($query) use ($idFicha, $idGradoPrograma) {
                 $query->where('idGradoPrograma', $idGradoPrograma)
-                    ->whereHas('horarios', function ($subQuery) use ($idAsignacionPeriodoProgramaJornada) {
-                        $subQuery->whereIn('id', function ($maxQuery) use ($idAsignacionPeriodoProgramaJornada) {
+                    ->whereHas('horarios', function ($subQuery) use ($idFicha) {
+                        $subQuery->whereIn('id', function ($maxQuery) use ($idFicha) {
                             $maxQuery->select(DB::raw('MAX(id)'))
                                 ->from('horarioMateria')
-                                ->where('idAsignacionPeriodoJornada', $idAsignacionPeriodoProgramaJornada)
+                                ->where('idAsignacionPeriodoJornada', $idFicha)
                                 ->groupBy('idAsignacionPeriodoJornada', 'idGradoMateria');
                         });
                     });
             })
-            ->whereHas('grados.horarios.asignacionPeriodoProgramaJornada', function ($subQJornada) use ($asignacionPeriodoProgramaJornada) {
-                $subQJornada->where('id', $asignacionPeriodoProgramaJornada->id);
+            ->whereHas('grados.horarios.idAperturarPrograma', function ($subQJornada) use ($idAperturarPrograma) {
+                $subQJornada->where('id', $idAperturarPrograma->id);
             })
-            ->whereHas('materiasAgregadas', function ($query) use ($asignacionPeriodoProgramaJornada) {
-                $query->where('idPrograma', $asignacionPeriodoProgramaJornada->asignacionPeriodoPrograma->idPrograma);
+            ->whereHas('materiasAgregadas', function ($query) use ($idAperturarPrograma) {
+                $query->where('idPrograma', $idAperturarPrograma->asignacionPeriodoPrograma->idPrograma);
             })
             ->whereHas('seguimientoMaterias')
             ->where('idMateriaPadre', $id)
@@ -228,7 +227,6 @@ class MateriaController extends Controller
             return response()->json([
                 'message' => 'Competencia actualizada correctamente'
             ], 200);
-
         } catch (\Throwable $e) {
             DB::rollBack();
 
@@ -294,17 +292,18 @@ class MateriaController extends Controller
                 'materia',
                 'horarioMateria' => function ($q) use ($idFicha) {
                     $q->where('idFicha', $idFicha)
-                    ->with(['dia', 'contrato.persona']);
+                        ->with(['dia', 'contrato.persona']);
                 },
                 'gradoPrograma.grado'
             ])
             ->get();
 
         // Formatear la respuesta
-        $resultado = $raps->map(function ($gradoMateria) {  
+        $resultado = $raps->map(function ($gradoMateria) {
             return [
                 'id' => $gradoMateria->id,
                 'idGradoMateria' => $gradoMateria->id,
+                'idMateriaPadre' => $gradoMateria->materia->idMateriaPadre,
                 'idMateria' => $gradoMateria->idMateria,
                 'nombre' => $gradoMateria->materia->nombreMateria ?? 'Sin nombre',
                 'descripcion' => $gradoMateria->materia->descripcion ?? '',
@@ -318,18 +317,48 @@ class MateriaController extends Controller
                     'fechaFin' => $gradoMateria->gradoPrograma->fechaFin ?? null,
                     'idGradoPrograma' => $gradoMateria->idGradoPrograma
                 ],
-                'horarios' => $gradoMateria->horarioMateria->map(function ($horario) {
-                    return [
-                        'id' => $horario->id,
-                        'dia' => $horario->dia,
-                        'horaInicial' => $horario->horaInicial,
-                        'horaFinal' => $horario->horaFinal,
-                        'fechaInicial' => $horario->fechaInicial,
-                        'fechaFinal' => $horario->fechaFinal,
-                        'estado' => $horario->estado,
-                        'instructor' => $horario->contrato->persona ?? null
-                    ];
-                })->values()
+                'horarios' => [
+                    'asignados' => $gradoMateria->horarioMateria
+                        ->filter(function ($h) {
+                            return $h->idDia != null &&
+                                $h->horaInicial != null &&
+                                $h->horaFinal != null &&
+                                $h->fechaInicial != null &&
+                                $h->idContrato != null;
+                        })
+                        ->map(function ($h) {
+                            return [
+                                'id' => $h->id,
+                                'dia' => $h->dia,
+                                'horaInicial' => $h->horaInicial,
+                                'horaFinal' => $h->horaFinal,
+                                'fechaInicial' => $h->fechaInicial,
+                                'fechaFinal' => $h->fechaFinal,
+                                'estado' => $h->estado,
+                                'instructor' => $h->contrato->persona ?? null
+                            ];
+                        })->values(),
+                    'sinAsignar' => $gradoMateria->horarioMateria
+                        ->filter(function ($h) {
+                            return $h->idDia != null &&
+                                $h->horaInicial != null &&
+                                $h->horaFinal != null &&
+                                $h->fechaInicial != null &&
+                                $h->idContrato == null;
+                        })
+                        ->map(function ($h) {
+                            return [
+                                'id' => $h->id,
+                                'dia' => $h->dia,
+                                'horaInicial' => $h->horaInicial,
+                                'horaFinal' => $h->horaFinal,
+                                'fechaInicial' => $h->fechaInicial,
+                                'fechaFinal' => $h->fechaFinal,
+                                'estado' => $h->estado,
+                                'instructor' => null
+                            ];
+                        })->values()
+                ]
             ];
         });
 
@@ -349,53 +378,55 @@ class MateriaController extends Controller
 
         $areaConocimientoRequerido = $materia->areaConocimiento->id;
 
-        $contratos = Contract::whereHas('asignacionContratoAreaConocimiento', 
+        $contratos = Contract::whereHas(
+            'asignacionContratoAreaConocimiento',
             function ($query) use ($areaConocimientoRequerido) {
                 $query->where('idAreaConocimiento', $areaConocimientoRequerido);
-            })
+            }
+        )
             ->select('id', 'numeroContrato', 'idpersona')
             ->with('persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto')
             ->get();
 
 
         return response()->json([
-                'message' => 'Instructores encontrados correctamente',
-                'data' => $contratos
-            ], 200);
-
+            'message' => 'Instructores encontrados correctamente',
+            'data' => $contratos
+        ], 200);
     }
 
-    public function crearCompetencia(Request $request) 
+    public function crearCompetencia(Request $request)
     {
-        try{
+        try {
             $datos = $request->all();
             DB::beginTransaction();
-                $compe = Materia::create([
-                    'nombreMateria' => $datos['nombreMateria'],
-                    'descripcion' => $datos['descripcion'],
-                    'idAreaConocimiento' => $datos['idAreaConocimiento'],
-                    'idCompany' => $datos['idCompany'],
-                    'idEmpresa' => $datos['idCompany']
-                ]);
+            $compe = Materia::create([
+                'nombreMateria' => $datos['nombreMateria'],
+                'descripcion' => $datos['descripcion'],
+                'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                'idCompany' => $datos['idCompany'],
+                'idEmpresa' => $datos['idCompany']
+            ]);
 
-                AgregarMateriaPrograma::create([
-                    'idMateria' => $compe->id,
-                    'idPrograma' => $datos['idPrograma']
-                ]);
+            AgregarMateriaPrograma::create([
+                'idMateria' => $compe->id,
+                'idPrograma' => $datos['idPrograma']
+            ]);
             DB::commit();
             return response()->json([
                 'message' => 'Competencia creada correctamente'
-            ],201);
-        }catch(\Throwable $e){
+            ], 201);
+        } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
                 'message' => 'No se pudo crear la competencia',
                 'error' => $e->getMessage()
-            ],400);
+            ], 400);
         }
     }
 
-    public function getById(int $id){
+    public function getById(int $id)
+    {
 
         $materia = Materia::select(
             'id',
@@ -404,16 +435,16 @@ class MateriaController extends Controller
             'idAreaConocimiento'
         )->find($id);
 
-        if(!$materia){
+        if (!$materia) {
             return response()->json([
                 'message' => 'NO se encontro la competencia',
                 'data' => null
-            ],404);
+            ], 404);
         }
 
         return response()->json([
             'message' => 'Competencia encontrada correctamente',
             'data' => $materia
-        ],200);
+        ], 200);
     }
 }

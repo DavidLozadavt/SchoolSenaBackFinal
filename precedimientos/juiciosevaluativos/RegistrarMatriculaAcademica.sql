@@ -321,7 +321,6 @@ END IF;
   
   END LOOP;
   -- Cerrar el cursor
-  --falta este procedimiento almacenado, apenas lo quite funciono.
-  -- CALL seguimientomateriasProcedure();
+  CALL seguimientomateriasProcedure();
   CLOSE tmpRapsCursor;  
 END;

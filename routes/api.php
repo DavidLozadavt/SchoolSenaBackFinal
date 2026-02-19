@@ -127,6 +127,7 @@ use App\Http\Controllers\gestion_horarios\GradoProgramaController;
 use App\Http\Controllers\gestion_materias\MateriaController;
 use App\Http\Controllers\auth\ForgotPasswordController;
 use App\Http\Controllers\TmpRapController;
+use App\Http\Controllers\gestion_horarios\DiaController;
 
 /*
 |--------------------------------------------------------------------------
@@ -1207,19 +1208,21 @@ Route::get('aperturaPrograma/{id}',[AperturarProgramaController::class, 'show'])
 Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Fichas:
-Route::get('fichas/{id}', [FichaController::class, 'show']);
-Route::put('fichas/{id}', [FichaController::class, 'update']);
-Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
-Route::post('fichas', [FichaController::class, 'store']);
-Route::get('fichas', [FichaController::class, 'index']);
-Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
+// IMPORTANTE: Las rutas específicas deben ir ANTES de las genéricas
+Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
+Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
 Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
+Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
+Route::get('fichas', [FichaController::class, 'index']);
+Route::post('fichas', [FichaController::class, 'store']);
+Route::get('fichas/{id}', [FichaController::class, 'show']);
+Route::put('fichas/{id}', [FichaController::class, 'update']);
+Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
-Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
-Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
-Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 
 //Juicios evaluativos:
 Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
@@ -1249,19 +1252,26 @@ Route::put('infraestructuras/{id}', [InfraestructuraController::class, 'update']
 Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destroy']);
 
 // MALLA CURRICULAR
-//Route::group(['middleware' => 'auth:api'], function () {
+Route::group(['middleware' => 'auth:api'], function () {
     Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']); // trae todos los trimestres con las competencias de la ficha
     Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']); // crear nuevo trimestre con minimo una competencia asignada
     Route::post('competencias/trimestre', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // agregar competencias a un trimestre ya creado
     Route::post('trimestres-ficha/competencias', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // asignar nuevas competencias a un trimestre
-//});
+});
 
 // MATERIAS
-//Route::group(['middleware' => 'auth:api'], function () {
+Route::group(['middleware' => 'auth:api'], function () {
     Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
     Route::get('materias/raps', [MateriaController::class, 'getCompetenciasHijas']); // materias hijas (raps-resultados)
     Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
     Route::post('materias', [MateriaController::class, 'crearCompetencia']);
     Route::put('materias/{id}', [MateriaController::class, 'update']);
     Route::get('materias/{id}', [MateriaController::class, 'getById']);
-//});
+});
+
+//HORARIOS
+Route::group(['middleware' => 'auth:api'], function () {
+    Route::get('dias', [DiaController::class, 'index']); //,obtener todos los dias
+    Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
+    Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
+});
