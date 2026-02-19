@@ -1307,11 +1307,13 @@ class HorarioMateriaController extends Controller
 
                             // AQUÍ CALCULAMOS LAS HORAS (usando todos los horarios combinados)
                             $horasData = $this->calcularHorasMateria($todosLosHorarios);
+                            $gradoMateriaParaEstado = $horariosPorMateriaPadre->first()->gradoMateria;
 
                             return [
                                 'id' => $materiaPadre->id,
                                 'nombre' => $materiaPadre->nombreMateria,
                                 'descripcion' => $materiaPadre->descripcion,
+                                'estado' => $gradoMateriaParaEstado->estado,
                                 'horasTotales' => $horasData['horasTotales'],
                                 'horasActuales' => $horasData['horasActuales'],
                                 'horasFaltantes' => $horasData['horasFaltantes'],
