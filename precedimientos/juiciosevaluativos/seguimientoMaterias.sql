@@ -6,12 +6,23 @@ BEGIN
     
     -- Declarar cursor correctamente
     DECLARE cur CURSOR FOR 
-        SELECT ma.idMateria, ma.idFicha, m.horas, ma.estado, m2.estado,ma.idMatricula, m.idMateriaPadre
-        FROM matriculaAcademica ma 
-        INNER JOIN materia m ON ma.idMateria = m.id
-        INNER JOIN matricula m2 ON m2.id=ma.idMatricula
-        WHERE m2.estado in ('EN FORMACION')
-        GROUP BY ma.idMateria, ma.idFicha;
+    SELECT 
+        ma.idMateria, 
+        ma.idFicha, 
+        m.horas, 
+        ma.estado,
+        m2.estado,
+        ma.idMatricula,
+        m.idMateriaPadre
+    FROM matriculaAcademica ma
+    INNER JOIN (
+        SELECT MAX(id) AS id
+        FROM matriculaAcademica
+        GROUP BY idMateria, idFicha
+    ) latest ON ma.id = latest.id
+    INNER JOIN materia m ON ma.idMateria = m.id
+    INNER JOIN matricula m2 ON m2.id = ma.idMatricula
+    WHERE m2.estado IN ('EN FORMACION');
 
     -- Manejador para el fin del cursor
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
@@ -29,16 +40,16 @@ BEGIN
        SET val_horasFaltantes=val_horas-val_horasEjecutadas;
         -- Verificar si el registro ya existe antes de insertarlo
 	        IF NOT EXISTS (
-	            SELECT 1 FROM seguimientoMaterias
+	            SELECT 1 FROM seguimientoMateria
 	            WHERE idMateria = val_idmateria 
 	            AND idFicha = val_idficha
 	        ) THEN
-	            INSERT INTO seguimientoMaterias
+	            INSERT INTO seguimientoMateria
 	                (idMateria, idFicha, tipoMateria, estado, horasTotales,horasEjecutadas,horasFaltantes,idMateriaPadre, created_at)
 	            VALUES 
 	                (val_idmateria, val_idficha, 'RAP', val_estado, val_horas,val_horasEjecutadas,val_horasFaltantes,val_idCompetencia, NOW());
 	        ELSE
-	            UPDATE seguimientoMaterias 
+	            UPDATE seguimientoMateria 
 	            SET estado=val_estado 
 	            WHERE idMateria = val_idmateria 
 	            AND idFicha = val_idficha; 
