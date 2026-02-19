@@ -13,7 +13,7 @@ BEGIN
     DECLARE cur CURSOR FOR
         SELECT hm.horaInicial, hm.horaFinal
         FROM sesionMateria sm 
-        INNER JOIN HorarioMateria hm ON sm.idHorarioMateria = hm.id
+        INNER JOIN horarioMateria hm ON sm.idHorarioMateria = hm.id
         INNER JOIN gradoMateria gm ON gm.id = hm.idGradoMateria
         INNER JOIN materia m ON m.id = gm.idMateria
         WHERE gm.idMateria = p_idMateria 
