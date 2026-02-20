@@ -112,6 +112,23 @@ class PensumController extends Controller
         }
     }
 
+    public function indexByRed(int $idRed)
+    {
+        try {
+            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])
+                ->where('idRed', $idRed)->get();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $programas
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 
 
     public function store(Request $request)
@@ -124,6 +141,7 @@ class PensumController extends Controller
             'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
             'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
             'documento'        => 'nullable|file|mimes:pdf|max:5120',
+            'idRed' => 'required|integer|exists:red,id',
         ]);
 
         try {
@@ -136,6 +154,7 @@ class PensumController extends Controller
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
                 'idCompany'           => KeyUtil::idCompany(),
+                'idRed' => $request->idRed,
             ]);
 
             $sanitize = function ($string) {

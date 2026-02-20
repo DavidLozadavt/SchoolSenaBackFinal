@@ -128,6 +128,7 @@ use App\Http\Controllers\gestion_materias\MateriaController;
 use App\Http\Controllers\auth\ForgotPasswordController;
 use App\Http\Controllers\TmpRapController;
 use App\Http\Controllers\gestion_horarios\DiaController;
+use App\Http\Controllers\RedController;
 
 /*
 |--------------------------------------------------------------------------
@@ -1138,6 +1139,7 @@ Route::get('get_all_categories_company/{id}', [CategoriasProController::class, '
 
 //ruta para traer asociados administradores activos
 Route::get('programasporRegional/{idRegional}', [PensumController::class, 'indexByRegional']);
+Route::get('programasporRed/{idRed}', [PensumController::class, 'indexByRed']);
 Route::get('get_asociados_admin', [PolizasController::class, 'getAsociadosAdmin']);
 Route::post('store_cuenta_cobrar_poliza', [PolizasController::class, 'storeCuentaCobrarPagoPoliza']);
 
@@ -1274,4 +1276,15 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::get('dias', [DiaController::class, 'index']); //,obtener todos los dias
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
+});
+
+// Red
+Route::middleware('auth:api')->group(function () {
+
+    Route::get('red', [RedController::class, 'index']);
+    Route::get('red/{id}', [RedController::class, 'show']);
+
+    Route::post('red', [RedController::class, 'store']);
+    Route::put('red/{id}', [RedController::class, 'update']);
+    Route::delete('red/{id}', [RedController::class, 'destroy']);
 });

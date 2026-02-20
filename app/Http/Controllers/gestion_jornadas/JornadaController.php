@@ -5,6 +5,7 @@ namespace App\Http\Controllers\gestion_jornadas;
 use App\Http\Controllers\Controller;
 use App\Models\Jornada;
 use App\Models\TipoJornada;
+use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -38,7 +39,7 @@ class JornadaController extends Controller
             return DB::transaction(function () use ($validated, $idEmpresa) {
 
                 // 🧠 Grupo de jornada (bandera)
-                $grupoJornada = (Jornada::where('idEmpresa', $idEmpresa)->max('grupoJornada') ?? 0) + 1;
+                $grupoJornada = (Jornada::where('idCompany', $idEmpresa)->max('grupoJornada') ?? 0) + 1;
 
                 // ⏱️ Cálculo de horas
                 $hInicio = Carbon::createFromFormat('H:i', $validated['horaInicial']);
@@ -63,6 +64,7 @@ class JornadaController extends Controller
                         'estado' => 'Activo',
                         'grupoJornada' => $grupoJornada,
                         'idEmpresa' => $idEmpresa,
+                        'idCompany' => $idEmpresa,
                         'idTipoJornada' => TipoJornada::MATERIAS,
                     ]);
                 }
