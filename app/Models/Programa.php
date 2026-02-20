@@ -22,7 +22,8 @@ class Programa extends Model
         'idNivelEducativo',
         'idTipoFormacion',
         'idEstadoPrograma',
-        'idCompany'
+        'idCompany',
+        'idRed'
     ];
 
     public function nivel()
@@ -88,5 +89,8 @@ class Programa extends Model
             'idGrado'         // FK en la tabla pivot para el modelo relacionado
         )->withPivot('cupos', 'fechaInicio', 'fechaFin', 'estado')
          ->withTimestamps();
+    }
+    public function red(){
+        return $this->belongsTo(Red::class, 'idRed');
     }
 }
