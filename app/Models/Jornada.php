@@ -22,6 +22,7 @@ class Jornada extends Model
         'grupoJornada',
         'idEmpresa',
         'idTipoJornada',
+        'idCompany'
     ];
 
     /**
