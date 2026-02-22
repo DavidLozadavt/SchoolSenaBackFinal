@@ -125,6 +125,8 @@ use App\Http\Controllers\TrabajadoresController;
 use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
 use App\Http\Controllers\gestion_horarios\GradoProgramaController;
 use App\Http\Controllers\gestion_materias\MateriaController;
+use App\Http\Controllers\gestion_actividades\ActividadController;
+use App\Http\Controllers\ambiente_virtual\GruposFichaController;
 use app\Http\Controllers\auth\ForgotPasswordController;
 
 /*
@@ -1221,7 +1223,37 @@ Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCo
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 
+// Rutas Actividades (módulo académico)
+Route::middleware('auth:api')->group(function () {
+    Route::get('actividades', [ActividadController::class, 'index']);
+    Route::post('actividades', [ActividadController::class, 'store']);
+    Route::post('cuestionarios', [ActividadController::class, 'storeCuestionario']);
+    Route::put('cuestionarios/{id}', [ActividadController::class, 'updateCuestionario']);
+    Route::post('actividades/upload-documento', [ActividadController::class, 'uploadDocumento']);
+    Route::post('actividades/{id}/upload-documento', [ActividadController::class, 'uploadDocumentoActividad']);
+    Route::get('actividades/{id}/materiales-apoyo', [ActividadController::class, 'materialesApoyo']);
+    Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
+    Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
+    Route::get('actividades/{id}', [ActividadController::class, 'show']);
+    Route::put('actividades/{id}', [ActividadController::class, 'update']);
+    Route::delete('actividades/{id}', [ActividadController::class, 'destroy']);
+    Route::get('tipo_actividades', [ActividadController::class, 'tipoActividades']);
+    Route::get('clasificacionactividad', [ActividadController::class, 'clasificaciones']);
+    Route::get('materia', [ActividadController::class, 'materias']);
+    Route::get('estados', [ActividadController::class, 'estados']);
+    Route::get('planeacion/ficha/{id}', [ActividadController::class, 'planeacionPorFicha']);
+    Route::get('planeacionactividades/ficha/{id}', [ActividadController::class, 'planeacionActividadesPorFicha']);
+    Route::post('planeacionactividades', [ActividadController::class, 'asignarPlaneacionActividad']);
+    Route::delete('planeacionactividades/{id}', [ActividadController::class, 'quitarPlaneacionActividad']);
 
+    // Grupos por ficha (ambiente virtual) - tabla grupos
+    Route::get('fichas/{idFicha}/grupos', [GruposFichaController::class, 'index']);
+    Route::get('fichas/{idFicha}/grupos/datos-crear', [GruposFichaController::class, 'datosCrear']);
+    Route::post('fichas/{idFicha}/grupos', [GruposFichaController::class, 'store']);
+    Route::get('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'show']);
+    Route::put('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'update']);
+    Route::delete('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'destroy']);
+});
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
