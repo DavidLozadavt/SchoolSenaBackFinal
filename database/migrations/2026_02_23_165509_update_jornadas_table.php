@@ -19,11 +19,10 @@ return new class extends Migration
             $table->dropColumn('idEmpresa');
 
             // Eliminar columnas que ya no se necesitan
-            $table->dropColumn(['diaSemana', 'grupoJornada']);
+            $table->dropColumn(['diaSemana', 'grupoJornada', 'idCompany']);
 
             // Agregar nuevas columnas
             $table->unsignedBigInteger('idCentroFormacion')->after('estado');
-            $table->unsignedInteger('idCompany')->after('updated_at');
 
             // Agregar nueva llave foránea
             $table->foreign('idCentroFormacion', 'jornadas_centroFormacion_FK')
