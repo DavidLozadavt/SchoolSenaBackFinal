@@ -218,6 +218,7 @@ class FichaController extends Controller
                 'regional:id,razonSocial',
                 'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
                 'asignacion.programa:id,nombrePrograma',
+                'asignacion.programa.grados', //Ya puedo capturar en idgrado
                 'instructorLider:id,idpersona', // Especificar campos para que Laravel resuelva correctamente la relación
                 'instructorLider.persona', // Luego cargar persona completa para que funcione rutaFotoUrl y todos los campos
             ])
@@ -840,6 +841,474 @@ class FichaController extends Controller
 
             return response()->json([
                 'message' => 'Error al eliminar la ficha',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener clases asignadas de un instructor
+     * Devuelve materias individuales con sus horarios específicos
+     * Si no se proporciona idInstructor, se obtiene del usuario autenticado
+     * 
+     * @param Request $request
+     * @param int|null $idInstructor ID del contrato (instructor) - opcional
+     * @return JsonResponse
+     */
+    public function clasesAsignadasInstructor(Request $request, ?int $idInstructor = null): JsonResponse
+    {
+        try {
+            // Si no se proporciona el ID del instructor, obtenerlo del usuario autenticado
+            if (!$idInstructor) {
+                try {
+                    $contratoActivo = KeyUtil::lastContractActive();
+                    if ($contratoActivo && $contratoActivo->id) {
+                        $idInstructor = $contratoActivo->id;
+                    } else {
+                        return response()->json([
+                            'message' => 'No se encontró un contrato activo para el usuario autenticado',
+                            'data' => [],
+                            'total' => 0
+                        ], 200);
+                    }
+                } catch (\Throwable $e) {
+                    return response()->json([
+                        'message' => 'Error al obtener el contrato del usuario autenticado',
+                        'error' => $e->getMessage(),
+                        'data' => [],
+                        'total' => 0
+                    ], 400);
+                }
+            }
+            $clases = DB::table('ficha as f')
+                ->select([
+                    'f.id as ficha_id',
+                    'f.codigo as ficha_codigo',
+                    'p.nombrePrograma as programa_nombre',
+                    'm.nombreMateria as materia_nombre',
+                    'j.nombreJornada as jornada_nombre',
+                    'j.nombreJornada as jornada_tipo',
+                    'd.dia as dia_semana',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
+                    'hm.fechaInicial as fechaInicial',
+                    'hm.fechaFinal as fechaFinal',
+                    DB::raw("CASE
+                        WHEN DATE(NOW()) BETWEEN DATE(hm.fechaInicial) AND DATE(COALESCE(hm.fechaFinal, '9999-12-31')) THEN 'EN CURSO'
+                        WHEN DATE(NOW()) < DATE(hm.fechaInicial) THEN 'PENDIENTE'
+                        ELSE 'COMPLETADO'
+                    END as estado"),
+                    DB::raw('COUNT(DISTINCT sm.id) as total_sesiones'),
+                    'c.id as contrato_id',
+                    DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
+                    'gp.id as idGradoPrograma',
+                    'g.nombreGrado as grado_nombre',
+                    'hm.id as idHorarioMateria'
+                ])
+                ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+                ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
+                ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
+                ->join('horarioMateria as hm', 'f.id', '=', 'hm.idFicha')
+                ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
+                ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
+                ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
+                ->join('contrato as c', 'hm.idContrato', '=', 'c.id')
+                ->join('persona as per', 'c.idpersona', '=', 'per.id')
+                ->leftJoin('sesionMateria as sm', 'hm.id', '=', 'sm.idHorarioMateria')
+                ->where('c.id', $idInstructor)
+                ->whereNotNull('hm.idDia')
+                ->whereNotNull('hm.horaInicial')
+                ->whereNotNull('hm.horaFinal')
+                ->groupBy([
+                    'f.id',
+                    'f.codigo',
+                    'p.nombrePrograma',
+                    'm.nombreMateria',
+                    'j.nombreJornada',
+                    'd.dia',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
+                    'hm.fechaInicial',
+                    'hm.fechaFinal',
+                    'c.id',
+                    'per.nombre1',
+                    'per.apellido1',
+                    'gp.id',
+                    'g.nombreGrado',
+                    'hm.id'
+                ])
+                ->get();
+
+            // Logs temporales para depuración
+            Log::info('=== CLASES ASIGNADAS DEL INSTRUCTOR ===', [
+                'idInstructor' => $idInstructor,
+                'total_clases' => $clases->count(),
+                'clases' => $clases->map(function ($clase) {
+                    return [
+                        'idHorarioMateria' => $clase->idHorarioMateria,
+                        'materia_nombre' => $clase->materia_nombre,
+                        'fechaInicial' => $clase->fechaInicial,
+                        'horaInicial' => $clase->horaInicial,
+                        'horaFinal' => $clase->horaFinal,
+                        'jornada_tipo' => $clase->jornada_tipo,
+                        'ficha_id' => $clase->ficha_id,
+                        'ficha_codigo' => $clase->ficha_codigo,
+                        'contrato_id' => $clase->contrato_id,
+                        'estado' => $clase->estado,
+                        'dia_semana' => $clase->dia_semana ?? null
+                    ];
+                })->toArray()
+            ]);
+
+            // Log adicional: verificar clases con la misma fecha pero diferentes horarios
+            $clasesPorFecha = $clases->groupBy('fechaInicial');
+            foreach ($clasesPorFecha as $fecha => $clasesFecha) {
+                if ($clasesFecha->count() > 1) {
+                    Log::info("=== MÚLTIPLES CLASES EN FECHA: {$fecha} ===", [
+                        'total' => $clasesFecha->count(),
+                        'clases' => $clasesFecha->map(function ($clase) {
+                            return [
+                                'idHorarioMateria' => $clase->idHorarioMateria,
+                                'materia_nombre' => $clase->materia_nombre,
+                                'horaInicial' => $clase->horaInicial,
+                                'horaFinal' => $clase->horaFinal,
+                                'jornada_tipo' => $clase->jornada_tipo,
+                                'ficha_id' => $clase->ficha_id
+                            ];
+                        })->toArray()
+                    ]);
+                }
+            }
+
+            // Log adicional: verificar clases que NO tienen el instructor asignado
+            $clasesSinInstructor = DB::table('horarioMateria as hm')
+                ->select([
+                    'hm.id as idHorarioMateria',
+                    'hm.fechaInicial',
+                    'hm.horaInicial',
+                    'hm.idContrato',
+                    'hm.idFicha'
+                ])
+                ->leftJoin('contrato as c', 'hm.idContrato', '=', 'c.id')
+                ->whereNotNull('hm.idDia')
+                ->whereNotNull('hm.horaInicial')
+                ->whereNotNull('hm.horaFinal')
+                ->where(function ($query) use ($idInstructor) {
+                    $query->whereNull('hm.idContrato')
+                        ->orWhere('hm.idContrato', '!=', $idInstructor);
+                })
+                ->whereIn('hm.fechaInicial', $clases->pluck('fechaInicial')->unique())
+                ->get();
+
+            if ($clasesSinInstructor->count() > 0) {
+                Log::info('=== CLASES CON LA MISMA FECHA PERO SIN ESTE INSTRUCTOR ===', [
+                    'total' => $clasesSinInstructor->count(),
+                    'clases' => $clasesSinInstructor->map(function ($clase) {
+                        return [
+                            'idHorarioMateria' => $clase->idHorarioMateria,
+                            'fechaInicial' => $clase->fechaInicial,
+                            'horaInicial' => $clase->horaInicial,
+                            'idContrato' => $clase->idContrato,
+                            'idFicha' => $clase->idFicha
+                        ];
+                    })->toArray()
+                ]);
+            }
+
+            // Log adicional: verificar si hay clases con la misma fecha pero diferentes horarios
+            $clasesPorFecha = $clases->groupBy('fechaInicial');
+            foreach ($clasesPorFecha as $fecha => $clasesFecha) {
+                if ($clasesFecha->count() > 1) {
+                    Log::info("=== MÚLTIPLES CLASES EN FECHA: {$fecha} ===", [
+                        'total' => $clasesFecha->count(),
+                        'clases' => $clasesFecha->map(function ($clase) {
+                            return [
+                                'idHorarioMateria' => $clase->idHorarioMateria,
+                                'materia_nombre' => $clase->materia_nombre,
+                                'horaInicial' => $clase->horaInicial,
+                                'horaFinal' => $clase->horaFinal,
+                                'jornada_tipo' => $clase->jornada_tipo,
+                                'ficha_id' => $clase->ficha_id
+                            ];
+                        })->toArray()
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'message' => 'Clases asignadas obtenidas correctamente',
+                'data' => $clases,
+                'total' => $clases->count()
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('Error al obtener clases asignadas del instructor', [
+                'idInstructor' => $idInstructor,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Error al obtener las clases asignadas',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener todas las clases con instructores asignados (sin filtro)
+     * Devuelve materias individuales con sus horarios específicos
+     * 
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function todasClasesAsignadas(Request $request): JsonResponse
+    {
+        try {
+            $clases = DB::table('ficha as f')
+                ->select([
+                    'f.id as ficha_id',
+                    'f.codigo as ficha_codigo',
+                    'p.nombrePrograma as programa_nombre',
+                    'm.nombreMateria as materia_nombre',
+                    'j.nombreJornada as jornada_nombre',
+                    'j.nombreJornada as jornada_tipo',
+                    'd.dia as dia_semana',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
+                    'hm.fechaInicial as fechaInicial',
+                    'hm.fechaFinal as fechaFinal',
+                    DB::raw("CASE
+                        WHEN DATE(NOW()) BETWEEN DATE(hm.fechaInicial) AND DATE(COALESCE(hm.fechaFinal, '9999-12-31')) THEN 'EN CURSO'
+                        WHEN DATE(NOW()) < DATE(hm.fechaInicial) THEN 'PENDIENTE'
+                        ELSE 'COMPLETADO'
+                    END as estado"),
+                    DB::raw('COUNT(DISTINCT sm.id) as total_sesiones'),
+                    'c.id as contrato_id',
+                    DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
+                    'gp.id as idGradoPrograma',
+                    'g.nombreGrado as grado_nombre',
+                    'hm.id as idHorarioMateria'
+                ])
+                ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+                ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
+                ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
+                ->join('horarioMateria as hm', 'f.id', '=', 'hm.idFicha')
+                ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
+                ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
+                ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
+                ->join('contrato as c', 'hm.idContrato', '=', 'c.id')
+                ->join('persona as per', 'c.idpersona', '=', 'per.id')
+                ->leftJoin('sesionMateria as sm', 'hm.id', '=', 'sm.idHorarioMateria')
+                ->whereNotNull('c.id')
+                ->whereNotNull('hm.idDia')
+                ->whereNotNull('hm.horaInicial')
+                ->whereNotNull('hm.horaFinal')
+                ->groupBy([
+                    'f.id',
+                    'f.codigo',
+                    'p.nombrePrograma',
+                    'm.nombreMateria',
+                    'j.nombreJornada',
+                    'd.dia',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
+                    'hm.fechaInicial',
+                    'hm.fechaFinal',
+                    'c.id',
+                    'per.nombre1',
+                    'per.apellido1',
+                    'gp.id',
+                    'g.nombreGrado',
+                    'hm.id'
+                ])
+                ->get();
+
+            return response()->json([
+                'message' => 'Clases asignadas obtenidas correctamente',
+                'data' => $clases,
+                'total' => $clases->count()
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('Error al obtener todas las clases asignadas', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Error al obtener las clases asignadas',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Obtener detalles de una clase por idHorarioMateria
+     * 
+     * @param Request $request
+     * @param int $idHorarioMateria
+     * @return JsonResponse
+     */
+    public function detalleClasePorHorario(Request $request, int $idHorarioMateria): JsonResponse
+    {
+        try {
+            // Primero obtener los datos de la clase usando el idHorarioMateria
+            $claseData = DB::table('horarioMateria as hm')
+                ->select([
+                    'f.id as ficha_id',
+                    'f.codigo as ficha_codigo',
+                    'p.nombrePrograma as programa_nombre',
+                    'm.nombreMateria as materia_nombre',
+                    'j.nombreJornada as jornada_nombre',
+                    'j.nombreJornada as jornada_tipo',
+                    'd.dia as dia_semana',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
+                    'hm.fechaInicial as fechaInicial',
+                    'hm.fechaFinal as fechaFinal',
+                    DB::raw('COUNT(DISTINCT sm.id) as total_sesiones'),
+                    'c.id as contrato_id',
+                    DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
+                    'gp.id as idGradoPrograma',
+                    'g.nombreGrado as grado_nombre',
+                    'g.id as idGrado',
+                    'hm.id as idHorarioMateria',
+                    'gm.id as idGradoMateria',
+                    'ap.fechaInicialClases',
+                    'ap.fechaFinalClases',
+                    'ap.id as idAsignacion'
+                ])
+                ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
+                ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+                ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
+                ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
+                ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
+                ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
+                ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
+                ->leftJoin('contrato as c', 'hm.idContrato', '=', 'c.id')
+                ->leftJoin('persona as per', 'c.idpersona', '=', 'per.id')
+                ->leftJoin('sesionMateria as sm', 'hm.id', '=', 'sm.idHorarioMateria')
+                ->where('hm.id', $idHorarioMateria)
+                ->groupBy([
+                    'f.id',
+                    'f.codigo',
+                    'p.nombrePrograma',
+                    'm.nombreMateria',
+                    'j.nombreJornada',
+                    'j.horaInicial',
+                    'd.dia',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
+                    'hm.fechaInicial',
+                    'hm.fechaFinal',
+                    'c.id',
+                    'per.nombre1',
+                    'per.apellido1',
+                    'gp.id',
+                    'g.nombreGrado',
+                    'g.id',
+                    'hm.id',
+                    'gm.id',
+                    'ap.fechaInicialClases',
+                    'ap.fechaFinalClases',
+                    'ap.id'
+                ])
+                ->first();
+
+            if (!$claseData) {
+                return response()->json([
+                    'message' => 'Clase no encontrada',
+                    'error' => 'No existe una clase con el ID proporcionado'
+                ], 404);
+            }
+
+            // Obtener la ficha completa para compatibilidad con el componente
+            $ficha = Ficha::with([
+                'jornada',
+                'asignacion' => function ($query) {
+                    $query->with([
+                        'periodo',
+                        'programa',
+                        'sede'
+                    ]);
+                },
+                'sede',
+                'infraestructura',
+                'regional',
+                'instructorLider.persona'
+            ])->find($claseData->ficha_id);
+
+            if (!$ficha) {
+                return response()->json([
+                    'message' => 'Ficha no encontrada',
+                    'error' => 'No existe una ficha asociada a esta clase'
+                ], 404);
+            }
+
+            // Obtener datos completos del instructor asignado a esta clase específica
+            $instructorClase = null;
+            if ($claseData->contrato_id) {
+                $contrato = \App\Models\Contract::with('persona')->find($claseData->contrato_id);
+                if ($contrato && $contrato->persona) {
+                    $instructorClase = [
+                        'id' => $contrato->id,
+                        'persona' => [
+                            'id' => $contrato->persona->id,
+                            'nombre1' => $contrato->persona->nombre1,
+                            'nombre2' => $contrato->persona->nombre2,
+                            'apellido1' => $contrato->persona->apellido1,
+                            'apellido2' => $contrato->persona->apellido2,
+                            'email' => $contrato->persona->email,
+                            'rutaFotoUrl' => $contrato->persona->rutaFotoUrl ?? null
+                        ]
+                    ];
+                }
+            }
+
+            // Agregar datos del instructor a claseData
+            $claseDataArray = (array) $claseData;
+            $claseDataArray['instructor'] = $instructorClase;
+
+            // Obtener TODAS las fechas de clase del instructor para el calendario
+            // Filtrar por contrato_id (instructor) para obtener todas las clases del instructor
+            $todasLasFechasClase = DB::table('horarioMateria as hm')
+                ->select([
+                    'hm.fechaInicial',
+                    'hm.fechaFinal',
+                    'd.dia as dia_semana'
+                ])
+                ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
+                ->where('hm.idContrato', $claseData->contrato_id)
+                ->whereNotNull('hm.fechaInicial')
+                ->whereNotNull('d.dia')
+                ->orderBy('hm.fechaInicial', 'asc')
+                ->get();
+
+            $apertura = AperturarPrograma::find($ficha->idAsignacion);
+
+            return response()->json([
+                'message' => 'Clase encontrada',
+                'data' => [
+                    'clase' => $claseDataArray,
+                    'ficha' => $ficha,
+                    'apertura' => $apertura,
+                    'todasLasFechasClase' => $todasLasFechasClase
+                ]
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('Error al obtener detalle de clase por horario', [
+                'idHorarioMateria' => $idHorarioMateria,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Error al obtener los detalles de la clase',
                 'error' => $e->getMessage()
             ], 500);
         }

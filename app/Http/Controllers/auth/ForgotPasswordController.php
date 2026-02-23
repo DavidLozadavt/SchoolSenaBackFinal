@@ -166,82 +166,124 @@ class ForgotPasswordController extends Controller
         }
     }
 
-    public function resetPassword(Request $request)
-    {
-        try {
-            $request->validate([
-                'email' => 'required|email|exists:usuario,email',
-                'token' => 'required|string',
-                'password' => 'required|min:8|confirmed'
+   public function resetPassword(Request $request)
+{
+    try {
+        $request->validate([
+            'email' => 'required|email|exists:usuario,email',
+            'token' => 'required|string',
+            'password' => 'required|min:8|confirmed'
+        ]);
+
+        $email = $request->email;
+        $token = $request->token;
+        $password = $request->password;
+
+        \Log::info('Reseteando contraseña para:', ['email' => $email]);
+
+        $resetRecord = DB::table('password_resets')
+            ->where('email', $email)
+            ->where('token', $token)
+            ->first();
+
+        if (!$resetRecord) {
+            \Log::warning('Token no encontrado');
+            return response()->json([
+                'message' => 'Token de recuperación inválido o expirado',
+                'error' => 'invalid_token'
+            ], 400);
+        }
+
+        \Log::info('Token encontrado:', ['created_at' => $resetRecord->created_at]);
+
+        $createdAt = strtotime($resetRecord->created_at);
+        $now = time();
+        $hoursPassed = floor(($now - $createdAt) / 3600);
+        
+        \Log::info('Horas desde creación:', ['hours' => $hoursPassed]);
+        
+        if ($hoursPassed > 24) {
+            \Log::warning('Token expirado');
+            DB::table('password_resets')->where('email', $email)->delete();
+            return response()->json([
+                'message' => 'El enlace de recuperación ha expirado',
+                'error' => 'expired_token'
+            ], 400);
+        }
+
+        $affected = DB::table('usuario')
+            ->where('email', $email)
+            ->update([
+                'contrasena' => Hash::make($password),
+                'updated_at' => now()
             ]);
 
-            $email = $request->email;
-            $token = $request->token;
-            $password = $request->password;
+        \Log::info('Contraseña actualizada:', ['affected_rows' => $affected]);
 
-            \Log::info('Reseteando contraseña para:', ['email' => $email]);
-
-            $resetRecord = DB::table('password_resets')
-                ->where('email', $email)
-                ->where('token', $token)
-                ->first();
-
-            if (!$resetRecord) {
-                \Log::warning('Token no encontrado');
-                return response()->json([
-                    'message' => 'Token de recuperación inválido o expirado',
-                    'error' => 'invalid_token'
-                ], 400);
-            }
-
-            \Log::info('Token encontrado:', ['created_at' => $resetRecord->created_at]);
-
-            $createdAt = strtotime($resetRecord->created_at);
-            $now = time();
-            $hoursPassed = floor(($now - $createdAt) / 3600);
-            
-            \Log::info('Horas desde creación:', ['hours' => $hoursPassed]);
-            
-            if ($hoursPassed > 24) {
-                \Log::warning('Token expirado');
-                DB::table('password_resets')->where('email', $email)->delete();
-                return response()->json([
-                    'message' => 'El enlace de recuperación ha expirado',
-                    'error' => 'expired_token'
-                ], 400);
-            }
-
-            $affected = DB::table('usuario')
-                ->where('email', $email)
-                ->update([
-                    'contrasena' => Hash::make($password),
-                    'updated_at' => now()
-                ]);
-
-            \Log::info('Contraseña actualizada:', ['affected_rows' => $affected]);
-
-            if ($affected === 0) {
-                \Log::warning('No se actualizó ninguna fila');
-                return response()->json([
-                    'message' => 'No se pudo actualizar la contraseña',
-                    'error' => 'update_failed'
-                ], 400);
-            }
-
-            DB::table('password_resets')->where('email', $email)->delete();
-            DB::table('otps')->where('identifier', $email)->delete();
-
-            \Log::info('Registros limpiados');
-
+        if ($affected === 0) {
+            \Log::warning('No se actualizó ninguna fila');
             return response()->json([
-                'message' => 'Contraseña actualizada correctamente. Ya puedes iniciar sesión con tu nueva contraseña.'
-            ], 200);
-
-        } catch (\Exception $e) {
-            \Log::error('Error en resetPassword: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error interno del servidor: ' . ($e->getMessage())
-            ], 500);
+                'message' => 'No se pudo actualizar la contraseña',
+                'error' => 'update_failed'
+            ], 400);
         }
+
+        // ===== NUEVO: Cambiar state_id de 18 a 1 =====
+        try {
+            // Buscar el usuario en la tabla users
+            $user = \App\Models\User::where('email', $email)->first();
+            
+            if ($user) {
+                \Log::info('Usuario encontrado en tabla users:', ['user_id' => $user->id]);
+                
+                // Buscar la activación del usuario
+                $activacion = \App\Models\ActivationCompanyUser::where('user_id', $user->id)->first();
+                
+                if ($activacion && $activacion->state_id == 18) {
+                    \Log::info('Cambiando state_id de 18 a 1 para usuario:', ['user_id' => $user->id]);
+                    
+                    $activacion->state_id = 1;
+                    $activacion->save();
+                    
+                    \Log::info('State_id actualizado exitosamente');
+                    
+                    // Devolver response indicando que el proceso se completó
+                    DB::table('password_resets')->where('email', $email)->delete();
+                    DB::table('otps')->where('identifier', $email)->delete();
+
+                    return response()->json([
+                        'message' => '¡Proceso completado! Contraseña actualizada y perfil activado correctamente.',
+                        'profile_completed' => true
+                    ], 200);
+                } else {
+                    \Log::info('Usuario no necesita cambio de state_id:', [
+                        'activacion_exists' => $activacion ? 'yes' : 'no',
+                        'state_id' => $activacion ? $activacion->state_id : 'N/A'
+                    ]);
+                }
+            } else {
+                \Log::warning('Usuario no encontrado en tabla users con email:', ['email' => $email]);
+            }
+        } catch (\Exception $e) {
+            \Log::error('Error actualizando state_id: ' . $e->getMessage());
+        }
+        // ===== FIN NUEVO =====
+
+        DB::table('password_resets')->where('email', $email)->delete();
+        DB::table('otps')->where('identifier', $email)->delete();
+
+        \Log::info('Registros limpiados');
+
+        return response()->json([
+            'message' => 'Contraseña actualizada correctamente. Ya puedes iniciar sesión con tu nueva contraseña.',
+            'profile_completed' => false
+        ], 200);
+
+    } catch (\Exception $e) {
+        \Log::error('Error en resetPassword: ' . $e->getMessage());
+        return response()->json([
+            'message' => 'Error interno del servidor: ' . ($e->getMessage())
+        ], 500);
     }
+}
 }

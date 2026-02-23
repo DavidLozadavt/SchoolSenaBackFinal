@@ -7,6 +7,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Util\KeyUtil;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use App\Models\ActivationCompanyUser;
+use Illuminate\Support\Facades\Log;
 
 class TrabajadoresController extends Controller
 {
@@ -15,6 +17,7 @@ class TrabajadoresController extends Controller
     public function cargarDesdeCSV(Request $request)
 {
     try {
+
         $archivo = $request->file('archivo');
         if (!$archivo || !in_array($archivo->getClientOriginalExtension(), ['xlsx', 'xls'])) {
             return response()->json(['error' => 'El archivo debe ser un archivo Excel válido'], 400);
@@ -81,22 +84,41 @@ class TrabajadoresController extends Controller
 
 
     public function ejecutarProcedimiento()
-    {
-        try {
-            $companyId = KeyUtil::idCompany();
-            $encryptedPassword = bcrypt('123');
+{
+    try {
+        $user = auth()->user();
+        $userId = $user->id;
 
-            DB::select('CALL `cargarTrabajadores`(:companyId, :encryptedPassword)', [
-                'companyId' => $companyId,
-                'encryptedPassword' => $encryptedPassword
-            ]);
-    
-            return response()->json(['message' => 'Operación realizada con éxito!'], 200, [], JSON_UNESCAPED_UNICODE);
-    
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+        \Log::info('ID del usuario: ' . $userId);
+
+        $activation = ActivationCompanyUser::byUser($userId)
+            ->active()
+            ->first();
+
+        if (!$activation) {
+            return response()->json(['error' => 'Usuario no tiene empresa asignada'], 400);
         }
+
+        $companyId = $activation->company_id;
+        $centroId = $user->idCentroFormacion; // 🔥 aquí está la corrección
+
+        \Log::info('Centro del usuario: ' . $centroId);
+
+        $encryptedPassword = bcrypt('123');
+
+        DB::statement('CALL cargarTrabajadores(?, ?, ?)', [
+            $companyId,
+            $centroId,
+            $encryptedPassword
+        ]);
+
+        return response()->json(['message' => 'Operación realizada con éxito!'], 200);
+
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
     }
+}
+
     
     
 }   

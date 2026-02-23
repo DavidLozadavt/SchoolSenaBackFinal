@@ -152,7 +152,7 @@ class AuthController extends Controller
         $roles = $user_active->roles;
         $permissions = $roles->pluck('permissions')->flatten()->unique('id')->pluck('name');
         $token = JWTAuth::claims([
-            'idCompany' => $user_active->idCompany,
+            'idCompany' => $user_active->company_id,
             'roles' => $roles->pluck('name'),
             'permissions' => $permissions,
             'company' => $user_active->company,

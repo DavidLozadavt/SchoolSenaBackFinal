@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class GradoMateria extends Model
 {
@@ -28,5 +29,9 @@ class GradoMateria extends Model
 
     public function docente(){
         return $this->belongsTo(ActivationCompanyUser::class, 'idDocente');
+    }
+
+    public function horarioMateria(){
+        return $this->hasMany(HorarioMateria::class, 'idGradoMateria');
     }
 }

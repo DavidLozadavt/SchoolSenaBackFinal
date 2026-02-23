@@ -10,7 +10,6 @@ class Sede extends Model
     use HasFactory;
 
     protected $table = 'sedes';
-    public const RUTA_FOTO_DEFAULT = 'sedes/default.png';
 
     protected $fillable = [
         'nombre',
@@ -26,6 +25,22 @@ class Sede extends Model
         'idResponsable',
         'idCentroFormacion'
     ];
+
+    const RUTA_FOTO = "urlImagen";
+    const RUTA_FOTO_DEFAULT = "/default/logoweb.png";
+
+    protected $appends = ['rutaFotoUrl'];
+
+    public function getRutaFotoUrlAttribute()
+    {
+        if (
+            isset($this->attributes['urlImagen']) &&
+            isset($this->attributes['urlImagen'][0])
+        ) {
+            return url($this->attributes['urlImagen']);
+        }
+        return url(self::RUTA_FOTO_DEFAULT);
+    }
 
     /**
      * RELACIONES

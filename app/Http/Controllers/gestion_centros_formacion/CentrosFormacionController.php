@@ -243,7 +243,17 @@ class CentrosFormacionController extends Controller
             $activeUser->fechaFin = '2040-01-15';
             $activeUser->save();
 
-            $rol = Rol::where('name', 'ADMINISTRADOR SENA')->first();
+            $rol = Rol::firstOrCreate(
+                [
+                    'name' => 'ADMINISTRADOR SENA',
+                    'guard_name' => 'web',
+                    'company_id' => $request->idEmpresa
+                ],
+                [
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]
+            );
 
             if ($rol) {
                 $activeUser->assignRole($rol);
@@ -280,6 +290,7 @@ class CentrosFormacionController extends Controller
             'data' => $centros
         ]);
     }
+    
     public function destroy($id)
     {
         DB::beginTransaction();
