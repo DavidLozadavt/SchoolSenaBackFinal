@@ -16,12 +16,12 @@ class Red extends Model
         'foto'
     ];
 
-    const RUTA_FOTO = "foto";
+    const RUTA_FOTO = "fotoUrl";
     const RUTA_FOTO_DEFAULT = "/default/logoweb.png";
 
-    protected $appends = ['foto'];
+    protected $appends = ['fotoUrl'];
 
-    public function geFotoAttribute()
+    public function getFotoUrlAttribute()
     {
         if (
             isset($this->attributes['foto']) &&

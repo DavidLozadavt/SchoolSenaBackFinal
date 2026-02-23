@@ -1139,6 +1139,7 @@ Route::get('get_all_categories_company/{id}', [CategoriasProController::class, '
 
 //ruta para traer asociados administradores activos
 Route::get('programasporRegional/{idRegional}', [PensumController::class, 'indexByRegional']);
+Route::get('programasporRed/{idRed}', [PensumController::class, 'indexByRed']);
 Route::get('get_asociados_admin', [PolizasController::class, 'getAsociadosAdmin']);
 Route::post('store_cuenta_cobrar_poliza', [PolizasController::class, 'storeCuentaCobrarPagoPoliza']);
 
