@@ -131,7 +131,12 @@ use App\Http\Controllers\gestion_horarios\DiaController;
 use App\Http\Controllers\RedController;
 use App\Http\Controllers\gestion_actividades\ActividadController;
 use App\Http\Controllers\ambiente_virtual\GruposFichaController;
-
+use App\Http\Controllers\MatriculaAcademicaController;
+use App\Http\Controllers\AnotacionesDisciplinariasController;
+use App\Http\Controllers\AsistenciaController;
+use App\Http\Controllers\CompromisosController;
+use App\Http\Controllers\gestion_pensum\InasistenciaController;
+use App\Http\Controllers\SancionesController;
 
 /*
 |--------------------------------------------------------------------------
@@ -1322,4 +1327,24 @@ Route::middleware('auth:api')->group(function () {
     Route::post('red', [RedController::class, 'store']);
     Route::put('red/{id}', [RedController::class, 'update']);
     Route::delete('red/{id}', [RedController::class, 'destroy']);
+    Route::get('anotaciones_by_matricula/{idMatricula}', [AnotacionesDisciplinariasController::class, 'getAnotacionesByMatriculaAcademica']);
+
 });
+Route::post('anotacionesdisciplinarias/{idMatricula}/matricula', [AnotacionesDisciplinariasController::class, 'anotacionesMatricula']);
+Route::put('sanciones/{id}',  [SancionesController::class, 'update']);
+
+//compromisos
+Route::get('compromisos_by_anotacion/{idAnotacion}',  [CompromisosController::class, 'commitmentsByAnotation']); 
+Route::post('compromisos', [CompromisosController::class, 'store']);
+Route::post('compromisos/update-cumplido', [CompromisosController::class, 'updateCumplido']);
+
+    //sanciones
+Route::get('sanciones_by_anotacion/{idAnotacion}',  [SancionesController::class, 'getPenaltiesforannotations']); 
+Route::post('sanciones',  [SancionesController::class, 'store']); 
+
+
+//asistencia y inasistencia
+Route::apiResource('asistencia', AsistenciaController::class);
+Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
+Route::get('get_assistances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
+Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);

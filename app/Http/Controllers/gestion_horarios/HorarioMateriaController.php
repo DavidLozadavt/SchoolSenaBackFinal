@@ -27,6 +27,8 @@ use App\Models\AsignacionPeriodoPrograma;
 use App\Http\Controllers\MateriaController;
 use App\Models\Ficha;
 use App\Models\Dia;
+use App\Models\Asistencia;
+use App\Models\MatriculaAcademica;
 
 class HorarioMateriaController extends Controller
 {
@@ -196,13 +198,47 @@ class HorarioMateriaController extends Controller
 
                 if (!$exists) {
                     $lastSession++;
-                    SesionMateria::create([
+                    $nuevaSesion = SesionMateria::create([
                         'numeroSesion' => $lastSession,
                         'idHorarioMateria' => $horarioMateria->id,
                         'fechaSesion' => $currentDate->toDateString(),
                         'created_at' => now(),
                         'updated_at' => now(),
                     ]);
+
+                    // Buscar todos los aprendices matriculados en esta Ficha y Materia
+                    $matriculas = MatriculaAcademica::where('idFicha', $horarioMateria->idFicha)
+                        ->whereHas('materia', function ($query) use ($horarioMateria) {
+                            $query->whereHas('gradoMateria', function($q) use ($horarioMateria) {
+                                $q->where('id', $horarioMateria->idGradoMateria);
+                            });
+                        })
+                        ->get();
+
+                    if ($matriculas->isEmpty()) {
+                        // Si la consulta anterior no trajo resultados, intentar buscar la materia directo
+                        $matriculas = MatriculaAcademica::where('idFicha', $horarioMateria->idFicha)
+                            ->where('idMateria', $horarioMateria->materia->idMateria ?? null)
+                            ->get();
+                    }
+
+                    // Crear el registro de asistencia por defecto en "false" (NO ASISTIÓ)
+                    $asistenciaData = [];
+                    $now = now();
+                    foreach ($matriculas as $matricula) {
+                        $asistenciaData[] = [
+                            'idSesionMateria' => $nuevaSesion->id,
+                            'idMatriculaAcademica' => $matricula->id,
+                            'asistio' => false,
+                            'horaLLegada' => null,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
+                    }
+
+                    if (!empty($asistenciaData)) {
+                        Asistencia::insert($asistenciaData);
+                    }
                 }
             }
             $currentDate->addDay();
