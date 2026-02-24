@@ -115,7 +115,7 @@ class PensumController extends Controller
     public function indexByRed(int $idRed)
     {
         try {
-            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])
+            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'red'])
                 ->where('idRed', $idRed)->get();
 
             return response()->json([
