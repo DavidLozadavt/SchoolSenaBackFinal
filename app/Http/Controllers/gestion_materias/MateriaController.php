@@ -207,7 +207,7 @@ class MateriaController extends Controller
      * @param  \App\Models\Materia  $materia
      * @return \Illuminate\Http\Response
      */
-    public function update(Request $request, int $id)
+    public function update(Request $request, $id)
     {
         try {
             DB::beginTransaction();
@@ -425,7 +425,7 @@ class MateriaController extends Controller
         }
     }
 
-    public function getById(int $id)
+    public function getById($id)
     {
 
         $materia = Materia::select(

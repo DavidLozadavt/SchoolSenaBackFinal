@@ -56,6 +56,9 @@ class Kernel extends ConsoleKernel
         $schedule->command('invoices:retry-failed')->hourly();
         $schedule->command('store:pago-administracion')->dailyAt('7:00')->withoutOverlapping();
 
+        // Registrar inasistencias automáticas para clases que ya terminaron
+        $schedule->command('asistencia:registrar-inasistencias')->everyThirtyMinutes()->withoutOverlapping();
+
         //crear copia local de la base de datos
         $schedule->command('backup:run --only-db --disable-notifications')
             ->dailyAt('02:00')

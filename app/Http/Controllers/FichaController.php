@@ -903,7 +903,9 @@ class FichaController extends Controller
                     DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
                     'gp.id as idGradoPrograma',
                     'g.nombreGrado as grado_nombre',
-                    'hm.id as idHorarioMateria'
+                    'hm.id as idHorarioMateria',
+                    'hm.idGradoMateria as idGradoMateria',
+                    'gm.idMateria as idMateria'
                 ])
                 ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
                 ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
@@ -937,7 +939,9 @@ class FichaController extends Controller
                     'per.apellido1',
                     'gp.id',
                     'g.nombreGrado',
-                    'hm.id'
+                    'hm.id',
+                    'hm.idGradoMateria',
+                    'gm.idMateria'
                 ])
                 ->get();
 
@@ -1089,7 +1093,9 @@ class FichaController extends Controller
                     DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
                     'gp.id as idGradoPrograma',
                     'g.nombreGrado as grado_nombre',
-                    'hm.id as idHorarioMateria'
+                    'hm.id as idHorarioMateria',
+                    'hm.idGradoMateria as idGradoMateria',
+                    'gm.idMateria as idMateria'
                 ])
                 ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
                 ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
@@ -1123,7 +1129,9 @@ class FichaController extends Controller
                     'per.apellido1',
                     'gp.id',
                     'g.nombreGrado',
-                    'hm.id'
+                    'hm.id',
+                    'hm.idGradoMateria',
+                    'gm.idMateria'
                 ])
                 ->get();
 
