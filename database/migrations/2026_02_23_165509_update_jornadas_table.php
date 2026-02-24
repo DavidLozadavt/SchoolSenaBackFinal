@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
@@ -13,18 +14,33 @@ return new class extends Migration
      */
     public function up()
     {
+        // Eliminar llaves foráneas y columnas viejas si existen
+        if (Schema::hasColumn('jornadas', 'idEmpresa')) {
+            Schema::table('jornadas', function (Blueprint $table) {
+                $table->dropForeign('jornadas_idempresa_foreign');
+                $table->dropColumn('idEmpresa');
+            });
+        }
+
+        // Eliminar columnas que ya no se necesitan
+        $columnsToDrop = ['diaSemana', 'grupoJornada', 'idCompany'];
+        foreach ($columnsToDrop as $col) {
+            if (Schema::hasColumn('jornadas', $col)) {
+                Schema::table('jornadas', function (Blueprint $table) use ($col) {
+                    $table->dropColumn($col);
+                });
+            }
+        }
+
+        // Agregar idCentroFormacion 
         Schema::table('jornadas', function (Blueprint $table) {
-            // Eliminar llave foránea existente y columna idEmpresa
-            $table->dropForeign('jornadas_idempresa_foreign');
-            $table->dropColumn('idEmpresa');
+            // SE DEJA COMO NULLABLE PARA NO ROMPER LA BASE DE DATOS Y PODER CREAR LA FK, 
+            //ACTIVAR MANUALMENTE DESPUES DE EJECUTAR LA MIGRACION Y ASIGNAR EL VALOR A LOS REGISTROS EXISTENTES
+            $table->unsignedBigInteger('idCentroFormacion')->nullable()->after('estado');
+        });
 
-            // Eliminar columnas que ya no se necesitan
-            $table->dropColumn(['diaSemana', 'grupoJornada', 'idCompany']);
-
-            // Agregar nuevas columnas
-            $table->unsignedBigInteger('idCentroFormacion')->after('estado');
-
-            // Agregar nueva llave foránea
+        // Agregar llave foránea
+        Schema::table('jornadas', function (Blueprint $table) {
             $table->foreign('idCentroFormacion', 'jornadas_centroFormacion_FK')
                 ->references('id')
                 ->on('centroFormacion');
@@ -38,26 +54,6 @@ return new class extends Migration
      */
     public function down()
     {
-        Schema::table('jornadas', function (Blueprint $table) {
-            $table->dropForeign('jornadas_centroFormacion_FK');
-            $table->dropColumn(['idCentroFormacion', 'idCompany']);
-
-            $table->enum('diaSemana', [
-                'Lunes',
-                'Martes',
-                'Miércoles',
-                'Jueves',
-                'Viernes',
-                'Sábado',
-                'Domingo'
-            ])->after('nombreJornada');
-
-            $table->integer('grupoJornada')->nullable()->after('estado');
-            $table->unsignedInteger('idEmpresa')->after('grupoJornada');
-            $table->foreign('idEmpresa', 'jornadas_idempresa_foreign')
-                ->references('id')
-                ->on('empresa')
-                ->onDelete('cascade');
-        });
+        //
     }
 };
