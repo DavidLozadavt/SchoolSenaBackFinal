@@ -42,10 +42,10 @@ class PensumController extends Controller
             ]);
 
             $nombreNivel = strtoupper(trim($request->nombreNivel));
-            
+
             // Buscar si ya existe
             $nivelExistente = NivelEducativo::where('nombreNivel', $nombreNivel)->first();
-            
+
             if ($nivelExistente) {
                 // Si existe, retornar el existente
                 return response()->json([
@@ -231,6 +231,7 @@ class PensumController extends Controller
             'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
             'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
             'documento'        => 'nullable|file|mimes:pdf|max:5120',
+            'idRed' => 'nullable|integer'
         ]);
 
         try {
@@ -243,6 +244,7 @@ class PensumController extends Controller
                 'idNivelEducativo'    => $request->idNivelEducativo,
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
+                'idRed' =>$request->idRed
             ];
 
             if ($request->hasFile('documento')) {
