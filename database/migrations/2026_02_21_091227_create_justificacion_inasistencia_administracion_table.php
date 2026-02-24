@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('justificacioninasistenciaadministracion', function (Blueprint $table) {
+        Schema::create('justificacionInasistenciaAdministracion', function (Blueprint $table) {
             $table->id();
 
             $table->unsignedBigInteger('idAsisAdmin')
@@ -55,7 +55,7 @@ return new class extends Migration
             // 🔹 Foreign Keys
             $table->foreign('idAsisAdmin')
                   ->references('id')
-                  ->on('asistenciaadministracion');
+                  ->on('asistenciaAdministracion');
 
             $table->foreign('idExcusa')
                   ->references('id')
@@ -74,6 +74,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('justificacioninasistenciaadministracion');
+        Schema::dropIfExists('justificacionInasistenciaAdministracion');
     }
 };

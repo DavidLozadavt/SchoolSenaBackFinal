@@ -8,11 +8,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('asistenciaadministracion', function (Blueprint $table) {
+        Schema::create('asistenciaAdministracion', function (Blueprint $table) {
             $table->id();
 
-            $table->date('fechaLLegada');
-            $table->time('horaLLegada')->nullable();
+            $table->date('fechaLlegada');
+            $table->time('horaLlegada')->nullable();
             $table->time('horaSalida')->nullable();
             $table->boolean('asistio')->default(false);
 
@@ -28,6 +28,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('asistenciaadministracion');
+        Schema::dropIfExists('asistenciaAdministracion');
     }
 };
