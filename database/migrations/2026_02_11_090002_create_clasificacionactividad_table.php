@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('clasificacionactividad', function (Blueprint $table) {
+        Schema::create('clasificacionActividad', function (Blueprint $table) {
             $table->id();
             $table->string('nombreClasificacionActividad', 255);
             $table->integer('porcentaje');
@@ -16,15 +16,15 @@ return new class extends Migration
             $table->unsignedBigInteger('idPrograma')->nullable();
             $table->timestamps();
 
-            $table->foreign('idCompany', 'clasificacionactividad_idcompany_foreign')
+            $table->foreign('idCompany', 'clasificacionActividad_idCompany_foreign')
                 ->references('id')->on('empresa')->onDelete('set null');
-            $table->foreign('idPrograma', 'clasificacionactividad_idprograma_foreign')
+            $table->foreign('idPrograma', 'clasificacionActividad_idPrograma_foreign')
                 ->references('id')->on('programa');
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('clasificacionactividad');
+        Schema::dropIfExists('clasificacionActividad');
     }
 };

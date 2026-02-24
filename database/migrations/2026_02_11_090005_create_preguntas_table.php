@@ -20,7 +20,7 @@ return new class extends Migration
             $table->text('urlDocumento')->nullable();
 
             $table->foreign('idTipoPregunta', 'preguntas_idtipopregunta_foreign')
-                ->references('id')->on('tipo_preguntas');
+                ->references('id')->on('tipoPreguntas');
             $table->foreign('idActividad', 'preguntas_idactividad_foreign')
                 ->references('id')->on('actividades');
         });

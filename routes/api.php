@@ -129,6 +129,9 @@ use App\Http\Controllers\auth\ForgotPasswordController;
 use App\Http\Controllers\TmpRapController;
 use App\Http\Controllers\gestion_horarios\DiaController;
 use App\Http\Controllers\RedController;
+use App\Http\Controllers\gestion_actividades\ActividadController;
+use App\Http\Controllers\ambiente_virtual\GruposFichaController;
+
 
 /*
 |--------------------------------------------------------------------------
@@ -1114,7 +1117,7 @@ Route::get('get_viajes_for_autorizacion', [AutorizacionController::class, 'getVi
 
 Route::apiResource('grupos_nomina', GrupoNominaController::class);
 
-// configuaracion productos 
+// configuaracion productos
 
 Route::get('products_by_tipo_producto', [ConfiguracionProductosController::class, 'getProductosByTipoProducto']);
 Route::post('update_valor_venta_producto', [ConfiguracionProductosController::class, 'updateValorVentaProducto']);
@@ -1169,7 +1172,7 @@ Route::get('programa/{idPrograma}/fichas', [DocumentoFichaController::class, 'fi
 Route::get('programa/{idPrograma}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizados']);
 Route::put('programa/{idPrograma}/documento/{idTipoDocumento}/autorizar', [DocumentoFichaController::class, 'autorizarDocumento']);
 
-//ruta de Periodos 
+//ruta de Periodos
 Route::post('/periodos', [PeriodosController::class, 'store']);
 Route::get('/periodos', [PeriodosController::class, 'index']);
 Route::put('/periodos/{id}', [PeriodosController::class, 'update']);
@@ -1228,7 +1231,37 @@ Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
 
-//Juicios evaluativos:
+// Rutas Actividades (módulo académico)
+Route::middleware('auth:api')->group(function () {
+    Route::get('actividades', [ActividadController::class, 'index']);
+    Route::post('actividades', [ActividadController::class, 'store']);
+    Route::post('cuestionarios', [ActividadController::class, 'storeCuestionario']);
+    Route::put('cuestionarios/{id}', [ActividadController::class, 'updateCuestionario']);
+    Route::post('actividades/upload-documento', [ActividadController::class, 'uploadDocumento']);
+    Route::post('actividades/{id}/upload-documento', [ActividadController::class, 'uploadDocumentoActividad']);
+    Route::get('actividades/{id}/materiales-apoyo', [ActividadController::class, 'materialesApoyo']);
+    Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
+    Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
+    Route::get('actividades/{id}', [ActividadController::class, 'show']);
+    Route::put('actividades/{id}', [ActividadController::class, 'update']);
+    Route::delete('actividades/{id}', [ActividadController::class, 'destroy']);
+    Route::get('tipo_actividades', [ActividadController::class, 'tipoActividades']);
+    Route::get('clasificacionactividad', [ActividadController::class, 'clasificaciones']);
+    Route::get('materia', [ActividadController::class, 'materias']);
+    Route::get('estados', [ActividadController::class, 'estados']);
+    Route::get('planeacion/ficha/{id}', [ActividadController::class, 'planeacionPorFicha']);
+    Route::get('planeacionactividades/ficha/{id}', [ActividadController::class, 'planeacionActividadesPorFicha']);
+    Route::post('planeacionactividades', [ActividadController::class, 'asignarPlaneacionActividad']);
+    Route::delete('planeacionactividades/{id}', [ActividadController::class, 'quitarPlaneacionActividad']);
+
+    // Grupos por ficha (ambiente virtual) - tabla grupos
+    Route::get('fichas/{idFicha}/grupos', [GruposFichaController::class, 'index']);
+    Route::get('fichas/{idFicha}/grupos/datos-crear', [GruposFichaController::class, 'datosCrear']);
+    Route::post('fichas/{idFicha}/grupos', [GruposFichaController::class, 'store']);
+    Route::get('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'show']);
+    Route::put('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'update']);
+    Route::delete('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'destroy']);
+});//Juicios evaluativos:
 Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 
 //rutas de Jornadas
@@ -1247,7 +1280,7 @@ Route::get('sedes-institucionales/{id}', [SedeInstitucionalController::class, 's
 
 // Rutas de Infraestructura
 Route::post('tiposInfraestructuras', [InfraestructuraController::class, 'storeTiposInfraestructura']); // Tipo de infraestructura
-Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']); 
+Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']);
 Route::get('sedes/{idSede}/infraestructuras', [InfraestructuraController::class, 'index']);
 Route::get('regionalInfraestructuras/{idRegional}', [InfraestructuraController::class, 'infraestructurasPorRegional']);
 Route::post('infraestructuras', [InfraestructuraController::class, 'store']);

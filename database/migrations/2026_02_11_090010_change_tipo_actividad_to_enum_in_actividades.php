@@ -29,7 +29,7 @@ return new class extends Migration
         Schema::table('actividades', function (Blueprint $table) {
             $table->unsignedInteger('idTipoActividad')->after('id');
             $table->foreign('idTipoActividad', 'actividades_idtipoactividad_foreign')
-                ->references('id')->on('tipo_actividades');
+                ->references('id')->on('tipoActividades');
         });
     }
 };

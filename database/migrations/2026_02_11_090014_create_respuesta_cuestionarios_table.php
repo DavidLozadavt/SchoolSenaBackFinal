@@ -8,10 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (Schema::hasTable('respuesta_cuestionarios')) {
+        if (Schema::hasTable('respuestaCuestionarios')) {
             return;
         }
-        Schema::create('respuesta_cuestionarios', function (Blueprint $table) {
+        Schema::create('respuestaCuestionarios', function (Blueprint $table) {
             $table->increments('id');
             $table->text('respuesta')->nullable();
             $table->double('puntaje')->nullable();
@@ -20,17 +20,17 @@ return new class extends Migration
             $table->unsignedInteger('idPregunta');
             $table->unsignedInteger('idRespuesta')->nullable();
 
-            $table->foreign('idCalificacion', 'respuesta_cuestionarios_idcalificacion_foreign')
-                ->references('id')->on('calificacionactividad');
-            $table->foreign('idPregunta', 'respuesta_cuestionarios_idpregunta_foreign')
+            $table->foreign('idCalificacion', 'respuestaCuestionarios_idcalificacion_foreign')
+                ->references('id')->on('calificacionActividad');
+            $table->foreign('idPregunta', 'respuestaCuestionarios_idpregunta_foreign')
                 ->references('id')->on('preguntas');
-            $table->foreign('idRespuesta', 'respuesta_cuestionarios_idrespuesta_foreign')
+            $table->foreign('idRespuesta', 'respuestaCuestionarios_idrespuesta_foreign')
                 ->references('id')->on('respuestas');
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('respuesta_cuestionarios');
+        Schema::dropIfExists('respuestaCuestionarios');
     }
 };

@@ -8,10 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (Schema::hasTable('calificacionactividad')) {
+        if (Schema::hasTable('calificacionActividad')) {
             return;
         }
-        Schema::create('calificacionactividad', function (Blueprint $table) {
+        Schema::create('calificacionActividad', function (Blueprint $table) {
             $table->id();
             $table->text('archivo')->nullable();
             $table->date('fechaCreacion');
@@ -31,23 +31,23 @@ return new class extends Migration
             $table->timestamps();
             $table->boolean('notificacionEnviada')->default(false);
 
-            $table->foreign('idActividad', 'calificacionactividad_idactividad_foreign')
+            $table->foreign('idActividad', 'calificacionActividad_idactividad_foreign')
                 ->references('id')->on('actividades');
-            $table->foreign('idAMartriculaAcademica', 'calificacionactividad_idamartriculaacademica_foreign')
-                ->references('id')->on('matriculaacademica');
-            $table->foreign('idEstado', 'calificacionactividad_idestado_foreign')
+            $table->foreign('idAMartriculaAcademica', 'calificacionActividad_idamartriculaacademica_foreign')
+                ->references('id')->on('matriculaAcademica');
+            $table->foreign('idEstado', 'calificacionActividad_idestado_foreign')
                 ->references('id')->on('estado');
-            $table->foreign('idGrupo', 'calificacionactividad_idgrupo_foreign')
+            $table->foreign('idGrupo', 'calificacionActividad_idgrupo_foreign')
                 ->references('id')->on('grupos');
-            $table->foreign('idPersona', 'calificacionactividad_idpersona_foreign')
+            $table->foreign('idPersona', 'calificacionActividad_idpersona_foreign')
                 ->references('id')->on('persona');
-            $table->foreign('idCorte', 'calificacionactividad_idcorte_foreign')
-                ->references('id')->on('configuracioncortes');
+            $table->foreign('idCorte', 'calificacionActividad_idcorte_foreign')
+                ->references('id')->on('configuracionCortes');
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('calificacionactividad');
+        Schema::dropIfExists('calificacionActividad');
     }
 };
