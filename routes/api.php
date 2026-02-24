@@ -1332,16 +1332,16 @@ Route::middleware('auth:api')->group(function () {
 });
 
 //buscar estudiantes por idMateria
-Route::get('get_student_by_id_materia',[MatriculaAcademicaController::class, 'getStudentByIdMateria']);
-Route::get('estadisticas-asistencia',[AsistenciaController::class, 'getEstadisticasAsistencia']);
-Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
-Route::post('registrar-asistencia',[AsistenciaController::class, 'store']);
+Route::get('get_student_by_id_materia', [MatriculaAcademicaController::class, 'getStudentByIdMateria']);
+Route::get('estadisticas-asistencia', [AsistenciaController::class, 'getEstadisticasAsistencia']);
+Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
+Route::post('registrar-asistencia', [AsistenciaController::class, 'store']);
 
 // Iniciar clase: crea SesionMateria + Asistencia automáticamente al comenzar la hora de clase
-Route::post('iniciar-clase',[AsistenciaController::class, 'iniciarClase']);
+Route::post('iniciar-clase', [AsistenciaController::class, 'iniciarClase']);
 
-Route::get('anotaciones_by_matricula/{idMatricula}',[AnotacionesDisciplinariasController::class, 'getAnotacionesByMatriculaAcademica']);
-Route::post('anotacionesdisciplinarias/{idMatricula}/matricula',[AnotacionesDisciplinariasController::class, 'anotacionesMatricula']);
+Route::get('anotaciones_by_matricula/{idMatricula}', [AnotacionesDisciplinariasController::class, 'getAnotacionesByMatriculaAcademica']);
+Route::post('anotacionesdisciplinarias/{idMatricula}/matricula', [AnotacionesDisciplinariasController::class, 'anotacionesMatricula']);
 Route::put('sanciones/{id}', [SancionesController::class, 'update']);
 
 //compromisos
