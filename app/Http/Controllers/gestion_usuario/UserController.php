@@ -33,8 +33,7 @@ class UserController extends Controller
         $search = $request->input('search', '');
         $perPage = $request->input('per_page', 15);
 
-        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
-            ->where('company_id', $id);
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado');
 
         if (!empty($search)) {
             $query->whereHas('user.persona', function ($q) use ($search) {
