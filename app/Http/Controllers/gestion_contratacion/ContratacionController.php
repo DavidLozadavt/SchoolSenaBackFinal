@@ -194,7 +194,7 @@ class ContratacionController extends Controller
      */
     public function getRoles()
     {
-        $roles = Rol::where('company_id', KeyUtil::idCompany())
+        $roles = Rol::query()
             ->with('salario')
             ->get();
 
@@ -359,6 +359,7 @@ class ContratacionController extends Controller
             $contrato = new Contract();
             $contrato->idpersona = $persona_id;
             $contrato->idempresa = $company_id;
+            $contrato->idCompany = $company_id;
             $contrato->idtipoContrato = $request->input('idtipoContrato');
             $contrato->fechaContratacion = $fechaInicio;
 
