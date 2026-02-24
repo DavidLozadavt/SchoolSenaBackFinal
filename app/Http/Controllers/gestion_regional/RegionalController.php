@@ -88,13 +88,14 @@ class RegionalController extends Controller
                 // 4️⃣ Rol
                 $rol = Rol::firstOrCreate(
                     [
-                        'name' => 'ADMINISTRADOR SENA',
-                        'guard_name' => 'web',
-                        'company_id' => $nuevaRegional->id
+                        'name' => 'ADMIN REGIONAL',
+                        'guard_name' => 'web'
                     ]
                 );
 
-                $user->assignRole($rol);
+                if ($rol) {
+                    $activeUser->assignRole($rol);
+                }
 
                 return $nuevaRegional;
             });
