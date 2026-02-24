@@ -8,21 +8,21 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('asignacionmaterialapoyoactividad', function (Blueprint $table) {
+        Schema::create('asignacionMaterialApoyoActividad', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('idActividad');
             $table->unsignedBigInteger('idMaterialApoyo');
             $table->timestamps();
 
-            $table->foreign('idActividad', 'asignacionmaterialapoyoactividad_idactividad_foreign')
+            $table->foreign('idActividad', 'asignacionMaterialApoyoActividad_idactividad_foreign')
                 ->references('id')->on('actividades');
-            $table->foreign('idMaterialApoyo', 'asignacionmaterialapoyoactividad_idmaterialapoyo_foreign')
-                ->references('id')->on('materialapoyoactividad');
+            $table->foreign('idMaterialApoyo', 'asignacionMaterialApoyoActividad_idmaterialapoyo_foreign')
+                ->references('id')->on('materialApoyoActividad');
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('asignacionmaterialapoyoactividad');
+        Schema::dropIfExists('asignacionMaterialApoyoActividad');
     }
 };

@@ -24,7 +24,7 @@ return new class extends Migration
             $table->text('entregables')->nullable();
 
             $table->foreign('idTipoActividad', 'actividades_idtipoactividad_foreign')
-                ->references('id')->on('tipo_actividades');
+                ->references('id')->on('tipoActividades');
             $table->foreign('idMateria', 'actividades_idmateria_foreign')
                 ->references('id')->on('materia');
             $table->foreign('idEstado', 'actividades_idestado_foreign')
@@ -34,7 +34,7 @@ return new class extends Migration
             $table->foreign('idPersona', 'actividades_persona_FK')
                 ->references('id')->on('persona');
             $table->foreign('idClasificacion', 'actividades_clasificacionActividad_FK')
-                ->references('id')->on('clasificacionactividad');
+                ->references('id')->on('clasificacionActividad');
         });
     }
 
