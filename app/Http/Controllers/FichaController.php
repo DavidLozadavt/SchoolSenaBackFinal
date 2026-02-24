@@ -214,7 +214,7 @@ class FichaController extends Controller
             })
             ->with([
                 'jornada:id,nombreJornada',
-                'sede:id,nombre',
+                'sede:id,nombre,idCentroFormacion',
                 'regional:id,razonSocial',
                 'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
                 'asignacion.programa:id,nombrePrograma',
