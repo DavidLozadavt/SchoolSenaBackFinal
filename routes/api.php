@@ -1327,9 +1327,19 @@ Route::middleware('auth:api')->group(function () {
     Route::post('red', [RedController::class, 'store']);
     Route::put('red/{id}', [RedController::class, 'update']);
     Route::delete('red/{id}', [RedController::class, 'destroy']);
-    Route::get('anotaciones_by_matricula/{idMatricula}', [AnotacionesDisciplinariasController::class, 'getAnotacionesByMatriculaAcademica']);
+   Route::get('materias-by-contrato', [HorarioMateriaController::class, 'getMateriasByContrato']);
 
 });
+
+//buscar estudiantes por idMateria
+Route::get('get_student_by_id_materia', [MatriculaAcademicaController::class, 'getStudentByIdMateria']);
+Route::get('estadisticas-asistencia', [AsistenciaController::class, 'getEstadisticasAsistencia']);
+Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
+Route::post('registrar-asistencia', [AsistenciaController::class, 'store']);
+// Iniciar clase: crea SesionMateria + Asistencia automáticamente al comenzar la hora de clase
+Route::post('iniciar-clase', [AsistenciaController::class, 'iniciarClase']);
+
+Route::get('anotaciones_by_matricula/{idMatricula}', [AnotacionesDisciplinariasController::class, 'getAnotacionesByMatriculaAcademica']);
 Route::post('anotacionesdisciplinarias/{idMatricula}/matricula', [AnotacionesDisciplinariasController::class, 'anotacionesMatricula']);
 Route::put('sanciones/{id}',  [SancionesController::class, 'update']);
 
@@ -1338,7 +1348,7 @@ Route::get('compromisos_by_anotacion/{idAnotacion}',  [CompromisosController::cl
 Route::post('compromisos', [CompromisosController::class, 'store']);
 Route::post('compromisos/update-cumplido', [CompromisosController::class, 'updateCumplido']);
 
-    //sanciones
+//sanciones
 Route::get('sanciones_by_anotacion/{idAnotacion}',  [SancionesController::class, 'getPenaltiesforannotations']); 
 Route::post('sanciones',  [SancionesController::class, 'store']); 
 
