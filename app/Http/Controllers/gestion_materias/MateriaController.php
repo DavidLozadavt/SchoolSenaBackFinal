@@ -219,7 +219,9 @@ class MateriaController extends Controller
             $materia->update([
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
-                'idAreaConocimiento' => $datos['idAreaConocimiento']
+                'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                'horas' => $datos['horas'],
+                'creditos' => $datos['creditos']
             ]);
 
             DB::commit();
@@ -428,12 +430,7 @@ class MateriaController extends Controller
     public function getById($id)
     {
 
-        $materia = Materia::select(
-            'id',
-            'nombreMateria',
-            'descripcion',
-            'idAreaConocimiento'
-        )->find($id);
+        $materia = Materia::with('areaConocimiento')->find($id);
 
         if (!$materia) {
             return response()->json([
