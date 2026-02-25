@@ -116,9 +116,9 @@ class PensumController extends Controller
     {
         try {
             $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'red'])
-                ->withCount('fichas')
+                ->withCount('fichasActivas')
                 ->where('idRed', $idRed)
-                ->orderByDesc('fichas_count')
+                ->orderByDesc('fichas_activas_count')
                 ->orderBy('nombrePrograma')
                 ->get();
 
