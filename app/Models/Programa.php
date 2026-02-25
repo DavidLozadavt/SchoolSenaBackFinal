@@ -93,4 +93,17 @@ class Programa extends Model
     public function red(){
         return $this->belongsTo(Red::class, 'idRed');
     }
+
+    //Para ver el conteo de fichas que tiene un programa:
+    public function fichas()
+{
+    return $this->hasManyThrough(
+        Ficha::class,
+        AperturarPrograma::class,
+        'idPrograma',     // FK en aperturarprograma
+        'idAsignacion',   // FK en ficha
+        'id',             // PK en programa
+        'id'              // PK en aperturarprograma
+    );
+}
 }

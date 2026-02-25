@@ -116,7 +116,11 @@ class PensumController extends Controller
     {
         try {
             $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'red'])
-                ->where('idRed', $idRed)->get();
+                ->withCount('fichas')
+                ->where('idRed', $idRed)
+                ->orderByDesc('fichas_count')
+                ->orderBy('nombrePrograma')
+                ->get();
 
             return response()->json([
                 'status' => 'success',
@@ -244,7 +248,7 @@ class PensumController extends Controller
                 'idNivelEducativo'    => $request->idNivelEducativo,
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
-                'idRed' =>$request->idRed
+                'idRed' => $request->idRed
             ];
 
             if ($request->hasFile('documento')) {
