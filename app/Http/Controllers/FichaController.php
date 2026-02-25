@@ -10,6 +10,7 @@ use App\Models\Programa;
 use App\Models\Sede;
 use App\Models\Status;
 use App\Util\KeyUtil;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -893,12 +894,7 @@ class FichaController extends Controller
                     'hm.horaFinal',
                     'hm.fechaInicial as fechaInicial',
                     'hm.fechaFinal as fechaFinal',
-                    DB::raw("CASE
-                        WHEN DATE(NOW()) BETWEEN DATE(hm.fechaInicial) AND DATE(COALESCE(hm.fechaFinal, '9999-12-31')) THEN 'EN CURSO'
-                        WHEN DATE(NOW()) < DATE(hm.fechaInicial) THEN 'PENDIENTE'
-                        ELSE 'COMPLETADO'
-                    END as estado"),
-                    DB::raw('COUNT(DISTINCT sm.id) as total_sesiones'),
+                    'hm.idDia',
                     'c.id as contrato_id',
                     DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
                     'gp.id as idGradoPrograma',
@@ -918,7 +914,6 @@ class FichaController extends Controller
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
                 ->join('contrato as c', 'hm.idContrato', '=', 'c.id')
                 ->join('persona as per', 'c.idpersona', '=', 'per.id')
-                ->leftJoin('sesionMateria as sm', 'hm.id', '=', 'sm.idHorarioMateria')
                 ->where('c.id', $idInstructor)
                 ->whereNotNull('hm.idDia')
                 ->whereNotNull('hm.horaInicial')
@@ -934,6 +929,7 @@ class FichaController extends Controller
                     'hm.horaFinal',
                     'hm.fechaInicial',
                     'hm.fechaFinal',
+                    'hm.idDia',
                     'c.id',
                     'per.nombre1',
                     'per.apellido1',
@@ -944,6 +940,43 @@ class FichaController extends Controller
                     'gm.idMateria'
                 ])
                 ->get();
+
+            // Procesar resultados para calcular estado, total_sesiones y sesiones_restantes
+            $clases = $clases->map(function ($clase) {
+                // Calcular estado usando el método helper
+                $estado = $this->calcularEstadoHorario(
+                    $clase->fechaInicial,
+                    $clase->fechaFinal,
+                    $clase->horaInicial,
+                    $clase->horaFinal,
+                    $clase->idDia
+                );
+                
+                // Calcular total de sesiones basado en fechaInicial y fechaFinal
+                $totalSesiones = $this->calcularTotalSesiones(
+                    $clase->fechaInicial,
+                    $clase->fechaFinal,
+                    $clase->idDia
+                );
+                
+                // Calcular sesiones dadas basándose en sesiones completadas (ya pasó la hora final)
+                $sesionesDadas = $this->calcularSesionesDadas(
+                    $clase->fechaInicial,
+                    $clase->fechaFinal,
+                    $clase->horaFinal,
+                    $clase->idDia
+                );
+                
+                // Calcular sesiones restantes
+                $sesionesRestantes = max(0, $totalSesiones - $sesionesDadas);
+                
+                // Agregar los campos calculados al objeto
+                $clase->estado = $estado;
+                $clase->total_sesiones = $totalSesiones;
+                $clase->sesiones_restantes = $sesionesRestantes;
+                
+                return $clase;
+            });
 
             // Logs temporales para depuración
             Log::info('=== CLASES ASIGNADAS DEL INSTRUCTOR ===', [
@@ -1083,12 +1116,7 @@ class FichaController extends Controller
                     'hm.horaFinal',
                     'hm.fechaInicial as fechaInicial',
                     'hm.fechaFinal as fechaFinal',
-                    DB::raw("CASE
-                        WHEN DATE(NOW()) BETWEEN DATE(hm.fechaInicial) AND DATE(COALESCE(hm.fechaFinal, '9999-12-31')) THEN 'EN CURSO'
-                        WHEN DATE(NOW()) < DATE(hm.fechaInicial) THEN 'PENDIENTE'
-                        ELSE 'COMPLETADO'
-                    END as estado"),
-                    DB::raw('COUNT(DISTINCT sm.id) as total_sesiones'),
+                    'hm.idDia',
                     'c.id as contrato_id',
                     DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
                     'gp.id as idGradoPrograma',
@@ -1108,7 +1136,6 @@ class FichaController extends Controller
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
                 ->join('contrato as c', 'hm.idContrato', '=', 'c.id')
                 ->join('persona as per', 'c.idpersona', '=', 'per.id')
-                ->leftJoin('sesionMateria as sm', 'hm.id', '=', 'sm.idHorarioMateria')
                 ->whereNotNull('c.id')
                 ->whereNotNull('hm.idDia')
                 ->whereNotNull('hm.horaInicial')
@@ -1124,6 +1151,7 @@ class FichaController extends Controller
                     'hm.horaFinal',
                     'hm.fechaInicial',
                     'hm.fechaFinal',
+                    'hm.idDia',
                     'c.id',
                     'per.nombre1',
                     'per.apellido1',
@@ -1134,6 +1162,43 @@ class FichaController extends Controller
                     'gm.idMateria'
                 ])
                 ->get();
+
+            // Procesar resultados para calcular estado, total_sesiones y sesiones_restantes
+            $clases = $clases->map(function ($clase) {
+                // Calcular estado usando el método helper
+                $estado = $this->calcularEstadoHorario(
+                    $clase->fechaInicial,
+                    $clase->fechaFinal,
+                    $clase->horaInicial,
+                    $clase->horaFinal,
+                    $clase->idDia
+                );
+                
+                // Calcular total de sesiones basado en fechaInicial y fechaFinal
+                $totalSesiones = $this->calcularTotalSesiones(
+                    $clase->fechaInicial,
+                    $clase->fechaFinal,
+                    $clase->idDia
+                );
+                
+                // Calcular sesiones dadas basándose en sesiones completadas (ya pasó la hora final)
+                $sesionesDadas = $this->calcularSesionesDadas(
+                    $clase->fechaInicial,
+                    $clase->fechaFinal,
+                    $clase->horaFinal,
+                    $clase->idDia
+                );
+                
+                // Calcular sesiones restantes
+                $sesionesRestantes = max(0, $totalSesiones - $sesionesDadas);
+                
+                // Agregar los campos calculados al objeto
+                $clase->estado = $estado;
+                $clase->total_sesiones = $totalSesiones;
+                $clase->sesiones_restantes = $sesionesRestantes;
+                
+                return $clase;
+            });
 
             return response()->json([
                 'message' => 'Clases asignadas obtenidas correctamente',
@@ -1177,7 +1242,7 @@ class FichaController extends Controller
                     'hm.horaFinal',
                     'hm.fechaInicial as fechaInicial',
                     'hm.fechaFinal as fechaFinal',
-                    DB::raw('COUNT(DISTINCT sm.id) as total_sesiones'),
+                    'hm.idDia',
                     'c.id as contrato_id',
                     DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
                     'gp.id as idGradoPrograma',
@@ -1200,7 +1265,6 @@ class FichaController extends Controller
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
                 ->leftJoin('contrato as c', 'hm.idContrato', '=', 'c.id')
                 ->leftJoin('persona as per', 'c.idpersona', '=', 'per.id')
-                ->leftJoin('sesionMateria as sm', 'hm.id', '=', 'sm.idHorarioMateria')
                 ->where('hm.id', $idHorarioMateria)
                 ->groupBy([
                     'f.id',
@@ -1214,6 +1278,7 @@ class FichaController extends Controller
                     'hm.horaFinal',
                     'hm.fechaInicial',
                     'hm.fechaFinal',
+                    'hm.idDia',
                     'c.id',
                     'per.nombre1',
                     'per.apellido1',
@@ -1227,6 +1292,43 @@ class FichaController extends Controller
                     'ap.id'
                 ])
                 ->first();
+
+            if (!$claseData) {
+                return response()->json([
+                    'message' => 'Clase no encontrada',
+                    'error' => 'No existe una clase con el ID proporcionado'
+                ], 404);
+            }
+
+            // Calcular estado, total_sesiones y sesiones_restantes
+            $estado = $this->calcularEstadoHorario(
+                $claseData->fechaInicial,
+                $claseData->fechaFinal,
+                $claseData->horaInicial,
+                $claseData->horaFinal,
+                $claseData->idDia
+            );
+            
+            $totalSesiones = $this->calcularTotalSesiones(
+                $claseData->fechaInicial,
+                $claseData->fechaFinal,
+                $claseData->idDia
+            );
+            
+            // Calcular sesiones dadas basándose en sesiones completadas (ya pasó la hora final)
+            $sesionesDadas = $this->calcularSesionesDadas(
+                $claseData->fechaInicial,
+                $claseData->fechaFinal,
+                $claseData->horaFinal,
+                $claseData->idDia
+            );
+            
+            $sesionesRestantes = max(0, $totalSesiones - $sesionesDadas);
+            
+            // Agregar campos calculados
+            $claseData->estado = $estado;
+            $claseData->total_sesiones = $totalSesiones;
+            $claseData->sesiones_restantes = $sesionesRestantes;
 
             if (!$claseData) {
                 return response()->json([
@@ -1319,6 +1421,225 @@ class FichaController extends Controller
                 'message' => 'Error al obtener los detalles de la clase',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Calcula el total de sesiones entre fechaInicial y fechaFinal
+     * basado en el día de la semana (idDia)
+     * 
+     * @param string $fechaInicial Fecha inicial en formato Y-m-d
+     * @param string|null $fechaFinal Fecha final en formato Y-m-d (puede ser null)
+     * @param int $idDia ID del día de la semana (1=Lunes, 2=Martes, ..., 7=Domingo)
+     * @return int Total de sesiones
+     */
+    private function calcularTotalSesiones(string $fechaInicial, ?string $fechaFinal, int $idDia): int
+    {
+        if (!$fechaFinal) {
+            return 0;
+        }
+
+        $inicio = Carbon::parse($fechaInicial);
+        $fin = Carbon::parse($fechaFinal);
+        
+        // Convertir idDia a formato Carbon (0=Domingo, 1=Lunes, ..., 6=Sábado)
+        // idDia BD: 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado, 7=Domingo
+        $carbonDayOfWeek = $idDia === 7 ? 0 : $idDia;
+        
+        $totalSesiones = 0;
+        $fechaActual = $inicio->copy();
+        
+        while ($fechaActual->lte($fin)) {
+            if ($fechaActual->dayOfWeek === $carbonDayOfWeek) {
+                $totalSesiones++;
+            }
+            $fechaActual->addDay();
+        }
+        
+        return $totalSesiones;
+    }
+
+    /**
+     * Calcula cuántas sesiones ya están completadas
+     * Una sesión está completada si ya pasó su fecha y hora final
+     * 
+     * @param string $fechaInicial Fecha inicial en formato Y-m-d
+     * @param string|null $fechaFinal Fecha final en formato Y-m-d (puede ser null)
+     * @param string $horaFinal Hora final (formato H:i:s)
+     * @param int $idDia ID del día de la semana (1=Lunes, 2=Martes, ..., 7=Domingo)
+     * @return int Número de sesiones completadas
+     */
+    private function calcularSesionesDadas(string $fechaInicial, ?string $fechaFinal, string $horaFinal, int $idDia): int
+    {
+        if (!$fechaFinal) {
+            return 0;
+        }
+
+        $inicio = Carbon::parse($fechaInicial);
+        $fin = Carbon::parse($fechaFinal);
+        $ahora = Carbon::now();
+        
+        // Parsear hora final
+        $horaFin = $this->parseHora($horaFinal);
+        if (!$horaFin) {
+            return 0;
+        }
+        
+        // Convertir idDia a formato Carbon (0=Domingo, 1=Lunes, ..., 6=Sábado)
+        $carbonDayOfWeek = $idDia === 7 ? 0 : $idDia;
+        
+        $sesionesCompletadas = 0;
+        $fechaActual = $inicio->copy();
+        
+        while ($fechaActual->lte($fin)) {
+            if ($fechaActual->dayOfWeek === $carbonDayOfWeek) {
+                // Crear fecha y hora completa de fin de esta sesión
+                $fechaHoraFinSesion = $fechaActual->copy()
+                    ->setTime($horaFin->hour, $horaFin->minute, $horaFin->second);
+                
+                // Si la hora actual es mayor o igual a la hora final de esta sesión, está completada
+                // Usamos gte() para incluir el momento exacto en que termina (ej: 8:15 AM)
+                if ($ahora->gte($fechaHoraFinSesion)) {
+                    $sesionesCompletadas++;
+                }
+            }
+            $fechaActual->addDay();
+        }
+        
+        return $sesionesCompletadas;
+    }
+
+    /**
+     * Calcula el estado de un horario basado en fecha, hora y día de la semana
+     * 
+     * Lógica:
+     * 1. Si fecha actual < fechaInicial → PENDIENTE (aún no ha comenzado)
+     * 2. Si fecha actual > fechaFinal (y existe) → COMPLETADO (ya terminó)
+     * 3. Si está en el rango de fechas:
+     *    - Si NO es el día correcto de la semana → PENDIENTE
+     *    - Si ES el día correcto:
+     *      - Si hora < horaInicial → PENDIENTE
+     *      - Si hora entre horaInicial y horaFinal → EN CURSO
+     *      - Si hora > horaFinal → PENDIENTE (para la próxima clase)
+     * 
+     * @param string $fechaInicial Fecha inicial
+     * @param string|null $fechaFinal Fecha final (puede ser null)
+     * @param string $horaInicial Hora inicial (formato H:i:s)
+     * @param string $horaFinal Hora final (formato H:i:s)
+     * @param int $idDia ID del día de la semana (1=Lunes, 2=Martes, ..., 7=Domingo)
+     * @return string Estado: 'PENDIENTE', 'EN CURSO', 'COMPLETADO'
+     */
+    private function calcularEstadoHorario(
+        string $fechaInicial,
+        ?string $fechaFinal,
+        string $horaInicial,
+        string $horaFinal,
+        int $idDia
+    ): string {
+        $ahora = Carbon::now();
+        $fechaIni = Carbon::parse($fechaInicial)->startOfDay();
+        $fechaActual = $ahora->copy()->startOfDay();
+        
+        // PASO 1: Verificar si la fecha actual está ANTES de la fecha inicial
+        // Si es así, la clase aún no ha comenzado → PENDIENTE
+        if ($fechaActual->lt($fechaIni)) {
+            return 'PENDIENTE';
+        }
+        
+        // PASO 2: Verificar si la fecha actual está DESPUÉS de la fecha final
+        // Si fechaFinal existe y ya pasó, la clase está COMPLETADA
+        if ($fechaFinal) {
+            $fechaFin = Carbon::parse($fechaFinal)->startOfDay();
+            if ($fechaActual->gt($fechaFin)) {
+                return 'COMPLETADO';
+            }
+        }
+        
+        // PASO 3: Estamos en el rango de fechas [fechaInicial, fechaFinal o indefinido]
+        // Ahora verificamos el día de la semana
+        // IMPORTANTE: Verificar que idDia sea válido
+        if ($idDia < 1 || $idDia > 7) {
+            return 'PENDIENTE';
+        }
+        
+        // idDia BD: 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado, 7=Domingo
+        // Carbon dayOfWeek: 0=Domingo, 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado
+        $carbonDayOfWeek = $idDia === 7 ? 0 : $idDia;
+        $esDiaCorrecto = $ahora->dayOfWeek === $carbonDayOfWeek;
+        
+        // Si NO es el día correcto de la semana, la clase está PENDIENTE
+        if (!$esDiaCorrecto) {
+            return 'PENDIENTE';
+        }
+        
+        // PASO 4: Es el día correcto de la semana, ahora verificamos la hora
+        // Parsear horas de forma segura
+        $horaIni = $this->parseHora($horaInicial);
+        $horaFin = $this->parseHora($horaFinal);
+        
+        if (!$horaIni || !$horaFin) {
+            return 'PENDIENTE';
+        }
+        
+        // Extraer solo la hora para comparar (minutos desde medianoche)
+        $horaActualMinutos = ($ahora->hour * 60) + $ahora->minute;
+        $horaIniMinutos = ($horaIni->hour * 60) + $horaIni->minute;
+        $horaFinMinutos = ($horaFin->hour * 60) + $horaFin->minute;
+        
+        // Comparar horas
+        if ($horaActualMinutos < $horaIniMinutos) {
+            // Aún no ha llegado la hora inicial → PENDIENTE
+            return 'PENDIENTE';
+        }
+        
+        if ($horaActualMinutos >= $horaIniMinutos && $horaActualMinutos <= $horaFinMinutos) {
+            // Está en el rango de horas de la clase → EN CURSO
+            // (Ya verificamos que es el día correcto y está en el rango de fechas)
+            return 'EN CURSO';
+        }
+        
+        if ($horaActualMinutos > $horaFinMinutos) {
+            // Ya pasó la hora final de la clase de hoy (ej: 8:15 AM)
+            // Si es el día correcto y ya pasó la hora final, esa sesión específica está COMPLETADA
+            // Retornamos COMPLETADO para indicar que esa sesión del día ya terminó
+            return 'COMPLETADO';
+        }
+        
+        // Por defecto, pendiente
+        return 'PENDIENTE';
+    }
+
+    /**
+     * Parsea una hora de forma segura desde diferentes formatos
+     * 
+     * @param string $hora Hora en formato H:i:s o H:i
+     * @return Carbon|null Objeto Carbon con la hora o null si no se puede parsear
+     */
+    private function parseHora(string $hora): ?Carbon
+    {
+        if (empty($hora)) {
+            return null;
+        }
+
+        // Intentar diferentes formatos
+        $formatos = ['H:i:s', 'H:i'];
+        
+        foreach ($formatos as $formato) {
+            try {
+                $parsed = Carbon::createFromFormat($formato, $hora);
+                if ($parsed) {
+                    return $parsed;
+                }
+            } catch (\Exception $e) {
+                continue;
+            }
+        }
+        
+        // Si no funciona, intentar parse genérico
+        try {
+            return Carbon::parse($hora);
+        } catch (\Exception $e) {
+            return null;
         }
     }
 }
