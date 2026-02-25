@@ -1316,6 +1316,7 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::get('dias', [DiaController::class, 'index']); //,obtener todos los dias
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
+    Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
 });
 
 // Red
