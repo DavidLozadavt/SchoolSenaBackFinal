@@ -961,11 +961,12 @@ class FichaController extends Controller
                     $clase->idDia
                 );
                 
-                // Sincronizar sesiones completadas automáticamente (crear registros en BD si pasaron)
+                // Sincronizar sesiones completadas automáticamente (crear registros en BD cuando comienza la clase)
                 $this->sincronizarSesionesCompletadas(
                     $clase->idHorarioMateria,
                     $clase->fechaInicial,
                     $clase->fechaFinal,
+                    $clase->horaInicial,
                     $clase->horaFinal,
                     $clase->idDia
                 );
@@ -1198,11 +1199,12 @@ class FichaController extends Controller
                     $clase->idDia
                 );
                 
-                // Sincronizar sesiones completadas automáticamente (crear registros en BD si pasaron)
+                // Sincronizar sesiones completadas automáticamente (crear registros en BD cuando comienza la clase)
                 $this->sincronizarSesionesCompletadas(
                     $clase->idHorarioMateria,
                     $clase->fechaInicial,
                     $clase->fechaFinal,
+                    $clase->horaInicial,
                     $clase->horaFinal,
                     $clase->idDia
                 );
@@ -1343,11 +1345,12 @@ class FichaController extends Controller
                 $claseData->idDia
             );
             
-            // Sincronizar sesiones completadas automáticamente (crear registros en BD si pasaron)
+            // Sincronizar sesiones completadas automáticamente (crear registros en BD cuando comienza la clase)
             $this->sincronizarSesionesCompletadas(
                 $idHorarioMateria,
                 $claseData->fechaInicial,
                 $claseData->fechaFinal,
+                $claseData->horaInicial,
                 $claseData->horaFinal,
                 $claseData->idDia
             );
@@ -1536,20 +1539,22 @@ class FichaController extends Controller
 
     /**
      * Sincroniza automáticamente las sesiones completadas en la base de datos
-     * Crea registros en sesionMateria para las sesiones que ya pasaron su hora final
-     * pero que aún no tienen registro en la BD
+     * Sincroniza automáticamente las sesiones completadas creando registros en BD
+     * cuando la hora de inicio de la clase ya ha pasado
      * 
      * @param int $idHorarioMateria ID del horario de materia
-     * @param string $fechaInicial Fecha inicial en formato Y-m-d
-     * @param string|null $fechaFinal Fecha final en formato Y-m-d (puede ser null)
-     * @param string $horaFinal Hora final (formato H:i:s)
-     * @param int $idDia ID del día de la semana (1=Lunes, 2=Martes, ..., 7=Domingo)
+     * @param string $fechaInicial Fecha inicial del horario (Y-m-d)
+     * @param string|null $fechaFinal Fecha final del horario (Y-m-d) o null
+     * @param string $horaInicial Hora inicial de la clase (H:i:s)
+     * @param string $horaFinal Hora final de la clase (H:i:s)
+     * @param int $idDia ID del día de la semana (1=Lunes, ..., 7=Domingo)
      * @return void
      */
     private function sincronizarSesionesCompletadas(
         int $idHorarioMateria,
         string $fechaInicial,
         ?string $fechaFinal,
+        string $horaInicial,
         string $horaFinal,
         int $idDia
     ): void {
@@ -1562,73 +1567,102 @@ class FichaController extends Controller
             $fin = Carbon::parse($fechaFinal);
             $ahora = Carbon::now();
             
-            // Parsear hora final
+            // Parsear horas
+            $horaIni = $this->parseHora($horaInicial);
             $horaFin = $this->parseHora($horaFinal);
-            if (!$horaFin) {
+            if (!$horaIni || !$horaFin) {
                 return;
             }
             
             // Convertir idDia a formato Carbon (0=Domingo, 1=Lunes, ..., 6=Sábado)
             $carbonDayOfWeek = $idDia === 7 ? 0 : $idDia;
             
-            // Obtener todas las sesiones ya registradas para este horario
+            // Obtener sesiones existentes como array de fechas para validación rápida
             $sesionesExistentes = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
                 ->whereNotNull('fechaSesion')
                 ->pluck('fechaSesion')
-                ->map(function ($fecha) {
-                    return Carbon::parse($fecha)->format('Y-m-d');
-                })
+                ->map(fn($fecha) => Carbon::parse($fecha)->format('Y-m-d'))
                 ->toArray();
             
-            // Obtener el último número de sesión registrado
-            $ultimoNumeroSesion = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
-                ->max('numeroSesion') ?? 0;
+            // Calcular todas las fechas de clase desde fechaInicial hasta fechaFinal
+            $todasLasFechasClase = [];
+            $fechaTemporal = $inicio->copy();
             
-            $fechaActual = $inicio->copy();
+            // Si fechaInicial coincide con el día de la semana, incluirla como primera sesión
+            // Si no coincide, también incluirla si ya pasó su hora de inicio (clase que comenzó ese día)
+            if ($fechaTemporal->dayOfWeek === $carbonDayOfWeek) {
+                // Coincide: incluir fechaInicial como primera sesión
+                $todasLasFechasClase[] = $fechaTemporal->format('Y-m-d');
+                $fechaTemporal->addWeek(); // Avanzar una semana para la siguiente sesión
+            } else {
+                // No coincide: incluir fechaInicial si ya pasó su hora de inicio
+                $fechaHoraInicioPrimera = $fechaTemporal->copy()
+                    ->setTime($horaIni->hour, $horaIni->minute, $horaIni->second);
+                if ($ahora->gte($fechaHoraInicioPrimera)) {
+                    $todasLasFechasClase[] = $fechaTemporal->format('Y-m-d');
+                }
+                // Avanzar hasta el siguiente día de la semana correspondiente
+                $diasHastaProximoDia = ($carbonDayOfWeek - $fechaTemporal->dayOfWeek + 7) % 7;
+                if ($diasHastaProximoDia === 0) {
+                    $diasHastaProximoDia = 7;
+                }
+                $fechaTemporal->addDays($diasHastaProximoDia);
+            }
+            
+            // Continuar con las siguientes sesiones semanales
+            while ($fechaTemporal->lte($fin)) {
+                if ($fechaTemporal->dayOfWeek === $carbonDayOfWeek) {
+                    $todasLasFechasClase[] = $fechaTemporal->format('Y-m-d');
+                }
+                $fechaTemporal->addWeek();
+            }
+            
+            // Crear mapa de fecha -> numeroSesion (orden cronológico)
+            $mapaFechaNumeroSesion = [];
+            foreach ($todasLasFechasClase as $index => $fechaClase) {
+                $mapaFechaNumeroSesion[$fechaClase] = $index + 1;
+            }
+            
+            // Crear sesiones para fechas pasadas que ya cumplieron su hora de inicio
             $nuevasSesiones = [];
+            $ahoraStr = $ahora->format('Y-m-d H:i:s');
             
-            // Iterar por todas las fechas posibles de clase
-            while ($fechaActual->lte($fin)) {
-                if ($fechaActual->dayOfWeek === $carbonDayOfWeek) {
-                    $fechaSesionStr = $fechaActual->format('Y-m-d');
-                    
-                    // Crear fecha y hora completa de fin de esta sesión
-                    $fechaHoraFinSesion = $fechaActual->copy()
-                        ->setTime($horaFin->hour, $horaFin->minute, $horaFin->second);
-                    
-                    // Si la hora actual es mayor o igual a la hora final de esta sesión
-                    // Y no existe un registro para esta fecha, crear uno
-                    if ($ahora->gte($fechaHoraFinSesion) && !in_array($fechaSesionStr, $sesionesExistentes)) {
-                        $ultimoNumeroSesion++;
+            foreach ($todasLasFechasClase as $fechaClaseStr) {
+                // Si ya existe, omitir
+                if (in_array($fechaClaseStr, $sesionesExistentes)) {
+                    continue;
+                }
+                
+                // Crear fecha y hora completa de inicio de esta sesión
+                $fechaClase = Carbon::parse($fechaClaseStr);
+                $fechaHoraInicioSesion = $fechaClase->copy()
+                    ->setTime($horaIni->hour, $horaIni->minute, $horaIni->second);
+                
+                // Si ya pasó la hora de inicio (incluyendo hoy si ya pasó la hora), crear la sesión
+                // Usar comparación de fecha y hora completa para mayor precisión
+                if ($ahora->gte($fechaHoraInicioSesion)) {
+                    $numeroSesion = $mapaFechaNumeroSesion[$fechaClaseStr] ?? null;
+                    if ($numeroSesion !== null) {
                         $nuevasSesiones[] = [
-                            'numeroSesion' => $ultimoNumeroSesion,
+                            'numeroSesion' => $numeroSesion,
                             'idHorarioMateria' => $idHorarioMateria,
-                            'fechaSesion' => $fechaSesionStr,
+                            'fechaSesion' => $fechaClaseStr,
                             'estado' => EstadoSesionMateria::APLICA,
                             'created_at' => Carbon::now(),
                             'updated_at' => Carbon::now(),
                         ];
                     }
                 }
-                $fechaActual->addDay();
             }
             
             // Insertar todas las nuevas sesiones en una sola operación
             if (!empty($nuevasSesiones)) {
                 SesionMateria::insert($nuevasSesiones);
-                
-                Log::info('Sesiones sincronizadas automáticamente', [
-                    'idHorarioMateria' => $idHorarioMateria,
-                    'sesiones_creadas' => count($nuevasSesiones),
-                    'fechas' => array_column($nuevasSesiones, 'fechaSesion'),
-                ]);
             }
         } catch (\Exception $e) {
-            // Log del error pero no interrumpir el flujo principal
             Log::error('Error al sincronizar sesiones completadas', [
                 'idHorarioMateria' => $idHorarioMateria,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
         }
     }
