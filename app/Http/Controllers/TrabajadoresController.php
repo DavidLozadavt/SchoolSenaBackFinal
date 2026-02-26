@@ -83,7 +83,7 @@ class TrabajadoresController extends Controller
 
 
 
-    public function ejecutarProcedimiento()
+   public function ejecutarProcedimiento()
 {
     try {
         $user = auth()->user();
@@ -91,16 +91,25 @@ class TrabajadoresController extends Controller
 
         \Log::info('ID del usuario: ' . $userId);
 
+        //Validación: debe tener centro de formación
+        if (empty($user->idCentroFormacion)) {
+            return response()->json([
+                'error' => 'No tienes centro de formación, debes tener uno para poder registrar'
+            ], 400);
+        }
+
         $activation = ActivationCompanyUser::byUser($userId)
             ->active()
             ->first();
 
         if (!$activation) {
-            return response()->json(['error' => 'Usuario no tiene empresa asignada'], 400);
+            return response()->json([
+                'error' => 'Usuario no tiene empresa asignada'
+            ], 400);
         }
 
         $companyId = $activation->company_id;
-        $centroId = $user->idCentroFormacion; // 🔥 aquí está la corrección
+        $centroId = $user->idCentroFormacion;
 
         \Log::info('Centro del usuario: ' . $centroId);
 
@@ -112,10 +121,14 @@ class TrabajadoresController extends Controller
             $encryptedPassword
         ]);
 
-        return response()->json(['message' => 'Operación realizada con éxito!'], 200);
+        return response()->json([
+            'message' => 'Operación realizada con éxito!'
+        ], 200);
 
     } catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
+        return response()->json([
+            'error' => $e->getMessage()
+        ], 500);
     }
 }
 
