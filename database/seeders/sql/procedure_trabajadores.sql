@@ -104,10 +104,9 @@ BEGIN
 	                SELECT *
 	                FROM roles
 	                WHERE name COLLATE utf8mb4_unicode_ci = nomRol COLLATE utf8mb4_unicode_ci
-	                    AND company_id = companyId
 	            ) THEN
-	                INSERT INTO roles (name, guard_name, company_id)
-	                VALUES (nomRol, 'web', companyId);
+	                INSERT INTO roles (name, guard_name)
+	                VALUES (nomRol, 'web');
 	            END IF;
 	            
 	            -- NIVEL EDUCATIVO: consultar o crear
@@ -163,7 +162,6 @@ BEGIN
             SELECT id INTO idRolExistente
             FROM roles
             WHERE name COLLATE utf8mb4_unicode_ci = nomRol COLLATE utf8mb4_unicode_ci
-                AND company_id = companyId
             LIMIT 1;
 
 
@@ -239,7 +237,6 @@ BEGIN
             SELECT id INTO roleId
             FROM roles
             WHERE name COLLATE utf8mb4_unicode_ci = nomRol COLLATE utf8mb4_unicode_ci
-                AND company_id = companyId
             LIMIT 1;
 
             INSERT INTO model_has_roles (role_id, model_type, model_id)
