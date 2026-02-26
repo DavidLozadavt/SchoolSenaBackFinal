@@ -1308,6 +1308,7 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
     Route::post('materias', [MateriaController::class, 'crearCompetencia']);
     Route::put('materias/{id}', [MateriaController::class, 'update']);
+    Route::delete('grado-materia', [MateriaController::class, 'deleteMateriaTrimestre']);// elimina competencias y raps del trimestre de la ficha
     Route::get('materias/{id}', [MateriaController::class, 'getById']);
 });
 

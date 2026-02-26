@@ -1366,6 +1366,8 @@ class HorarioMateriaController extends Controller
                                 'nombre' => $materiaPadre->nombreMateria,
                                 'descripcion' => $materiaPadre->descripcion,
                                 'estado' => $gradoMateriaParaEstado->estado,
+                                'idMateriaPadre' => $materiaPadre->idMateriaPadre,
+                                'idGradoMateria' => $gradoMateriaParaEstado->id,
                                 'horasTotales' => $materiaPadre->horas,
                                 'horasActuales' => $horasData['horasActuales'],
                                 'horasFaltantes' => $materiaPadre->horas - $horasData['horasActuales'],
