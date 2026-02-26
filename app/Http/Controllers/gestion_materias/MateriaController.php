@@ -219,7 +219,9 @@ class MateriaController extends Controller
             $materia->update([
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
-                'idAreaConocimiento' => $datos['idAreaConocimiento']
+                'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                'horas' => $datos['horas'],
+                'creditos' => $datos['creditos']
             ]);
 
             DB::commit();
@@ -292,7 +294,10 @@ class MateriaController extends Controller
                 'materia',
                 'horarioMateria' => function ($q) use ($idFicha) {
                     $q->where('idFicha', $idFicha)
-                        ->with(['dia', 'contrato.persona']);
+                        ->with(['dia', 'contrato.persona'])
+                        ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($sq) {
+                            $sq->whereNotNull('fechaSesion');
+                        }]);
                 },
                 'gradoPrograma.grado'
             ])
@@ -300,6 +305,19 @@ class MateriaController extends Controller
 
         // Formatear la respuesta
         $resultado = $raps->map(function ($gradoMateria) {
+            // Calcular horas usando los horarios asociados
+            $horasActuales = 0;
+            foreach ($gradoMateria->horarioMateria as $horario) {
+                if ($horario->horaInicial && $horario->horaFinal) {
+                    $hI = Carbon::parse($horario->horaInicial);
+                    $hF = Carbon::parse($horario->horaFinal);
+                    $duracionSesion = $hF->diffInMinutes($hI, true) / 60;
+
+                    $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
+                    $horasActuales += $sesionesDadas * $duracionSesion;
+                }
+            }
+
             return [
                 'id' => $gradoMateria->id,
                 'idGradoMateria' => $gradoMateria->id,
@@ -310,6 +328,11 @@ class MateriaController extends Controller
                 'codigo' => $gradoMateria->materia->codigo ?? '',
                 'estado' => $gradoMateria->estado,
                 'horas' => $gradoMateria->materia->horas ?? 0,
+                'horasActuales' => round($horasActuales, 2),
+                'horasFaltantes' => round(max(0, ($gradoMateria->materia->horas ?? 0) - $horasActuales), 2),
+                'porcentajeAvance' => ($gradoMateria->materia->horas ?? 0) > 0
+                    ? round(($horasActuales / $gradoMateria->materia->horas) * 100, 2)
+                    : 0,
                 'trimestre' => [
                     'id' => $gradoMateria->gradoPrograma->grado->id ?? null,
                     'numero' => $gradoMateria->gradoPrograma->grado->numeroGrado ?? null,
@@ -428,12 +451,7 @@ class MateriaController extends Controller
     public function getById($id)
     {
 
-        $materia = Materia::select(
-            'id',
-            'nombreMateria',
-            'descripcion',
-            'idAreaConocimiento'
-        )->find($id);
+        $materia = Materia::with('areaConocimiento')->find($id);
 
         if (!$materia) {
             return response()->json([

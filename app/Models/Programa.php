@@ -88,22 +88,34 @@ class Programa extends Model
             'idPrograma',     // FK en la tabla pivot para este modelo
             'idGrado'         // FK en la tabla pivot para el modelo relacionado
         )->withPivot('cupos', 'fechaInicio', 'fechaFin', 'estado')
-         ->withTimestamps();
+            ->withTimestamps();
     }
-    public function red(){
+    public function red()
+    {
         return $this->belongsTo(Red::class, 'idRed');
     }
 
     //Para ver el conteo de fichas que tiene un programa:
     public function fichas()
-{
-    return $this->hasManyThrough(
-        Ficha::class,
-        AperturarPrograma::class,
-        'idPrograma',     // FK en aperturarprograma
-        'idAsignacion',   // FK en ficha
-        'id',             // PK en programa
-        'id'              // PK en aperturarprograma
-    );
-}
+    {
+        return $this->hasManyThrough(
+            Ficha::class,
+            AperturarPrograma::class,
+            'idPrograma',     // FK en aperturarprograma
+            'idAsignacion',   // FK en ficha
+            'id',             // PK en programa
+            'id'              // PK en aperturarprograma
+        );
+    }
+    public function fichasActivas()
+    {
+        return $this->hasManyThrough(
+            Ficha::class,
+            AperturarPrograma::class,
+            'idPrograma',
+            'idAsignacion',
+            'id',
+            'id'
+        )->whereIn('aperturarprograma.estado', ['ACTIVO', 'EN CURSO']);
+    }
 }

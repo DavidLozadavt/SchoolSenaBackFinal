@@ -228,26 +228,27 @@ class ForgotPasswordController extends Controller
             ], 400);
         }
 
-        // ===== NUEVO: Cambiar state_id de 18 a 1 =====
+        // ===== Cambiar state_id de 18 a 1 si aplica =====
         try {
-            // Buscar el usuario en la tabla users
+            // Buscar el usuario en la tabla `usuario`
             $user = \App\Models\User::where('email', $email)->first();
-            
+
             if ($user) {
-                \Log::info('Usuario encontrado en tabla users:', ['user_id' => $user->id]);
-                
-                // Buscar la activación del usuario
-                $activacion = \App\Models\ActivationCompanyUser::where('user_id', $user->id)->first();
-                
-                if ($activacion && $activacion->state_id == 18) {
+                \Log::info('Usuario encontrado:', ['user_id' => $user->id]);
+
+                // Buscar la activación que esté específicamente en estado 18
+                $activacion = \App\Models\ActivationCompanyUser::where('user_id', $user->id)
+                    ->where('state_id', 18)
+                    ->first();
+
+                if ($activacion) {
                     \Log::info('Cambiando state_id de 18 a 1 para usuario:', ['user_id' => $user->id]);
-                    
+
                     $activacion->state_id = 1;
                     $activacion->save();
-                    
+
                     \Log::info('State_id actualizado exitosamente');
-                    
-                    // Devolver response indicando que el proceso se completó
+
                     DB::table('password_resets')->where('email', $email)->delete();
                     DB::table('otps')->where('identifier', $email)->delete();
 
@@ -256,18 +257,15 @@ class ForgotPasswordController extends Controller
                         'profile_completed' => true
                     ], 200);
                 } else {
-                    \Log::info('Usuario no necesita cambio de state_id:', [
-                        'activacion_exists' => $activacion ? 'yes' : 'no',
-                        'state_id' => $activacion ? $activacion->state_id : 'N/A'
-                    ]);
+                    \Log::info('El usuario no tiene activación en estado 18.', ['user_id' => $user->id]);
                 }
             } else {
-                \Log::warning('Usuario no encontrado en tabla users con email:', ['email' => $email]);
+                \Log::warning('Usuario no encontrado en tabla usuario con email:', ['email' => $email]);
             }
         } catch (\Exception $e) {
             \Log::error('Error actualizando state_id: ' . $e->getMessage());
         }
-        // ===== FIN NUEVO =====
+        // ===== FIN =====
 
         DB::table('password_resets')->where('email', $email)->delete();
         DB::table('otps')->where('identifier', $email)->delete();

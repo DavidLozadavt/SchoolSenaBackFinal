@@ -13,6 +13,7 @@ use App\Models\GradoMateria;
 use Illuminate\Http\Request;
 use App\Models\SesionMateria;
 use App\Models\HorarioMateria;
+use App\Models\Materia;
 use App\Traits\CalculateEndDate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -209,7 +210,7 @@ class HorarioMateriaController extends Controller
                     // Buscar todos los aprendices matriculados en esta Ficha y Materia
                     $matriculas = MatriculaAcademica::where('idFicha', $horarioMateria->idFicha)
                         ->whereHas('materia', function ($query) use ($horarioMateria) {
-                            $query->whereHas('gradoMateria', function($q) use ($horarioMateria) {
+                            $query->whereHas('gradoMateria', function ($q) use ($horarioMateria) {
                                 $q->where('id', $horarioMateria->idGradoMateria);
                             });
                         })
@@ -551,40 +552,42 @@ class HorarioMateriaController extends Controller
     }
 
     /**
-     * Unassign teacher to schedule by idGradoMateria
-     * @param string|int $idGradoMateria
+     * Unassign teacher to schedule
+     * @param Request $request
      * @return JsonResponse
      */
-    public function unassignTeacherSchedule(string|int $idGradoMateria): JsonResponse
+    public function unassignTeacherSchedule(Request $request): JsonResponse
     {
+        $horarios = $request->input('horarios');
+
+        if (!is_array($horarios)) {
+            return response()->json([
+                'message' => 'La lista de horarios es obligatoria'
+            ], 400);
+        }
+
         try {
-            $horarios = horariomateria::where('idGradoMateria', $idGradoMateria)->get();
-
-            if ($horarios->isEmpty()) {
-                return response()->json([
-                    'message' => 'No se encontró ninguna asignación para el grado/materia especificado'
-                ], 404);
-            }
-
             DB::beginTransaction();
 
-            $updatedRows = horariomateria::where('idGradoMateria', $idGradoMateria)
-                ->update(['idContrato' => null]);
+            foreach ($horarios as $h) {
+                $horarioMateria = HorarioMateria::findOrFail($h['id']);
 
-            if ($updatedRows === 0) {
-                DB::rollBack();
-                return response()->json([
-                    'message' => 'No se realizó ninguna actualización, es posible que ya estuviera desasignado'
-                ], 400);
+                $horarioMateria->update([
+                    'idContrato' => null,
+                    'estado' => EstadoHorarioMateria::PENDIENTE
+                ]);
             }
 
             DB::commit();
 
-            return response()->json(['message' => 'Docente desasignado correctamente'], 200);
-        } catch (Exception $e) {
+            return response()->json([
+                'message' => 'Instructor desasignado correctamente de todos los horarios'
+            ], 200);
+        } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
-                'message' => 'No se logró desasignar el docente debido a un error interno'
+                'message' => 'Error al desasignar el instructor',
+                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -1252,6 +1255,9 @@ class HorarioMateriaController extends Controller
                 'dia',
                 'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email'
             ])
+            ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($q) {
+                $q->whereNotNull('fechaSesion');
+            }])
             ->get();
 
         if ($horarios->isEmpty()) {
@@ -1332,6 +1338,16 @@ class HorarioMateriaController extends Controller
                                 ->gradoMateria
                                 ->materia;
 
+                            // Actualizar las horas del padre basándose en la suma de sus hijos (RAPs)
+                            $hijosQuery = Materia::where('idMateriaPadre', $materiaPadre->id);
+                            if ($hijosQuery->exists()) {
+                                $horasSum = $hijosQuery->sum('horas');
+                                if ($materiaPadre->horas != $horasSum) {
+                                    $materiaPadre->horas = $horasSum;
+                                    $materiaPadre->save();
+                                }
+                            }
+
                             // Obtenemos todos los horarios de los hijos (RAPs) de esta materia padre
                             // que pertenecen a este mismo grado/trimestre
                             $horariosDeHijos = $horariosPorGrado->filter(function ($h) use ($idMateriaPadre) {
@@ -1350,9 +1366,9 @@ class HorarioMateriaController extends Controller
                                 'nombre' => $materiaPadre->nombreMateria,
                                 'descripcion' => $materiaPadre->descripcion,
                                 'estado' => $gradoMateriaParaEstado->estado,
-                                'horasTotales' => $horasData['horasTotales'],
+                                'horasTotales' => $materiaPadre->horas,
                                 'horasActuales' => $horasData['horasActuales'],
-                                'horasFaltantes' => $horasData['horasFaltantes'],
+                                'horasFaltantes' => $materiaPadre->horas - $horasData['horasActuales'],
                                 'porcentajeAvance' => $horasData['porcentajeAvance'],
 
                                 // Horarios de los hijos agrupados por asignación
@@ -1423,50 +1439,30 @@ class HorarioMateriaController extends Controller
     {
         $horasTotales = 0;
         $horasActuales = 0;
-        $fechaHoy = now(); // Fecha actual del servidor
 
         foreach ($horarios as $horario) {
-            // Calcular cuántas horas hay en cada sesión
+            // Calcular cuánto dura cada sesión en horas (con decimales)
             $horaInicial = \Carbon\Carbon::parse($horario->horaInicial);
             $horaFinal = \Carbon\Carbon::parse($horario->horaFinal);
-            $horasPorSesion = $horaFinal->diffInHours($horaInicial, true); // true = con decimales
+            $horasPorSesion = $horaFinal->diffInMinutes($horaInicial, true) / 60;
 
-            // Obtener fechas del periodo
+            // Horas Totales: Calculadas por el rango de fechas (Teórico)
             $fechaInicial = \Carbon\Carbon::parse($horario->fechaInicial);
             $fechaFinal = \Carbon\Carbon::parse($horario->fechaFinal);
 
-            // Verificar que el horario tenga un día asignado
-            if (!$horario->dia || !isset($horario->dia->dia)) {
-                continue; // Si no tiene día, lo saltamos
-            }
-
-            // Contar cuántos días de este tipo hay en el rango total
-            $diasTotalesEnRango = $this->contarDiasEnRango(
-                $fechaInicial,
-                $fechaFinal,
-                $horario->dia->dia
-            );
-
-            // Calcular horas totales de este horario
-            $horasTotalesHorario = $diasTotalesEnRango * $horasPorSesion;
-            $horasTotales += $horasTotalesHorario;
-
-            // Calcular horas que ya transcurrieron hasta hoy
-            if ($fechaHoy->greaterThanOrEqualTo($fechaInicial)) {
-                // Si hoy es después o igual al inicio, calculamos días transcurridos
-
-                // Usamos la fecha menor entre hoy y la fecha final
-                $fechaLimite = $fechaHoy->lessThan($fechaFinal) ? $fechaHoy : $fechaFinal;
-
-                $diasTranscurridos = $this->contarDiasEnRango(
+            if ($horario->dia && isset($horario->dia->dia)) {
+                $diasTotalesEnRango = $this->contarDiasEnRango(
                     $fechaInicial,
-                    $fechaLimite,
+                    $fechaFinal,
                     $horario->dia->dia
                 );
-
-                $horasActuales += $diasTranscurridos * $horasPorSesion;
+                $horasTotales += $diasTotalesEnRango * $horasPorSesion;
             }
-            // Si hoy es antes del inicio, horasActuales queda en 0 para este horario
+
+            // Horas Actuales: Basadas en las sesiones que YA se han dado (fechaSesion no null)
+            // Usamos el contador cargado con withCount para evitar N+1
+            $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
+            $horasActuales += $sesionesDadas * $horasPorSesion;
         }
 
         // Calcular horas faltantes

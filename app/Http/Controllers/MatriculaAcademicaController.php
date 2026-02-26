@@ -30,7 +30,9 @@ class MatriculaAcademicaController extends Controller
             }
  
             $idMateria = $data['idMateria'];
-            $idFicha = $data['idFicha'] ?? null;
+            $idFicha   = $data['idFicha'] ?? null;
+            // Si el frontend envía el horario exacto, usarlo directamente
+            $idHorarioMateriaFijo = isset($data['idHorarioMateria']) ? (int)$data['idHorarioMateria'] : null;
  
             $matriculasAcademicas = MatriculaAcademica::with([
                 'matricula.person',
@@ -46,21 +48,26 @@ class MatriculaAcademicaController extends Controller
  
             $result = $matriculasAcademicas->get();
 
-            // Lógica para crear SesionMateria y Asistencia automáticamente para HOY si corresponde
+            // Crear SesionMateria y Asistencia automáticamente para HOY si corresponde
             if ($idFicha && $idMateria && $result->isNotEmpty()) {
-                $hoy = now();
+                $hoy     = now();
                 $dbIdDia = ($hoy->dayOfWeek == 0) ? 7 : $hoy->dayOfWeek;
 
-                // Buscar un horario de esa materia en la ficha para el día de hoy
-                $horarioMateria = \App\Models\HorarioMateria::where('idFicha', $idFicha)
-                    ->whereHas('gradoMateria', function ($query) use ($idMateria) {
-                        $query->where('idMateria', $idMateria);
-                    })
-                    ->where('idDia', (int)$dbIdDia)
-                    ->first();
+                // Prioridad: horario exacto del frontend (soporta misma materia 2 veces el mismo día)
+                if ($idHorarioMateriaFijo) {
+                    $horarioMateria = \App\Models\HorarioMateria::find($idHorarioMateriaFijo);
+                } else {
+                    // Fallback: buscar por ficha + materia + día actual
+                    $horarioMateria = \App\Models\HorarioMateria::where('idFicha', $idFicha)
+                        ->whereHas('gradoMateria', function ($query) use ($idMateria) {
+                            $query->where('idMateria', $idMateria);
+                        })
+                        ->where('idDia', (int)$dbIdDia)
+                        ->first();
+                }
 
                 if ($horarioMateria) {
-                    // Verificar si ya existe la sesión de hoy
+                    // Verificar si ya existe la sesión de hoy para este horario exacto
                     $existsSesion = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
                         ->whereDate('fechaSesion', $hoy->toDateString())
                         ->exists();
@@ -68,22 +75,22 @@ class MatriculaAcademicaController extends Controller
                     if (!$existsSesion) {
                         $lastSession = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
                             ->max('numeroSesion') ?? 0;
-                        
+
                         $nuevaSesion = \App\Models\SesionMateria::create([
-                            'numeroSesion' => $lastSession + 1,
+                            'numeroSesion'     => $lastSession + 1,
                             'idHorarioMateria' => $horarioMateria->id,
-                            'fechaSesion' => $hoy->toDateString(),
+                            'fechaSesion'      => $hoy->toDateString(),
                         ]);
 
                         $asistenciaData = [];
                         foreach ($result as $matricula) {
                             $asistenciaData[] = [
-                                'idSesionMateria' => $nuevaSesion->id,
+                                'idSesionMateria'      => $nuevaSesion->id,
                                 'idMatriculaAcademica' => $matricula->id,
-                                'asistio' => false,
-                                'horaLLegada' => null,
-                                'created_at' => $hoy,
-                                'updated_at' => $hoy,
+                                'asistio'              => false,
+                                'horaLLegada'          => null,
+                                'created_at'           => $hoy,
+                                'updated_at'           => $hoy,
                             ];
                         }
 
@@ -94,7 +101,7 @@ class MatriculaAcademicaController extends Controller
                 }
             }
 
-            $result->load('asistencias');
+            $result->load('asistencias.sesionMateria');
 
             return response()->json($result);
  
@@ -302,7 +309,7 @@ class MatriculaAcademicaController extends Controller
             }
         }
 
-        \Illuminate\Database\Eloquent\Collection::make($matriculas)->load('asistencias');
+        \Illuminate\Database\Eloquent\Collection::make($matriculas)->load('asistencias.sesionMateria');
 
         return response()->json($matriculas);
 

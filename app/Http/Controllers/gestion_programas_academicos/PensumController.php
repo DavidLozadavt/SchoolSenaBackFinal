@@ -112,13 +112,32 @@ class PensumController extends Controller
         }
     }
 
-    public function indexByRed(int $idRed)
+    public function indexByRed(Request $request, int $idRed)
     {
         try {
+            // Verificamos si se pasó el centro
+            if (!$request->filled('centro')) {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [] // Retorna vacío si no hay centro
+                ]);
+            }
+
+            $idCentro = $request->centro;
+
             $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'red'])
-                ->withCount('fichas')
+                ->withCount([
+                    'fichasActivas as fichas_activas_count' => function ($q) use ($idCentro) {
+                        $q->whereHas('aperturarPrograma.sede', function ($sub) use ($idCentro) {
+                            $sub->where('idCentroFormacion', $idCentro);
+                        });
+                    }
+                ])
                 ->where('idRed', $idRed)
-                ->orderByDesc('fichas_count')
+                ->whereHas('aperturarProgramas.sede', function ($q) use ($idCentro) {
+                    $q->where('idCentroFormacion', $idCentro);
+                })
+                ->orderByDesc('fichas_activas_count')
                 ->orderBy('nombrePrograma')
                 ->get();
 
