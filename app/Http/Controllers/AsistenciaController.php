@@ -217,13 +217,14 @@ public function getAllAssistance(Request $request): JsonResponse
   {
 
     $validatedData = $request->validate([
-      // 'idAsignacionPeriodoProgramaJornada' => 'nullable|integer',
-      'idMateria' => 'nullable|integer',
-      'idMatricula' => 'required|integer',
+      'idMateria'         => 'nullable|integer',
+      'idMatricula'       => 'required|integer',
+      'idHorarioMateria'  => 'nullable|integer|exists:horarioMateria,id',
     ]);
 
-    $idMatricula = $validatedData['idMatricula'];
-    $idMateria = $validatedData['idMateria'];
+    $idMatricula      = $validatedData['idMatricula'];
+    $idMateria        = $validatedData['idMateria'];
+    $idHorarioMateria = $validatedData['idHorarioMateria'] ?? null;
 
     $matriculaAcademica = MatriculaAcademica::with('ficha')->where('idMatricula', $idMatricula)
       ->where('idMateria', $idMateria)
@@ -235,51 +236,56 @@ public function getAllAssistance(Request $request): JsonResponse
 
     $idFicha = $matriculaAcademica->idFicha;
 
-    $hoy = now();
+    $hoy     = now();
     $dbIdDia = ($hoy->dayOfWeek == 0) ? 7 : $hoy->dayOfWeek;
 
-    // Find HorarioMateria for the given ficha and materia on TODAY
-    $horarioMateria = \App\Models\HorarioMateria::where('idFicha', $idFicha)
-        ->whereHas('gradoMateria', function ($query) use ($idMateria) {
-            $query->where('idMateria', $idMateria);
-        })
-        ->where('idDia', $dbIdDia)
-        ->first();
-
-    // Fallback to any schedule if updating past attendance on off-days
-    if (!$horarioMateria) {
+    // ── Buscar el HorarioMateria ──────────────────────────────────────────
+    // Prioridad: usar idHorarioMateria exacto si viene del frontend.
+    // Esto soporta que la misma materia se dicte dos veces el mismo día
+    // con horarios distintos (cada horario tiene su propio idHorarioMateria).
+    if ($idHorarioMateria) {
+        $horarioMateria = \App\Models\HorarioMateria::find($idHorarioMateria);
+    } else {
+        // Fallback: buscar por ficha + materia + día actual
         $horarioMateria = \App\Models\HorarioMateria::where('idFicha', $idFicha)
             ->whereHas('gradoMateria', function ($query) use ($idMateria) {
                 $query->where('idMateria', $idMateria);
             })
+            ->where('idDia', $dbIdDia)
             ->first();
+
+        // Fallback adicional: cualquier horario de esa materia en la ficha
+        if (!$horarioMateria) {
+            $horarioMateria = \App\Models\HorarioMateria::where('idFicha', $idFicha)
+                ->whereHas('gradoMateria', function ($query) use ($idMateria) {
+                    $query->where('idMateria', $idMateria);
+                })
+                ->first();
+        }
     }
 
     if (!$horarioMateria) {
         return response()->json(['message' => 'No se encontró un horario asignado para esta materia y ficha'], 404);
     }
+    // ─────────────────────────────────────────────────────────────────────
 
-    // Try finding a session for today first
+    // ── Buscar / crear SesionMateria de HOY para este horario exacto ──────
     $sesionMateria = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
         ->whereDate('fechaSesion', today())
         ->first();
 
-    // If no session today, check if WE SHOULD HAVE ONE (it's a scheduled day)
     if (!$sesionMateria && $horarioMateria->idDia == $dbIdDia) {
-        // Create the session for today
         $lastSession = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
             ->max('numeroSesion') ?? 0;
-        
-        $sesionMateria = \App\Models\SesionMateria::create([
-            'numeroSesion' => $lastSession + 1,
-            'idHorarioMateria' => $horarioMateria->id,
-            'fechaSesion' => today()->toDateString(),
-        ]);
 
-        // Note: Individual attendance will be created below since $asistencia will be null
+        $sesionMateria = \App\Models\SesionMateria::create([
+            'numeroSesion'     => $lastSession + 1,
+            'idHorarioMateria' => $horarioMateria->id,
+            'fechaSesion'      => today()->toDateString(),
+        ]);
     }
 
-    // Fallback: If still no session (e.g. it's not a scheduled day), find the most recent session for manual updates
+    // Fallback: sesión más reciente si no es día programado
     if (!$sesionMateria) {
         $sesionMateria = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
             ->orderBy('fechaSesion', 'desc')
@@ -289,7 +295,9 @@ public function getAllAssistance(Request $request): JsonResponse
     if (!$sesionMateria) {
         return response()->json(['message' => 'No hay sesiones programadas para el horario de esta materia.'], 404);
     }
+    // ─────────────────────────────────────────────────────────────────────
 
+    // ── Crear o actualizar la asistencia del estudiante ───────────────────
     $asistencia = Asistencia::where('idMatriculaAcademica', $matriculaAcademica->id)
       ->where('idSesionMateria', $sesionMateria->id)
       ->first();
@@ -297,24 +305,22 @@ public function getAllAssistance(Request $request): JsonResponse
     if (!$asistencia) {
       $asistencia = Asistencia::create([
         'idMatriculaAcademica' => $matriculaAcademica->id,
-        'idSesionMateria' => $sesionMateria->id,
-        'horaLLegada' => now(),
-        'asistio' => $request['asistio'] ?? 0
+        'idSesionMateria'      => $sesionMateria->id,
+        'horaLLegada'          => now(),
+        'asistio'              => $request['asistio'] ?? 0
       ]);
     } else {
       $asistencia->update([
         'asistio' => $request['asistio'] ?? 0
       ]);
     }
+    // ─────────────────────────────────────────────────────────────────────
 
     // ─── AUTO-REGISTRO DE INASISTENCIAS ───────────────────────────────────
-    // Cuando se registra la asistencia de un estudiante, automáticamente
-    // se crean registros asistio=false para todos los demás estudiantes de
-    // la misma ficha+materia que aún no tengan registro en esta sesión.
     try {
         $todasLasMatriculas = MatriculaAcademica::where('idFicha', $idFicha)
             ->where('idMateria', $idMateria)
-            ->where('id', '!=', $matriculaAcademica->id) // excluir al que ya se registró
+            ->where('id', '!=', $matriculaAcademica->id)
             ->get();
 
         foreach ($todasLasMatriculas as $otraMatricula) {
@@ -325,39 +331,37 @@ public function getAllAssistance(Request $request): JsonResponse
             if (!$existe) {
                 Asistencia::create([
                     'idMatriculaAcademica' => $otraMatricula->id,
-                    'idSesionMateria' => $sesionMateria->id,
-                    'horaLLegada' => null,
-                    'asistio' => false,
+                    'idSesionMateria'      => $sesionMateria->id,
+                    'horaLLegada'          => null,
+                    'asistio'              => false,
                 ]);
             }
         }
     } catch (\Exception $e) {
-        // No interrumpir el flujo principal si falla el auto-registro
         \Illuminate\Support\Facades\Log::warning('Auto-registro inasistencias falló: ' . $e->getMessage());
     }
     // ──────────────────────────────────────────────────────────────────────
 
-    // Process Justification
+    // ── Justificación ────────────────────────────────────────────────────
     if ($request->has('justificada') && $request->justificada && !$request->asistio) {
-        // Create Excusa
         $excusa = \App\Models\Excusa::create([
-            'tipoExcusa' => $request->tipoExcusa ?? 'FUERZA MAYOR',
-            'observacion' => $request->observacionExcusa ?? null,
-            'urlDocumento' => $request->urlDocumento ?? null,
+            'tipoExcusa'              => $request->tipoExcusa ?? 'FUERZA MAYOR',
+            'observacion'             => $request->observacionExcusa ?? null,
+            'urlDocumento'            => $request->urlDocumento ?? null,
             'fechaInicialJustificacion' => today(),
-            'fechaFinalJustificacion' => today(),
+            'fechaFinalJustificacion'   => today(),
         ]);
 
-        // Link with JustificacionInasistencia
         \App\Models\JustificacionInasistencia::create([
-            'idAsistencia' => $asistencia->id,
-            'idExcusa' => $excusa->id,
+            'idAsistencia'         => $asistencia->id,
+            'idExcusa'             => $excusa->id,
             'idMatriculaAcademica' => $matriculaAcademica->id,
-            'idPersona' => auth()->user()->idpersona ?? null,
-            'estado' => 'APROBADO', // By default since it's entered directly
-            'observacion' => 'Justificada desde el registro de asistencia de clase'
+            'idPersona'            => auth()->user()->idpersona ?? null,
+            'estado'               => 'APROBADO',
+            'observacion'          => 'Justificada desde el registro de asistencia de clase'
         ]);
     }
+    // ─────────────────────────────────────────────────────────────────────
 
     return response()->json($asistencia, $request->isMethod('put') ? 200 : 201);
   }
