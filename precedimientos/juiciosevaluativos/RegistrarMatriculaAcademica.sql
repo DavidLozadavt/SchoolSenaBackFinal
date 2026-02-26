@@ -255,14 +255,14 @@ END IF;
 SET v_idRol = (
   SELECT id
   FROM roles
-  WHERE name = 'APRENDIZ' AND company_id = p_idCompany
+  WHERE name = 'APRENDIZ'
   LIMIT 1
 );
 
 -- Si no existe el rol "APRENDIZ", crearlo
 IF v_idRol IS NULL THEN
-  INSERT INTO roles (name, guard_name, company_id)
-  VALUES ('APRENDIZ', 'web', p_idCompany);
+  INSERT INTO roles (name, guard_name)
+VALUES ('APRENDIZ', 'web');
   SET v_idRol = LAST_INSERT_ID();
 END IF;
 
