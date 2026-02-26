@@ -56,7 +56,7 @@ class ActividadController extends Controller
                 'idEstado' => 'nullable|exists:estado,id',
                 'idCompany' => 'required|exists:empresa,id',
                 'idPersona' => 'nullable|exists:persona,id',
-                'idClasificacion' => 'nullable|exists:clasificacionactividad,id',
+                'idClasificacion' => 'nullable|exists:clasificacionActividad,id',
                 'estrategia' => 'required|string',
                 'entregables' => 'required|string',
             ]);
@@ -88,7 +88,7 @@ class ActividadController extends Controller
                 'idEstado' => 'nullable|exists:estado,id',
                 'idCompany' => 'sometimes|required|exists:empresa,id',
                 'idPersona' => 'nullable|exists:persona,id',
-                'idClasificacion' => 'nullable|exists:clasificacionactividad,id',
+                'idClasificacion' => 'nullable|exists:clasificacionActividad,id',
                 'estrategia' => 'sometimes|required|string',
                 'entregables' => 'sometimes|required|string',
             ]);
@@ -230,16 +230,23 @@ class ActividadController extends Controller
     {
         try {
             $ficha = \App\Models\Ficha::with('asignacion')->findOrFail($idFicha);
-            $idAsignacion = $ficha->idAsignacion ?? null;
-            if (!$idAsignacion) {
+            if (!\Illuminate\Support\Facades\Schema::hasTable('planeacion')) {
                 return response()->json(['id' => null]);
             }
-            if (\Illuminate\Support\Facades\Schema::hasTable('planeacion') && \Illuminate\Support\Facades\Schema::hasColumn('planeacion', 'idAsignacion')) {
-                $planeacion = \Illuminate\Support\Facades\DB::table('planeacion')
-                    ->where('idAsignacion', $idAsignacion)->first();
-                return response()->json($planeacion ?? ['id' => $idAsignacion]);
+            $idContrato = null;
+            if (\Illuminate\Support\Facades\Schema::hasTable('horarioMateria') && \Illuminate\Support\Facades\Schema::hasColumn('horarioMateria', 'idContrato')) {
+                $horario = \Illuminate\Support\Facades\DB::table('horarioMateria')
+                    ->where('idFicha', $idFicha)
+                    ->whereNotNull('idContrato')
+                    ->first();
+                $idContrato = $horario->idContrato ?? null;
             }
-            return response()->json(['id' => $idAsignacion]);
+            if (!$idContrato || !\Illuminate\Support\Facades\Schema::hasColumn('planeacion', 'idContrato')) {
+                return response()->json(['id' => null]);
+            }
+            $planeacion = \Illuminate\Support\Facades\DB::table('planeacion')
+                ->where('idContrato', $idContrato)->first();
+            return response()->json($planeacion ?? ['id' => null]);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -249,24 +256,55 @@ class ActividadController extends Controller
     {
         try {
             $ficha = \App\Models\Ficha::with('asignacion')->findOrFail($idFicha);
-            $idAsignacion = $ficha->idAsignacion ?? null;
-            if (!$idAsignacion) {
-                return response()->json([]);
+            $items = collect();
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('planeacion')) {
+                $idContrato = null;
+                if (\Illuminate\Support\Facades\Schema::hasTable('horarioMateria') && \Illuminate\Support\Facades\Schema::hasColumn('horarioMateria', 'idContrato')) {
+                    $horario = \Illuminate\Support\Facades\DB::table('horarioMateria')
+                        ->where('idFicha', $idFicha)
+                        ->whereNotNull('idContrato')
+                        ->first();
+                    $idContrato = $horario->idContrato ?? null;
+                }
+                $idPlaneacion = null;
+                if ($idContrato && \Illuminate\Support\Facades\Schema::hasColumn('planeacion', 'idContrato')) {
+                    $planeacion = \Illuminate\Support\Facades\DB::table('planeacion')
+                        ->where('idContrato', $idContrato)->first();
+                    $idPlaneacion = $planeacion->id ?? null;
+                }
+                if ($idPlaneacion) {
+                    $items = PlaneacionActividad::with(['actividad.persona', 'actividad.materia', 'actividad.estado'])
+                        ->where('idPlaneacion', $idPlaneacion)
+                        ->get();
+                }
             }
-            $idPlaneacion = null;
-            if (\Illuminate\Support\Facades\Schema::hasTable('planeacion') && \Illuminate\Support\Facades\Schema::hasColumn('planeacion', 'idAsignacion')) {
-                $planeacion = \Illuminate\Support\Facades\DB::table('planeacion')
-                    ->where('idAsignacion', $idAsignacion)->first();
-                $idPlaneacion = $planeacion->id ?? null;
-            } else {
-                $idPlaneacion = $idAsignacion;
+
+            // Fallback: actividades asignadas en calificacionActividad (sin planeación)
+            if ($items->isEmpty() && \Illuminate\Support\Facades\Schema::hasTable('calificacionActividad')) {
+                $tableMa = \Illuminate\Support\Facades\Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+                if (\Illuminate\Support\Facades\Schema::hasColumn($tableMa, 'idFicha')) {
+                    $idsActividad = \Illuminate\Support\Facades\DB::table('calificacionActividad as ca')
+                        ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                        ->where('ma.idFicha', $idFicha)
+                        ->distinct()
+                        ->pluck('ca.idActividad');
+                    if ($idsActividad->isNotEmpty()) {
+                        $actividades = Actividad::with(['persona', 'materia', 'estado'])
+                            ->whereIn('id', $idsActividad)
+                            ->get();
+                        foreach ($actividades as $act) {
+                            $items->push((object) [
+                                'id' => $act->id,
+                                'idActividad' => $act->id,
+                                'idMateria' => $act->idMateria,
+                                'actividad' => $act,
+                            ]);
+                        }
+                    }
+                }
             }
-            if (!$idPlaneacion) {
-                return response()->json([]);
-            }
-            $items = PlaneacionActividad::with(['actividad.persona', 'actividad.materia', 'actividad.estado'])
-                ->where('idPlaneacion', $idPlaneacion)
-                ->get();
+
             return response()->json($items);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -281,6 +319,11 @@ class ActividadController extends Controller
                 'idMateria' => 'required|exists:materia,id',
                 'idPlaneacion' => 'required',
             ]);
+            $idPlaneacion = $validated['idPlaneacion'];
+            if (is_array($idPlaneacion)) {
+                $idPlaneacion = $idPlaneacion['id'] ?? $idPlaneacion[0] ?? null;
+            }
+            $validated['idPlaneacion'] = (int) $idPlaneacion;
 
             $item = PlaneacionActividad::create($validated);
             return response()->json($item, 201);

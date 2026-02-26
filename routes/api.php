@@ -131,6 +131,7 @@ use App\Http\Controllers\gestion_horarios\DiaController;
 use App\Http\Controllers\RedController;
 use App\Http\Controllers\gestion_actividades\ActividadController;
 use App\Http\Controllers\ambiente_virtual\GruposFichaController;
+use App\Http\Controllers\ambiente_virtual\AsignacionActividadController;
 use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
@@ -1262,10 +1263,15 @@ Route::middleware('auth:api')->group(function () {
     // Grupos por ficha (ambiente virtual) - tabla grupos
     Route::get('fichas/{idFicha}/grupos', [GruposFichaController::class, 'index']);
     Route::get('fichas/{idFicha}/grupos/datos-crear', [GruposFichaController::class, 'datosCrear']);
+    Route::get('tipos-grupo', [GruposFichaController::class, 'tiposGrupo']);
     Route::post('fichas/{idFicha}/grupos', [GruposFichaController::class, 'store']);
     Route::get('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'show']);
     Route::put('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'update']);
     Route::delete('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'destroy']);
+
+    // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
+    Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);
+    Route::post('fichas/{idFicha}/asignacion-actividades', [AsignacionActividadController::class, 'asignar']);
 });//Juicios evaluativos:
 Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 

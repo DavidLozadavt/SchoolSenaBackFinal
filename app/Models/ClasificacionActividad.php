@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class ClasificacionActividad extends Model
 {
-    protected $table = 'clasificacionactividad';
+    protected $table = 'clasificacionActividad';
 
     protected $fillable = ['nombreClasificacionActividad', 'porcentaje', 'idCompany', 'idPrograma'];
 
