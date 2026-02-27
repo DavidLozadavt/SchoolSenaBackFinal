@@ -24,7 +24,7 @@ class TmpRapController extends Controller
         $archivo       = $request->file('archivo');
         $spreadsheet   = IOFactory::load($archivo->getPathname());
         $hoja          = $spreadsheet->getActiveSheet();
-        $numeroDeFicha = $hoja->getCell('C3')->getValue();
+        $numeroDeFicha = trim($hoja->getCell('C3')->getFormattedValue());
         $fechaReporte  = $hoja->getCell('C2')->getValue();
         $filaInicial   = 14;
 
