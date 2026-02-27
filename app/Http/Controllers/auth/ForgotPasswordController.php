@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Otps;
 use App\Models\PasswordReset;
-use App\Models\usuario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB; 
@@ -27,7 +26,7 @@ class ForgotPasswordController extends Controller
             
             \Log::info('Enviando OTP a:', ['email' => $email]);
 
-            $userExists = DB::table('usuario')->where('email', $email)->exists();
+            $userExists = DB::table('persona')->where('email', $email)->exists();
             
             $responseMessage = 'Si el correo existe en nuestro sistema, recibirás un código de verificación en tu correo electrónico.';
             
@@ -170,14 +169,25 @@ class ForgotPasswordController extends Controller
 {
     try {
         $request->validate([
-            'email' => 'required|email|exists:usuario,email',
+            'email' => 'required|email|exists:persona,email',
             'token' => 'required|string',
             'password' => 'required|min:8|confirmed'
         ]);
 
+
         $email = $request->email;
         $token = $request->token;
         $password = $request->password;
+
+        $findUser = DB::table('persona')
+                ->where('email', $email)
+                ->first();
+
+            if (!$findUser) {
+                return response()->json([
+                    'message' => 'Persona no encontrada'
+                ], 404);
+        }
 
         \Log::info('Reseteando contraseña para:', ['email' => $email]);
 
@@ -210,8 +220,8 @@ class ForgotPasswordController extends Controller
                 'error' => 'expired_token'
             ], 400);
         }
-
         $affected = DB::table('usuario')
+            ->where('idpersona', $findUser->id)
             ->where('email', $email)
             ->update([
                 'contrasena' => Hash::make($password),
@@ -221,17 +231,13 @@ class ForgotPasswordController extends Controller
         \Log::info('Contraseña actualizada:', ['affected_rows' => $affected]);
 
         if ($affected === 0) {
-            \Log::warning('No se actualizó ninguna fila');
-            return response()->json([
-                'message' => 'No se pudo actualizar la contraseña',
-                'error' => 'update_failed'
-            ], 400);
+            \Log::info('No se actualizó ninguna fila (posiblemente la misma contraseña), pero el usuario existe.');
         }
 
-        // ===== Cambiar state_id de 18 a 1 si aplica =====
+
         try {
             // Buscar el usuario en la tabla `usuario`
-            $user = \App\Models\User::where('email', $email)->first();
+            $user = \App\Models\User::where('idpersona', $findUser->id)->first();
 
             if ($user) {
                 \Log::info('Usuario encontrado:', ['user_id' => $user->id]);
@@ -250,10 +256,10 @@ class ForgotPasswordController extends Controller
                     \Log::info('State_id actualizado exitosamente');
 
                     // Actualizar roles según el tipo de usuario
-                    if ($activacion->hasRole('ESTUDIANTEUP')) {
-                        $activacion->removeRole('ESTUDIANTEUP');
-                        $activacion->assignRole('APRENDIZ');
-                        \Log::info('Rol ESTUDIANTEUP revertido a APRENDIZ');
+                    if ($activacion->hasRole('APRENDIZUP')) {
+                        $activacion->removeRole('APRENDIZUP');
+                        $activacion->assignRole('APRENDIZ SENA');
+                        \Log::info('Rol APRENDIZUP revertido a APRENDIZ SENA');
                     } elseif ($activacion->hasRole('DOCENTEUP')) {
                         $activacion->removeRole('DOCENTEUP');
                         $activacion->assignRole('INSTRUCTOR SENA');
@@ -288,6 +294,8 @@ class ForgotPasswordController extends Controller
             'profile_completed' => false
         ], 200);
 
+    } catch (\Illuminate\Validation\ValidationException $e) {
+        throw $e;
     } catch (\Exception $e) {
         \Log::error('Error en resetPassword: ' . $e->getMessage());
         return response()->json([
