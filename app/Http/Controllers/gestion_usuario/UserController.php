@@ -95,9 +95,9 @@ class UserController extends Controller
         }
 
         // Actualizar roles según el tipo de usuario (APRENDIZ o INSTRUCTOR)
-        if ($activacion->hasRole('APRENDIZUP')) {
-            $activacion->removeRole('APRENDIZUP');
-            $activacion->assignRole('APRENDIZ SENA');
+        if ($activacion->hasRole('ESTUDIANTEUP')) {
+            $activacion->removeRole('ESTUDIANTEUP');
+            $activacion->assignRole('APRENDIZ');
         } elseif ($activacion->hasRole('DOCENTEUP')) {
             $activacion->removeRole('DOCENTEUP');
             $activacion->assignRole('INSTRUCTOR SENA');
