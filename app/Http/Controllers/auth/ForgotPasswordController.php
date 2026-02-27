@@ -220,27 +220,25 @@ class ForgotPasswordController extends Controller
                 'error' => 'expired_token'
             ], 400);
         }
-        $affected = DB::table('usuario')
-            ->where('idpersona', $findUser->id)
-            ->where('email', $email)
-            ->update([
-                'contrasena' => Hash::make($password),
-                'updated_at' => now()
-            ]);
+        // Actualizar la contraseña usando el modelo User para consistencia
+        $user = \App\Models\User::where('idpersona', $findUser->id)->first();
 
-        \Log::info('Contraseña actualizada:', ['affected_rows' => $affected]);
-
-        if ($affected === 0) {
-            \Log::info('No se actualizó ninguna fila (posiblemente la misma contraseña), pero el usuario existe.');
+        if (!$user) {
+            \Log::warning('Usuario no encontrado en tabla usuario para idpersona:', ['id' => $findUser->id]);
+            return response()->json([
+                'message' => 'No se encontró un usuario asociado a esta persona'
+            ], 404);
         }
 
+        $user->contrasena = Hash::make($password);
+        $user->updated_at = now();
+        $user->save();
+
+        \Log::info('Contraseña actualizada para usuario ID:', ['user_id' => $user->id]);
 
         try {
-            // Buscar el usuario en la tabla `usuario`
-            $user = \App\Models\User::where('idpersona', $findUser->id)->first();
-
-            if ($user) {
-                \Log::info('Usuario encontrado:', ['user_id' => $user->id]);
+            // Ya tenemos el objeto $user, podemos usarlo directamente
+            \Log::info('Verificando activación para:', ['user_id' => $user->id]);
 
                 // Buscar la activación que esté específicamente en estado 18
                 $activacion = \App\Models\ActivationCompanyUser::where('user_id', $user->id)
@@ -256,10 +254,10 @@ class ForgotPasswordController extends Controller
                     \Log::info('State_id actualizado exitosamente');
 
                     // Actualizar roles según el tipo de usuario
-                    if ($activacion->hasRole('APRENDIZUP')) {
-                        $activacion->removeRole('APRENDIZUP');
-                        $activacion->assignRole('APRENDIZ SENA');
-                        \Log::info('Rol APRENDIZUP revertido a APRENDIZ SENA');
+                    if ($activacion->hasRole('ESTUDIANTEUP')) {
+                        $activacion->removeRole('ESTUDIANTEUP');
+                        $activacion->assignRole('APRENDIZ');
+                        \Log::info('Rol ESTUDIANTEUP revertido a APRENDIZ SENA');
                     } elseif ($activacion->hasRole('DOCENTEUP')) {
                         $activacion->removeRole('DOCENTEUP');
                         $activacion->assignRole('INSTRUCTOR SENA');
@@ -275,9 +273,6 @@ class ForgotPasswordController extends Controller
                     ], 200);
                 } else {
                     \Log::info('El usuario no tiene activación en estado 18.', ['user_id' => $user->id]);
-                }
-            } else {
-                \Log::warning('Usuario no encontrado en tabla usuario con email:', ['email' => $email]);
             }
         } catch (\Exception $e) {
             \Log::error('Error actualizando state_id: ' . $e->getMessage());
