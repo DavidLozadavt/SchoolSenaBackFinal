@@ -1196,6 +1196,7 @@ class HorarioMateriaController extends Controller
 
             $materias = HorarioMateria::where('idFicha', $idFicha)
                 ->with('gradoMateria.materia')
+                ->with('contrato.persona')
                 ->get();
 
             if ($materias->isEmpty()) {
