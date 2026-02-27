@@ -927,10 +927,10 @@ public function getAllContratos(Request $request)
                 Log::info('No se recibió idCentroFormacion o está vacío - mostrar todos los de la empresa');
             }
         }
-        elseif (in_array('ADMINISTRADOR REGIONAL', $userRoles)) {
-            Log::info('Es ADMINISTRADOR REGIONAL');
+        elseif (in_array('ADMIN REGIONAL', $userRoles)) {
+            Log::info('Es ADMIN REGIONAL');
             
-            // ADMINISTRADOR REGIONAL: puede filtrar por centro
+            // ADMIN REGIONAL: puede filtrar por centro
             if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
                 $idCentroFormacion = $request->input('idCentroFormacion');
                 $query->where('idCentroFormacion', $idCentroFormacion);

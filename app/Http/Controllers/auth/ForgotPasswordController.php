@@ -250,10 +250,10 @@ class ForgotPasswordController extends Controller
                     \Log::info('State_id actualizado exitosamente');
 
                     // Actualizar roles según el tipo de usuario
-                    if ($activacion->hasRole('APRENDIZUP')) {
-                        $activacion->removeRole('APRENDIZUP');
-                        $activacion->assignRole('APRENDIZ SENA');
-                        \Log::info('Rol APRENDIZUP revertido a APRENDIZ SENA');
+                    if ($activacion->hasRole('ESTUDIANTEUP')) {
+                        $activacion->removeRole('ESTUDIANTEUP');
+                        $activacion->assignRole('APRENDIZ');
+                        \Log::info('Rol ESTUDIANTEUP revertido a APRENDIZ');
                     } elseif ($activacion->hasRole('DOCENTEUP')) {
                         $activacion->removeRole('DOCENTEUP');
                         $activacion->assignRole('INSTRUCTOR SENA');
