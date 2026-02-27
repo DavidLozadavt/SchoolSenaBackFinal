@@ -126,6 +126,7 @@ class PensumController extends Controller
             $idCentro = $request->centro;
 
             $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'red'])
+                ->where('idRed', $idRed)
                 ->withCount([
                     'fichasActivas as fichas_activas_count' => function ($q) use ($idCentro) {
                         $q->whereHas('aperturarPrograma.sede', function ($sub) use ($idCentro) {
@@ -133,10 +134,6 @@ class PensumController extends Controller
                         });
                     }
                 ])
-                ->where('idRed', $idRed)
-                ->whereHas('aperturarProgramas.sede', function ($q) use ($idCentro) {
-                    $q->where('idCentroFormacion', $idCentro);
-                })
                 ->orderByDesc('fichas_activas_count')
                 ->orderBy('nombrePrograma')
                 ->get();
