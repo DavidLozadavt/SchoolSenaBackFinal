@@ -18,6 +18,7 @@ use App\Models\AsignacionContratoAreaConocimiento;
 use App\Models\Contract;
 use App\Models\GradoMateria;
 use App\Models\GradoPrograma;
+use App\Models\HorarioMateria;
 
 use function PHPUnit\Framework\isEmpty;
 
@@ -216,6 +217,16 @@ class MateriaController extends Controller
             $datos = $request->all();
 
             $materia = Materia::findOrFail($id);
+            $raps = Materia::where('idMateriaPadre', $materia->id)->get();
+
+            // si trae raps y el area de conocimiento es diferente, actualiza el area de conocimiento de los raps
+            if($raps->isNotEmpty() && $materia->idAreaConocimiento != $datos['idAreaConocimiento'] && $materia->idMateriaPadre == null){
+                foreach ($raps as $rap) {
+                    $rap->update([
+                        'idAreaConocimiento' => $datos['idAreaConocimiento']
+                    ]);
+                }
+            }
 
             $materia->update([
                 'nombreMateria' => $datos['nombreMateria'],
@@ -428,14 +439,37 @@ class MateriaController extends Controller
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
                 'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                'horas' => $datos['horas'],
+                'creditos' => $datos['creditos'],
+                'idMateriaPadre' => $datos['idMateriaPadre'] ?? null,
                 'idCompany' => $datos['idCompany'],
                 'idEmpresa' => $datos['idCompany']
             ]);
 
-            AgregarMateriaPrograma::create([
-                'idMateria' => $compe->id,
-                'idPrograma' => $datos['idPrograma']
-            ]);
+            if($compe->idMateriaPadre != null && $datos['idGradoPrograma'] != null){
+                $gradoMateria = GradoMateria::create([
+                    'idGradoPrograma' => $datos['idGradoPrograma'],
+                    'idMateria' => $compe->id,
+                    'idCompany' => $datos['idCompany'],
+                    'idEmpresa' => $datos['idCompany']
+                ]);
+
+                HorarioMateria::create([
+                    'idGradoMateria' => $gradoMateria->id,
+                    'idFicha' => $datos['idFicha'],
+                    'idDia' => null,
+                    'horaInicial' => null,
+                    'horaFinal' => null,
+                    'fechaFinal' => null
+                ]);
+            }
+
+            if($compe->idMateriaPadre == null){
+                AgregarMateriaPrograma::create([
+                    'idMateria' => $compe->id,
+                    'idPrograma' => $datos['idPrograma']
+                ]);
+            }
             DB::commit();
             return response()->json([
                 'message' => 'Competencia creada correctamente'
