@@ -94,53 +94,13 @@ class UserController extends Controller
             $activacion->save();
         }
 
-        $companyId = KeyUtil::idCompany();
-        $estudianteUpRoleId = DB::table('roles')
-            ->where('name', 'APRENDIZUP')
-            ->where('company_id', $companyId)
-            ->value('id');
-
-        $role = DB::table('model_has_roles')
-            ->where('model_id', $activacion->id)
-            ->where('model_type', ActivationCompanyUser::class)
-            ->where('role_id', $estudianteUpRoleId)
-            ->first();
-
-        $estudianteRoleId = DB::table('roles')
-            ->where('name', 'APRENDIZ SENA')
-            ->where('company_id', $companyId)
-            ->value('id');
-
-        if ($role) {
-            DB::table('model_has_roles')
-                ->where('model_id', $activacion->id)
-                ->where('model_type', ActivationCompanyUser::class)
-                ->where('role_id', $estudianteUpRoleId)
-                ->update(['role_id' => $estudianteRoleId]);
-        }
-
-        $docenteUpRoleId = DB::table('roles')
-            ->where('name', 'DOCENTEUP')
-            ->where('company_id', $companyId)
-            ->value('id');
-
-        $roleDocente = DB::table('model_has_roles')
-            ->where('model_id', $activacion->id)
-            ->where('model_type', ActivationCompanyUser::class)
-            ->where('role_id', $docenteUpRoleId)
-            ->first();
-
-        $docenteRoleId = DB::table('roles')
-            ->where('name', 'INSTRUCTOR SENA')
-            ->where('company_id', $companyId)
-            ->value('id');
-
-        if ($roleDocente) {
-            DB::table('model_has_roles')
-                ->where('model_id', $activacion->id)
-                ->where('model_type', ActivationCompanyUser::class)
-                ->where('role_id', $docenteUpRoleId)
-                ->update(['role_id' => $docenteRoleId]);
+        // Actualizar roles según el tipo de usuario (APRENDIZ o INSTRUCTOR)
+        if ($activacion->hasRole('ESTUDIANTEUP')) {
+            $activacion->removeRole('ESTUDIANTEUP');
+            $activacion->assignRole('APRENDIZ');
+        } elseif ($activacion->hasRole('DOCENTEUP')) {
+            $activacion->removeRole('DOCENTEUP');
+            $activacion->assignRole('INSTRUCTOR SENA');
         }
         
        // $contrato = $persona->contrato;

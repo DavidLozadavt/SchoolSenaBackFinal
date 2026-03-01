@@ -17,6 +17,8 @@ use App\Models\AgregarMateriaPrograma;
 use App\Models\AsignacionContratoAreaConocimiento;
 use App\Models\Contract;
 use App\Models\GradoMateria;
+use App\Models\GradoPrograma;
+use App\Models\HorarioMateria;
 
 use function PHPUnit\Framework\isEmpty;
 
@@ -215,6 +217,16 @@ class MateriaController extends Controller
             $datos = $request->all();
 
             $materia = Materia::findOrFail($id);
+            $raps = Materia::where('idMateriaPadre', $materia->id)->get();
+
+            // si trae raps y el area de conocimiento es diferente, actualiza el area de conocimiento de los raps
+            if($raps->isNotEmpty() && $materia->idAreaConocimiento != $datos['idAreaConocimiento'] && $materia->idMateriaPadre == null){
+                foreach ($raps as $rap) {
+                    $rap->update([
+                        'idAreaConocimiento' => $datos['idAreaConocimiento']
+                    ]);
+                }
+            }
 
             $materia->update([
                 'nombreMateria' => $datos['nombreMateria'],
@@ -427,14 +439,37 @@ class MateriaController extends Controller
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
                 'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                'horas' => $datos['horas'],
+                'creditos' => $datos['creditos'],
+                'idMateriaPadre' => $datos['idMateriaPadre'] ?? null,
                 'idCompany' => $datos['idCompany'],
                 'idEmpresa' => $datos['idCompany']
             ]);
 
-            AgregarMateriaPrograma::create([
-                'idMateria' => $compe->id,
-                'idPrograma' => $datos['idPrograma']
-            ]);
+            if($compe->idMateriaPadre != null && $datos['idGradoPrograma'] != null){
+                $gradoMateria = GradoMateria::create([
+                    'idGradoPrograma' => $datos['idGradoPrograma'],
+                    'idMateria' => $compe->id,
+                    'idCompany' => $datos['idCompany'],
+                    'idEmpresa' => $datos['idCompany']
+                ]);
+
+                HorarioMateria::create([
+                    'idGradoMateria' => $gradoMateria->id,
+                    'idFicha' => $datos['idFicha'],
+                    'idDia' => null,
+                    'horaInicial' => null,
+                    'horaFinal' => null,
+                    'fechaFinal' => null
+                ]);
+            }
+
+            if($compe->idMateriaPadre == null){
+                AgregarMateriaPrograma::create([
+                    'idMateria' => $compe->id,
+                    'idPrograma' => $datos['idPrograma']
+                ]);
+            }
             DB::commit();
             return response()->json([
                 'message' => 'Competencia creada correctamente'
@@ -464,5 +499,83 @@ class MateriaController extends Controller
             'message' => 'Competencia encontrada correctamente',
             'data' => $materia
         ], 200);
+    }
+
+    public function deleteMateriaTrimestre(Request $request)
+    {
+        try {
+            $idGradoMateria = $request->input('id');
+            $eliminarTrimestre = $request->boolean('eliminarTrimestre');
+
+            DB::beginTransaction();
+
+            $gradoMateriaABorrar = GradoMateria::with('materia')->find($idGradoMateria);
+
+            if (!$gradoMateriaABorrar) {
+                return response()->json(['message' => 'No se encontró la materia'], 404);
+            }
+
+            $idGradoPrograma = $gradoMateriaABorrar->idGradoPrograma;
+            $idsAProcesar = [];
+
+            if ($eliminarTrimestre) {
+                // Si eliminamos el trimestre, cargamos todas sus materias para validar que estén vacías
+                $idsAProcesar = GradoMateria::where('idGradoPrograma', $idGradoPrograma)->pluck('id')->toArray();
+            } else {
+                // Si no, solo cargamos la materia seleccionada y sus hijos (RAPs) si es una competencia padre
+                $idsAProcesar = [$gradoMateriaABorrar->id];
+
+                if ($gradoMateriaABorrar->materia && is_null($gradoMateriaABorrar->materia->idMateriaPadre)) {
+                    $idMateriaPadre = $gradoMateriaABorrar->materia->id;
+                    $hijosEnTrimestre = GradoMateria::where('idGradoPrograma', $idGradoPrograma)
+                        ->whereHas('materia', function ($query) use ($idMateriaPadre) {
+                            $query->where('idMateriaPadre', $idMateriaPadre);
+                        })->pluck('id')->toArray();
+
+                    $idsAProcesar = array_merge($idsAProcesar, $hijosEnTrimestre);
+                }
+            }
+
+            // Validar que NADA de lo que vamos a borrar tenga sesiones o datos reales
+            $registrosAProcesar = GradoMateria::whereIn('id', $idsAProcesar)
+                ->with(['materia', 'horarioMateria.sesionMaterias'])
+                ->get();
+
+            foreach ($registrosAProcesar as $registro) {
+                if ($registro->horarioMateria) {
+                    foreach ($registro->horarioMateria as $horario) {
+                        if ($horario->sesionMaterias->isNotEmpty()) {
+                            return response()->json([
+                                'message' => "No se puede eliminar porque la materia '{$registro->materia->nombreMateria}' ya tiene sesiones dadas.",
+                            ], 400);
+                        }
+                        if (!is_null($horario->idDia) || !is_null($horario->horaInicial) || !is_null($horario->idContrato)) {
+                            return response()->json([
+                                'message' => "No se puede eliminar porque la materia '{$registro->materia->nombreMateria}' ya tiene horarios o instructor.",
+                            ], 400);
+                        }
+                    }
+                }
+            }
+
+            // eliminación de las materias y sus horarios vacíos
+            foreach ($registrosAProcesar as $registro) {
+                $registro->horarioMateria()->delete();
+                $registro->delete();
+            }
+
+            // Solo eliminar el trimestre si eliminarTrimestre es true
+            if ($eliminarTrimestre) {
+                GradoPrograma::where('id', $idGradoPrograma)->delete();
+            }
+
+            DB::commit();
+            return response()->json([
+                'message' => $eliminarTrimestre ? 'Trimestre eliminado correctamente.' : 'Materia(s) eliminada(s) correctamente.'
+            ], 200);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error al eliminar', 'error' => $e->getMessage()], 400);
+        }
     }
 }

@@ -1196,6 +1196,7 @@ class HorarioMateriaController extends Controller
 
             $materias = HorarioMateria::where('idFicha', $idFicha)
                 ->with('gradoMateria.materia')
+                ->with('contrato.persona')
                 ->get();
 
             if ($materias->isEmpty()) {
@@ -1366,6 +1367,8 @@ class HorarioMateriaController extends Controller
                                 'nombre' => $materiaPadre->nombreMateria,
                                 'descripcion' => $materiaPadre->descripcion,
                                 'estado' => $gradoMateriaParaEstado->estado,
+                                'idMateriaPadre' => $materiaPadre->idMateriaPadre,
+                                'idGradoMateria' => $gradoMateriaParaEstado->id,
                                 'horasTotales' => $materiaPadre->horas,
                                 'horasActuales' => $horasData['horasActuales'],
                                 'horasFaltantes' => $materiaPadre->horas - $horasData['horasActuales'],

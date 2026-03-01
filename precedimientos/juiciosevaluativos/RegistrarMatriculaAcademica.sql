@@ -241,7 +241,7 @@ IF activationId IS NULL THEN
   )
   VALUES (
       v_idUsuario,
-      1,
+      18,
       p_idCompany,
       NOW(),
       '2100-12-12'
@@ -255,14 +255,14 @@ END IF;
 SET v_idRol = (
   SELECT id
   FROM roles
-  WHERE name = 'APRENDIZ' AND company_id = p_idCompany
+  WHERE name = 'ESTUDIANTEUP'
   LIMIT 1
 );
 
 -- Si no existe el rol "APRENDIZ", crearlo
 IF v_idRol IS NULL THEN
-  INSERT INTO roles (name, guard_name, company_id)
-  VALUES ('APRENDIZ', 'web', p_idCompany);
+  INSERT INTO roles (name, guard_name)
+VALUES ('ESTUDIANTEUP', 'web');
   SET v_idRol = LAST_INSERT_ID();
 END IF;
 
