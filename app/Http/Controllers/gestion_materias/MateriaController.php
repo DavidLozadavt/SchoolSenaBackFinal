@@ -435,10 +435,11 @@ class MateriaController extends Controller
         try {
             $datos = $request->all();
             DB::beginTransaction();
+            $materiaPadre = Materia::where('id', $datos['idMateriaPadre'])->firstOrFail();
             $compe = Materia::create([
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
-                'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                'idAreaConocimiento' => $datos['idMateriaPadre'] != null ? $materiaPadre->idAreaConocimiento : $datos['idAreaConocimiento'], 
                 'horas' => $datos['horas'],
                 'creditos' => $datos['creditos'],
                 'idMateriaPadre' => $datos['idMateriaPadre'] ?? null,
