@@ -115,8 +115,8 @@ class TrabajadoresController extends Controller
 
         $encryptedPassword = bcrypt('123');
 
-        $nomRol = 'DOCENTEUP';
-        
+        $nomRol = 'DOCENTEUP'; // Cambiar el rol dinamicamente para el docente y el trabajado administrativo PENDIENTE!!
+
         DB::statement('CALL cargarTrabajadores(?, ?, ?, ?)', [
             $companyId,
             $centroId,
