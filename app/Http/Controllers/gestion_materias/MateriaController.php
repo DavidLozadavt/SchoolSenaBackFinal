@@ -579,4 +579,13 @@ class MateriaController extends Controller
             return response()->json(['message' => 'Error al eliminar', 'error' => $e->getMessage()], 400);
         }
     }
+
+    public function getMattersChildren($id)
+    {
+        $materias = Materia::where('idMateriaPadre', $id)->get();
+        return response()->json([
+            'message' => 'Materias encontradas correctamente',
+            'data' => $materias
+        ], 200);
+    }
 }
