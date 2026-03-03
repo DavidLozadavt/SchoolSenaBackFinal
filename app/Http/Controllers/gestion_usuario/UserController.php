@@ -79,8 +79,8 @@ class UserController extends Controller
       // Inicializar variable
             $passwordUpdated = false;
 
-// Solo actualizar contraseña si se proporciona
-        if ($request->input('contrasena')) {
+        // Solo actualizar contraseña si se proporciona dentro del objeto user
+        if (isset($userData['contrasena']) && !empty($userData['contrasena'])) {
             $user->contrasena = bcrypt($userData['contrasena']);
             $user->save();
             $passwordUpdated = true;

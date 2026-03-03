@@ -1633,14 +1633,14 @@ class FichaController extends Controller
                     continue;
                 }
                 
-                // Crear fecha y hora completa de inicio de esta sesión
+                // La sesión se crea cuando TERMINA la clase (horaFinal), no cuando comienza
                 $fechaClase = Carbon::parse($fechaClaseStr);
-                $fechaHoraInicioSesion = $fechaClase->copy()
-                    ->setTime($horaIni->hour, $horaIni->minute, $horaIni->second);
+                $fechaHoraFinSesion = $fechaClase->copy()
+                    ->setTime($horaFin->hour, $horaFin->minute, $horaFin->second);
                 
-                // Si ya pasó la hora de inicio (incluyendo hoy si ya pasó la hora), crear la sesión
-                // Usar comparación de fecha y hora completa para mayor precisión
-                if ($ahora->gte($fechaHoraInicioSesion)) {
+                // Si ya pasó la hora FINAL de la clase (cuando termina el cronómetro), crear la sesión
+                // Esto asegura que la sesión solo se marca como completada cuando realmente terminó
+                if ($ahora->gte($fechaHoraFinSesion)) {
                     $numeroSesion = $mapaFechaNumeroSesion[$fechaClaseStr] ?? null;
                     if ($numeroSesion !== null) {
                         $nuevasSesiones[] = [
