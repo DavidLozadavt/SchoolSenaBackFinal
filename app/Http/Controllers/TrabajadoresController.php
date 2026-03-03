@@ -115,9 +115,12 @@ class TrabajadoresController extends Controller
 
         $encryptedPassword = bcrypt('123');
 
-        DB::statement('CALL cargarTrabajadores(?, ?, ?)', [
+        $nomRol = 'DOCENTEUP';
+        
+        DB::statement('CALL cargarTrabajadores(?, ?, ?, ?)', [
             $companyId,
             $centroId,
+            $nomRol,
             $encryptedPassword
         ]);
 
