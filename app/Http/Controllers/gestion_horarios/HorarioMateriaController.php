@@ -527,7 +527,8 @@ class HorarioMateriaController extends Controller
                 if ($resultado->isExist) {
                     DB::rollBack();
                     return response()->json([
-                        'message' => "El docente ya tiene una clase asignada para el mismo horario."
+                        'message' => "El docente ya tiene una clase asignada para el mismo horario.",
+                        'conflicto' => $resultado->horarioMateria
                     ], 422);
                 }
 
@@ -630,8 +631,7 @@ class HorarioMateriaController extends Controller
         $conflictingHorario = HorarioMateria::with(
             'infraestructura.sede.ciudad',
             'dia',
-            'materia.grado',
-            'materia.materia',
+            'gradoMateria.materia',
             'ficha.jornada',
             'contrato.persona'
         )
@@ -654,8 +654,8 @@ class HorarioMateriaController extends Controller
                 });
             })
             ->when(isset($horarioMateria->fechaInicial) ? $horarioMateria->fechaInicial : null, function ($query) use ($horarioMateria) {
-                $query->whereDate('fechaInicial', '>=', $horarioMateria->fechaInicial)
-                    ->whereDate('fechaFinal', '<=', $horarioMateria->fechaFinal);
+                $query->whereDate('fechaInicial', '<=', $horarioMateria->fechaFinal)
+                    ->whereDate('fechaFinal', '>=', $horarioMateria->fechaInicial);
             })
             ->first();
 

@@ -435,10 +435,11 @@ class MateriaController extends Controller
         try {
             $datos = $request->all();
             DB::beginTransaction();
+            $materiaPadre = Materia::where('id', $datos['idMateriaPadre'])->firstOrFail();
             $compe = Materia::create([
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
-                'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                'idAreaConocimiento' => $datos['idMateriaPadre'] != null ? $materiaPadre->idAreaConocimiento : $datos['idAreaConocimiento'], 
                 'horas' => $datos['horas'],
                 'creditos' => $datos['creditos'],
                 'idMateriaPadre' => $datos['idMateriaPadre'] ?? null,
@@ -577,5 +578,14 @@ class MateriaController extends Controller
             DB::rollBack();
             return response()->json(['message' => 'Error al eliminar', 'error' => $e->getMessage()], 400);
         }
+    }
+
+    public function getMattersChildren($id)
+    {
+        $materias = Materia::where('idMateriaPadre', $id)->get();
+        return response()->json([
+            'message' => 'Materias encontradas correctamente',
+            'data' => $materias
+        ], 200);
     }
 }
