@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class MaterialApoyoActividad extends Model
 {
-    protected $table = 'materialapoyoactividad';
+    protected $table = 'materialApoyoActividad';
 
     protected $fillable = ['descripcion', 'titulo', 'urlDocumento', 'urlAdicional', 'idMateria'];
 

@@ -52,7 +52,7 @@ class Actividad extends Model
 
     public function materialesApoyo()
     {
-        return $this->belongsToMany(MaterialApoyoActividad::class, 'asignacionmaterialapoyoactividad', 'idActividad', 'idMaterialApoyo')
+        return $this->belongsToMany(MaterialApoyoActividad::class, 'asignacionMaterialApoyoActividad', 'idActividad', 'idMaterialApoyo')
             ->withTimestamps();
     }
 
