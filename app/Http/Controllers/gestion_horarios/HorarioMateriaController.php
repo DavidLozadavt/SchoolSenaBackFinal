@@ -1575,4 +1575,30 @@ class HorarioMateriaController extends Controller
             ]);
         }
     }
+
+    public function finalizarRap (Request $request) 
+    {
+        try {
+            $idGradoMateria = $request->input('idGradoMateria');
+            DB::beginTransaction();
+            $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
+            ->where('estado', '!=', EstadoHorarioMateria::EVALUADO)
+            ->get();
+            
+            foreach ($horarios as $horario) {
+                $horario->estado = EstadoHorarioMateria::FINALIZADO;
+                $horario->save();
+            }
+            DB::commit();
+            return response()->json([
+                'message' => 'Rap finalizado correctamente'
+            ], 200);
+        } catch (\Throwable $th) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Ha ocurrido un error al finalizar el rap',
+                'error' => $th->getMessage()
+            ]);
+        }
+    }
 }
