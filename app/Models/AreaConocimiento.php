@@ -27,4 +27,9 @@ class AreaConocimiento extends Model
     public function asignacionContrato () {
         return $this->hasMany(Contract::class, 'idAreaConocimiento', 'id');
     }
+
+    public function programas()
+    {
+        return $this->belongsToMany(Programa::class, 'asignacionAreaConocimientoPrograma', 'idAreaConocimiento', 'idPrograma');
+    }
 }

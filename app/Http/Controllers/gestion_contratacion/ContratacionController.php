@@ -2484,10 +2484,9 @@ public function getContratosFlujoVT(Request $request)
             ], 404);
         }
 
-        $areas = AreaConocimiento::where(
-            'idNivelEducativo',
-            $programa->idNivelEducativo
-        )->get();
+        $areas = AreaConocimiento::whereHas('programas', function ($query) use ($idPrograma) {
+            $query->where('idPrograma', $idPrograma);
+        })->get();
 
         return response()->json([
             'message' => 'Áreas obtenidas correctamente',

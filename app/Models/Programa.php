@@ -118,4 +118,9 @@ class Programa extends Model
             'id'
         )->whereIn('aperturarprograma.estado', ['ACTIVO', 'EN CURSO']);
     }
+
+    public function areasConocimiento()
+    {
+        return $this->belongsToMany(AreaConocimiento::class, 'asignacionAreaConocimientoPrograma', 'idPrograma', 'idAreaConocimiento');
+    }
 }
