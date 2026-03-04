@@ -36,7 +36,7 @@ class ActividadController extends Controller
                 });
             }
 
-            $actividades = $query->orderBy('id', 'desc')->get();
+            $actividades = $query->orderBy('id', 'asc')->get();
             return response()->json($actividades);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -276,6 +276,7 @@ class ActividadController extends Controller
                 if ($idPlaneacion) {
                     $items = PlaneacionActividad::with(['actividad.persona', 'actividad.materia', 'actividad.estado'])
                         ->where('idPlaneacion', $idPlaneacion)
+                        ->orderBy('id', 'asc')
                         ->get();
                 }
             }
@@ -292,6 +293,7 @@ class ActividadController extends Controller
                     if ($idsActividad->isNotEmpty()) {
                         $actividades = Actividad::with(['persona', 'materia', 'estado'])
                             ->whereIn('id', $idsActividad)
+                            ->orderBy('id', 'asc')
                             ->get();
                         foreach ($actividades as $act) {
                             $items->push((object) [
@@ -458,9 +460,17 @@ class ActividadController extends Controller
             ]);
 
             $tiposPregunta = TipoPregunta::pluck('id', 'tipoPregunta')->toArray();
+            if (empty($tiposPregunta)) {
+                TipoPregunta::firstOrCreate(['tipoPregunta' => 'Párrafo'], ['tipoPregunta' => 'Párrafo']);
+                TipoPregunta::firstOrCreate(['tipoPregunta' => 'Varias opciones'], ['tipoPregunta' => 'Varias opciones']);
+                $tiposPregunta = TipoPregunta::pluck('id', 'tipoPregunta')->toArray();
+            }
 
             foreach ($request->preguntas as $i => $p) {
-                $idTipo = $tiposPregunta[$p['tipo']] ?? 1;
+                $idTipo = $tiposPregunta[$p['tipo']] ?? $tiposPregunta['Párrafo'] ?? null;
+                if ($idTipo === null) {
+                    throw new \InvalidArgumentException("Tipo de pregunta '{$p['tipo']}' no encontrado. Ejecute: php artisan migrate");
+                }
                 $urlDoc = null;
 
                 $fileKey = "foto_pregunta_{$i}";
@@ -542,9 +552,17 @@ class ActividadController extends Controller
             $actividad->preguntas()->delete();
 
             $tiposPregunta = TipoPregunta::pluck('id', 'tipoPregunta')->toArray();
+            if (empty($tiposPregunta)) {
+                TipoPregunta::firstOrCreate(['tipoPregunta' => 'Párrafo'], ['tipoPregunta' => 'Párrafo']);
+                TipoPregunta::firstOrCreate(['tipoPregunta' => 'Varias opciones'], ['tipoPregunta' => 'Varias opciones']);
+                $tiposPregunta = TipoPregunta::pluck('id', 'tipoPregunta')->toArray();
+            }
 
             foreach ($request->preguntas as $i => $p) {
-                $idTipo = $tiposPregunta[$p['tipo']] ?? 1;
+                $idTipo = $tiposPregunta[$p['tipo']] ?? $tiposPregunta['Párrafo'] ?? null;
+                if ($idTipo === null) {
+                    throw new \InvalidArgumentException("Tipo de pregunta '{$p['tipo']}' no encontrado. Ejecute: php artisan migrate");
+                }
                 $urlDoc = null;
 
                 $fileKey = "foto_pregunta_{$i}";

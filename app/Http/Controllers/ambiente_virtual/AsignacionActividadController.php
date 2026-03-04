@@ -103,7 +103,8 @@ class AsignacionActividadController extends Controller
             $destinatariosAprendices = collect();
             if (!empty($validated['aprendices'])) {
                 if ($validated['aprendices'] === 'todos' || (is_array($validated['aprendices']) && in_array('todos', $validated['aprendices']))) {
-                    $aprendices = $this->aprendicesPorFicha($idFicha);
+                    // Usar todas las matrículas académicas (una por materia) para que coincidan con cada actividad
+                    $aprendices = $this->aprendicesPorFichaParaAsignacion($idFicha);
                     foreach ($aprendices as $a) {
                         $destinatariosAprendices->push([
                             'idMatriculaAcademica' => $a['idMatriculaAcademica'],
@@ -128,28 +129,29 @@ class AsignacionActividadController extends Controller
             }
 
             $destinatariosGrupos = collect();
-            $tieneIdMatricula = Schema::hasTable('asignacionparticipantes')
-                && Schema::hasColumn('asignacionparticipantes', 'idMatricula');
-            if (!empty($validated['grupos']) && $tieneIdMatricula) {
+            $idsGrupo = collect();
+            if (!empty($validated['grupos'])) {
                 $idsGrupo = ($validated['grupos'] === 'todos' || (is_array($validated['grupos']) && in_array('todos', $validated['grupos'])))
                     ? GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)->where('estado', 'ACTIVO')->pluck('id')
                     : collect(is_array($validated['grupos']) ? $validated['grupos'] : [])->flatten()->map(fn ($v) => (int) $v)->filter()->values();
 
-                $participantes = $idsGrupo->isEmpty()
-                    ? collect()
-                    : DB::table('asignacionparticipantes')
+                $tieneIdMatricula = Schema::hasTable('asignacionparticipantes')
+                    && Schema::hasColumn('asignacionparticipantes', 'idMatricula');
+                if ($tieneIdMatricula && $idsGrupo->isNotEmpty()) {
+                    $participantes = DB::table('asignacionparticipantes')
                         ->whereIn('idGrupo', $idsGrupo->all())
                         ->whereNotNull('idMatricula')
                         ->get(['idMatricula', 'idGrupo']);
-                foreach ($participantes as $p) {
-                    $ma = $this->matriculaAcademicaPorMatricula($p->idMatricula);
-                    if ($ma) {
-                        $destinatariosGrupos->push([
-                            'idMatriculaAcademica' => $ma->id,
-                            'idMatricula' => $p->idMatricula,
-                            'idMateria' => $ma->idMateria ?? null,
-                            'idGrupo' => $p->idGrupo,
-                        ]);
+                    foreach ($participantes as $p) {
+                        $ma = $this->matriculaAcademicaPorMatricula($p->idMatricula);
+                        if ($ma) {
+                            $destinatariosGrupos->push([
+                                'idMatriculaAcademica' => $ma->id,
+                                'idMatricula' => $p->idMatricula,
+                                'idMateria' => $ma->idMateria ?? null,
+                                'idGrupo' => $p->idGrupo,
+                            ]);
+                        }
                     }
                 }
             }
@@ -157,16 +159,9 @@ class AsignacionActividadController extends Controller
             $destinatarios = $destinatariosAprendices->merge($destinatariosGrupos)
                 ->unique(fn ($d) => $d['idMatriculaAcademica'] . '-' . (is_scalar($d['idGrupo'] ?? null) ? $d['idGrupo'] : ''));
 
-            if ($destinatarios->isEmpty()) {
-                $msg = 'No se encontraron destinatarios. ';
-                if (!empty($validated['grupos']) && empty($validated['aprendices'])) {
-                    $msg .= 'Los grupos seleccionados no tienen participantes con matrícula académica. Verifica que los estudiantes se hayan unido a los grupos.';
-                } elseif (!empty($validated['aprendices']) && empty($validated['grupos'])) {
-                    $msg .= 'No se encontró matrícula académica para los estudiantes seleccionados.';
-                } else {
-                    $msg .= 'Selecciona estudiantes o grupos con participantes.';
-                }
-                return response()->json(['error' => $msg], 422);
+            $tieneGruposSinParticipantes = $idsGrupo->isNotEmpty() && $destinatariosGrupos->count() < $idsGrupo->count() * count($actividades);
+            if ($destinatarios->isEmpty() && $idsGrupo->isEmpty()) {
+                return response()->json(['error' => 'Selecciona al menos un estudiante o un grupo.'], 422);
             }
 
             foreach ($actividades as $idActividad) {
@@ -211,6 +206,29 @@ class AsignacionActividadController extends Controller
                 }
             }
 
+            if ($idsGrupo->isNotEmpty() && Schema::hasTable('asignacionActividadGrupo')) {
+                foreach ($actividades as $idActividad) {
+                    foreach ($idsGrupo as $idGrupo) {
+                        $yaExiste = DB::table('asignacionActividadGrupo')
+                            ->where('idActividad', $idActividad)
+                            ->where('idGrupo', $idGrupo)
+                            ->exists();
+                        if (!$yaExiste) {
+                            DB::table('asignacionActividadGrupo')->insert([
+                                'idActividad' => $idActividad,
+                                'idGrupo' => $idGrupo,
+                                'fechaInicial' => $fecha,
+                                'fechaFinal' => $fechaFin,
+                                'idPersona' => $idPersona,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ]);
+                            $exitosas++;
+                        }
+                    }
+                }
+            }
+
             return response()->json([
                 'message' => 'Asignación completada',
                 'exitosas' => $exitosas,
@@ -229,46 +247,119 @@ class AsignacionActividadController extends Controller
         $ficha = \App\Models\Ficha::find($idFicha);
         if (!$ficha) return [];
 
-        $matriculas = collect();
-        if (Schema::hasColumn('matricula', 'idFicha')) {
-            $matriculas = DB::table('matricula')
-                ->where('idFicha', $idFicha)
-                ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
-                ->pluck('id');
-        } elseif (Schema::hasColumn('matricula', 'idAsignacionPeriodoProgramaJornada')) {
-            $idAppj = null;
-            foreach (['asignacionPeriodoProgramaJornada', 'asignacionperiodoprogramajornada', 'asignacionJornada'] as $tbl) {
-                if (!Schema::hasTable($tbl) || !Schema::hasColumn($tbl, 'idAsignacion')) continue;
-                $q = DB::table($tbl)->where('idAsignacion', $ficha->idAsignacion);
-                if (Schema::hasColumn($tbl, 'idJornada')) {
-                    $q->where('idJornada', $ficha->idJornada);
-                }
-                $appj = $q->first();
-                if ($appj) { $idAppj = $appj->id; break; }
-            }
-            if ($idAppj) {
-                $matriculas = DB::table('matricula')
-                    ->where('idAsignacionPeriodoProgramaJornada', $idAppj)
-                    ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
-                    ->pluck('id');
-            }
+        $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+
+        // Prioridad: matriculaAcademica por idFicha (misma fuente que getStudentByIdMateria)
+        $ma = collect();
+        if (Schema::hasColumn($tableMa, 'idFicha')) {
+            $ma = DB::table($tableMa)->where('idFicha', $idFicha)->get();
         }
 
-        $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
-        $ma = $matriculas->isNotEmpty()
-            ? DB::table($tableMa)->whereIn('idMatricula', $matriculas)->get()
-            : (Schema::hasColumn($tableMa, 'idFicha')
-                ? DB::table($tableMa)->where('idFicha', $idFicha)->get()
-                : collect());
+        // Fallback: matricula por ficha -> matriculaAcademica
+        if ($ma->isEmpty()) {
+            $matriculas = collect();
+            if (Schema::hasColumn('matricula', 'idFicha')) {
+                $matriculas = DB::table('matricula')
+                    ->where('idFicha', $idFicha)
+                    ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                    ->pluck('id');
+            } elseif (Schema::hasColumn('matricula', 'idAsignacionPeriodoProgramaJornada')) {
+                $idAppj = null;
+                foreach (['asignacionPeriodoProgramaJornada', 'asignacionperiodoprogramajornada', 'asignacionJornada'] as $tbl) {
+                    if (!Schema::hasTable($tbl) || !Schema::hasColumn($tbl, 'idAsignacion')) continue;
+                    $q = DB::table($tbl)->where('idAsignacion', $ficha->idAsignacion);
+                    if (Schema::hasColumn($tbl, 'idJornada')) {
+                        $q->where('idJornada', $ficha->idJornada);
+                    }
+                    $appj = $q->first();
+                    if ($appj) { $idAppj = $appj->id; break; }
+                }
+                if ($idAppj) {
+                    $matriculas = DB::table('matricula')
+                        ->where('idAsignacionPeriodoProgramaJornada', $idAppj)
+                        ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                        ->pluck('id');
+                }
+            }
+            $ma = $matriculas->isNotEmpty()
+                ? DB::table($tableMa)->whereIn('idMatricula', $matriculas)->get()
+                : collect();
+        }
 
-        $personas = DB::table('persona')
-            ->whereIn('id', $ma->pluck('idMatricula')->unique()->filter())
-            ->get()
-            ->keyBy('id');
+        $idsMatricula = $ma->pluck('idMatricula')->unique()->filter()->values();
+        $matriculasMap = DB::table('matricula')->whereIn('id', $idsMatricula)->get(['id', 'idPersona'])->keyBy('id');
+        $idsPersona = $matriculasMap->pluck('idPersona')->unique()->filter()->values();
+        $personas = DB::table('persona')->whereIn('id', $idsPersona)->get()->keyBy('id');
+
+        $vistos = [];
+        $result = [];
+        foreach ($ma as $m) {
+            $mat = $matriculasMap[$m->idMatricula] ?? null;
+            $idPersona = $mat->idPersona ?? $m->idMatricula ?? null;
+            if ($idPersona === null || isset($vistos[$idPersona])) continue;
+            $vistos[$idPersona] = true;
+            $p = $personas[$idPersona] ?? null;
+            $result[] = [
+                'id' => $m->idMatricula,
+                'idMatriculaAcademica' => $m->id,
+                'idMateria' => $m->idMateria,
+                'nombre' => $p ? trim(($p->nombre1 ?? '') . ' ' . ($p->apellido1 ?? '')) : 'N/A',
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * Todas las matrículas académicas de la ficha (una por materia por estudiante).
+     * Usado al asignar "todos" para que cada actividad reciba estudiantes de su materia.
+     */
+    private function aprendicesPorFichaParaAsignacion(int $idFicha): array
+    {
+        $ficha = \App\Models\Ficha::find($idFicha);
+        if (!$ficha) return [];
+
+        $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+        $ma = collect();
+        if (Schema::hasColumn($tableMa, 'idFicha')) {
+            $ma = DB::table($tableMa)->where('idFicha', $idFicha)->get();
+        }
+        if ($ma->isEmpty()) {
+            $matriculas = collect();
+            if (Schema::hasColumn('matricula', 'idFicha')) {
+                $matriculas = DB::table('matricula')
+                    ->where('idFicha', $idFicha)
+                    ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                    ->pluck('id');
+            } elseif (Schema::hasColumn('matricula', 'idAsignacionPeriodoProgramaJornada')) {
+                $idAppj = null;
+                foreach (['asignacionPeriodoProgramaJornada', 'asignacionperiodoprogramajornada', 'asignacionJornada'] as $tbl) {
+                    if (!Schema::hasTable($tbl) || !Schema::hasColumn($tbl, 'idAsignacion')) continue;
+                    $q = DB::table($tbl)->where('idAsignacion', $ficha->idAsignacion);
+                    if (Schema::hasColumn($tbl, 'idJornada')) $q->where('idJornada', $ficha->idJornada);
+                    $appj = $q->first();
+                    if ($appj) { $idAppj = $appj->id; break; }
+                }
+                if ($idAppj) {
+                    $matriculas = DB::table('matricula')
+                        ->where('idAsignacionPeriodoProgramaJornada', $idAppj)
+                        ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                        ->pluck('id');
+                }
+            }
+            $ma = $matriculas->isNotEmpty()
+                ? DB::table($tableMa)->whereIn('idMatricula', $matriculas)->get()
+                : collect();
+        }
+
+        $idsMatricula = $ma->pluck('idMatricula')->unique()->filter()->values();
+        $matriculasMap = DB::table('matricula')->whereIn('id', $idsMatricula)->get(['id', 'idPersona'])->keyBy('id');
+        $personas = DB::table('persona')->whereIn('id', $matriculasMap->pluck('idPersona')->unique()->filter())->get()->keyBy('id');
 
         $result = [];
         foreach ($ma as $m) {
-            $p = $personas[$m->idMatricula] ?? null;
+            $mat = $matriculasMap[$m->idMatricula] ?? null;
+            $idPersona = $mat->idPersona ?? null;
+            $p = $idPersona ? ($personas[$idPersona] ?? null) : null;
             $result[] = [
                 'id' => $m->idMatricula,
                 'idMatriculaAcademica' => $m->id,
