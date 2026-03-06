@@ -445,4 +445,146 @@ public function getAllAssistance(Request $request): JsonResponse
           ], 500);
       }
   }
+
+  /**
+   * Obtener asistencias del estudiante autenticado agrupadas por área de conocimiento
+   * Retorna estadísticas generales y por área
+   */
+  public function getAsistenciasPorArea(Request $request): JsonResponse
+  {
+      try {
+          // Obtener el usuario autenticado
+          $user = auth()->user();
+          if (!$user || !$user->idpersona) {
+              return response()->json([
+                  'message' => 'Usuario no autenticado o sin persona asociada',
+                  'data' => []
+              ], 401);
+          }
+
+          $idPersona = $user->idpersona;
+
+          // Obtener todas las matrículas académicas del estudiante
+          $matriculas = MatriculaAcademica::with([
+              'materia.areaConocimiento',
+              'asistencias.sesionMateria'
+          ])
+          ->whereHas('matricula', function($query) use ($idPersona) {
+              $query->where('idPersona', $idPersona);
+          })
+          ->get();
+
+          if ($matriculas->isEmpty()) {
+              return response()->json([
+                  'message' => 'No se encontraron matrículas académicas',
+                  'data' => [
+                      'areas' => [],
+                      'registros' => [],
+                      'resumen' => [
+                          'asistenciaGeneral' => 0,
+                          'totalAsistencias' => 0,
+                          'totalInasistencias' => 0,
+                          'totalRegistros' => 0
+                      ]
+                  ]
+              ], 200);
+          }
+
+          // Agrupar asistencias por área de conocimiento
+          $areasMap = [];
+          $registrosDetallados = [];
+          $totalAsistencias = 0;
+          $totalInasistencias = 0;
+
+          foreach ($matriculas as $matricula) {
+              $areaConocimiento = $matricula->materia->areaConocimiento ?? null;
+              
+              if (!$areaConocimiento) {
+                  continue;
+              }
+
+              $idArea = $areaConocimiento->id;
+              $nombreArea = $areaConocimiento->nombreAreaConocimiento;
+
+              // Inicializar área si no existe
+              if (!isset($areasMap[$idArea])) {
+                  $areasMap[$idArea] = [
+                      'idArea' => $idArea,
+                      'nombreArea' => $nombreArea,
+                      'asistencias' => 0,
+                      'inasistencias' => 0,
+                      'total' => 0
+                  ];
+              }
+
+              // Procesar asistencias de esta matrícula
+              foreach ($matricula->asistencias as $asistencia) {
+                  $sesionMateria = $asistencia->sesionMateria;
+                  if (!$sesionMateria) {
+                      continue;
+                  }
+
+                  $fechaSesion = $sesionMateria->fechaSesion;
+                  
+                  // Contar por área
+                  if ($asistencia->asistio) {
+                      $areasMap[$idArea]['asistencias']++;
+                      $totalAsistencias++;
+                  } else {
+                      $areasMap[$idArea]['inasistencias']++;
+                      $totalInasistencias++;
+                  }
+                  $areasMap[$idArea]['total']++;
+
+                  // Agregar registro detallado
+                  $registrosDetallados[] = [
+                      'fecha' => $fechaSesion,
+                      'idArea' => $idArea,
+                      'nombreArea' => $nombreArea,
+                      'asistio' => (bool)$asistencia->asistio,
+                      'estado' => $asistencia->asistio ? 'Presente' : 'Ausente'
+                  ];
+              }
+          }
+
+          // Convertir mapa de áreas a array y calcular porcentajes
+          $areasArray = array_values($areasMap);
+          foreach ($areasArray as &$area) {
+              $area['porcentaje'] = $area['total'] > 0 
+                  ? round(($area['asistencias'] / $area['total']) * 100) 
+                  : 0;
+          }
+
+          // Ordenar registros detallados por fecha (más reciente primero)
+          usort($registrosDetallados, function($a, $b) {
+              return strtotime($b['fecha']) - strtotime($a['fecha']);
+          });
+
+          // Calcular porcentaje general
+          $totalRegistros = $totalAsistencias + $totalInasistencias;
+          $asistenciaGeneral = $totalRegistros > 0 
+              ? round(($totalAsistencias / $totalRegistros) * 100) 
+              : 0;
+
+          return response()->json([
+              'message' => 'Asistencias obtenidas correctamente',
+              'data' => [
+                  'areas' => $areasArray,
+                  'registros' => $registrosDetallados,
+                  'resumen' => [
+                      'asistenciaGeneral' => $asistenciaGeneral,
+                      'totalAsistencias' => $totalAsistencias,
+                      'totalInasistencias' => $totalInasistencias,
+                      'totalRegistros' => $totalRegistros
+                  ]
+              ]
+          ], 200);
+
+      } catch (\Exception $e) {
+          return response()->json([
+              'message' => 'Error al obtener asistencias por área',
+              'error' => $e->getMessage()
+          ], 500);
+      }
+  }
 }

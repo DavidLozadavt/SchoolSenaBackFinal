@@ -1800,6 +1800,373 @@ class FichaController extends Controller
         })->toArray();
     }
 
+    /**
+     * Obtener todas las clases (materias) de un estudiante
+     * Devuelve materias agrupadas con información completa: profesor, aula, horarios, sesiones
+     * 
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function clasesEstudiante(Request $request): JsonResponse
+    {
+        try {
+            // Obtener el usuario autenticado y su idPersona
+            $user = auth()->user();
+            if (!$user || !$user->idpersona) {
+                return response()->json([
+                    'message' => 'Usuario no autenticado o sin persona asociada',
+                    'data' => []
+                ], 401);
+            }
+
+            $idPersona = $user->idpersona;
+
+            // Obtener todas las matrículas activas del estudiante
+            $matriculas = DB::table('matricula as m')
+                ->where('m.idPersona', $idPersona)
+                ->whereIn('m.estado', ['ACTIVO', 'EN CURSO', 'CURSANDO', 'MATRICULADO', 'EN FORMACION'])
+                ->whereNotNull('m.idFicha')
+                ->select('m.idFicha', 'm.estado', 'm.id')
+                ->distinct()
+                ->get();
+
+            // Log para depuración: verificar matrículas del estudiante
+            Log::info('Matrículas del estudiante', [
+                'idPersona' => $idPersona,
+                'matriculas' => $matriculas->toArray(),
+                'idsFichas' => $matriculas->pluck('idFicha')->toArray()
+            ]);
+
+            if ($matriculas->isEmpty()) {
+                return response()->json([
+                    'message' => 'El estudiante no tiene matrículas activas con fichas asignadas',
+                    'data' => []
+                ], 200);
+            }
+
+            // Obtener IDs de fichas relacionadas con las matrículas
+            // Relación correcta: matricula.idFicha -> ficha.id
+            $idsFichas = $matriculas->pluck('idFicha')->toArray();
+
+            // Log para depuración: verificar qué fichas tiene el estudiante
+            Log::info('Fichas del estudiante', [
+                'idPersona' => $idPersona,
+                'idsFichas' => $idsFichas,
+                'cantidad_fichas' => count($idsFichas)
+            ]);
+
+            // Obtener todas las clases (horarioMateria) del estudiante
+            // Relación: matricula.idFicha -> ficha.id -> horarioMateria.idFicha
+            $clases = DB::table('horarioMateria as hm')
+                ->select([
+                    'm.nombreMateria as materia_nombre',
+                    'hm.id as idHorarioMateria',
+                    'hm.idFicha',
+                    'hm.fechaInicial',
+                    'hm.fechaFinal',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
+                    'hm.idDia',
+                    'd.dia as dia_semana',
+                    'f.codigo as ficha_codigo',
+                    'inf.nombreInfraestructura as aula_nombre',
+                    'c.id as contrato_id',
+                    DB::raw("CONCAT(per.nombre1, ' ', IFNULL(per.nombre2, ''), ' ', per.apellido1, ' ', IFNULL(per.apellido2, '')) as profesor_nombre"),
+                    'per.email as profesor_email',
+                    'gm.idMateria as idMateria'
+                ])
+                ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
+                ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
+                ->leftJoin('infraestructura as inf', 'hm.idInfraestructura', '=', 'inf.id')
+                ->leftJoin('contrato as c', 'hm.idContrato', '=', 'c.id')
+                ->leftJoin('persona as per', 'c.idpersona', '=', 'per.id')
+                ->whereIn('f.id', $idsFichas)
+                ->whereNotNull('hm.idDia')
+                ->whereNotNull('hm.horaInicial')
+                ->whereNotNull('hm.horaFinal')
+                ->orderBy('m.nombreMateria')
+                ->orderBy('hm.idDia')
+                ->orderBy('hm.horaInicial')
+                ->get();
+
+            // Log para depuración: verificar qué clases se encontraron
+            Log::info('Clases encontradas para el estudiante', [
+                'idPersona' => $idPersona,
+                'cantidad_clases' => $clases->count(),
+                'profesores' => $clases->pluck('profesor_nombre')->unique()->toArray(),
+                'fichas_clases' => $clases->pluck('idFicha')->unique()->toArray()
+            ]);
+
+            if ($clases->isEmpty()) {
+                return response()->json([
+                    'message' => 'El estudiante no tiene clases asignadas',
+                    'data' => []
+                ], 200);
+            }
+
+            // Agrupar por materia y profesor para combinar horarios del mismo tema
+            // Clave de agrupación: idMateria + idContrato (o profesor_nombre si no hay contrato)
+            // Esto asegura que clases con mismo tema y mismo profesor se combinen
+            $clasesAgrupadas = $clases->groupBy(function ($clase) {
+                // Agrupar por materia y contrato (mismo tema, mismo profesor)
+                // Si no hay contrato, usar profesor_nombre como respaldo
+                if ($clase->contrato_id) {
+                    return $clase->idMateria . '_contrato_' . $clase->contrato_id;
+                } else {
+                    $profesorKey = trim($clase->profesor_nombre ?? 'Sin asignar');
+                    return $clase->idMateria . '_profesor_' . md5($profesorKey);
+                }
+            });
+
+            // Procesar cada grupo de materia+profesor como una clase combinada
+            $materias = [];
+            foreach ($clasesAgrupadas as $claveGrupo => $horariosMateria) {
+                // Obtener el primer horario para datos comunes
+                $primerHorario = $horariosMateria->first();
+
+                // Combinar todos los días y horarios de este grupo (misma materia, mismo profesor)
+                $diasHorarios = [];
+                $horariosUnicos = $horariosMateria->unique('idHorarioMateria');
+                
+                foreach ($horariosUnicos as $horario) {
+                    $diaNombre = $horario->dia_semana ?? 'Sin día';
+                    $horaIni = $horario->horaInicial ? Carbon::parse($horario->horaInicial)->format('H:i') : '';
+                    $horaFin = $horario->horaFinal ? Carbon::parse($horario->horaFinal)->format('H:i') : '';
+                    $diasHorarios[] = [
+                        'dia' => $diaNombre,
+                        'horaInicial' => $horaIni,
+                        'horaFinal' => $horaFin,
+                        'idHorarioMateria' => $horario->idHorarioMateria
+                    ];
+                }
+
+                // Ordenar días por idDia
+                usort($diasHorarios, function ($a, $b) use ($horariosUnicos) {
+                    $horarioA = $horariosUnicos->firstWhere('idHorarioMateria', $a['idHorarioMateria']);
+                    $horarioB = $horariosUnicos->firstWhere('idHorarioMateria', $b['idHorarioMateria']);
+                    $idDiaA = $horarioA->idDia ?? 999;
+                    $idDiaB = $horarioB->idDia ?? 999;
+                    return $idDiaA <=> $idDiaB;
+                });
+
+                // Formatear horario para display combinando todos los días (ej: "Lunes 13:00 - 18:00, Martes 13:00 - 18:00")
+                $horarioDisplay = [];
+                foreach ($diasHorarios as $dh) {
+                    $horaIni = $dh['horaInicial'] ? Carbon::parse($dh['horaInicial'])->format('H:i') : '';
+                    $horaFin = $dh['horaFinal'] ? Carbon::parse($dh['horaFinal'])->format('H:i') : '';
+                    $horarioDisplay[] = $dh['dia'] . ' ' . $horaIni . ' - ' . $horaFin;
+                }
+                $horarioTexto = implode(', ', $horarioDisplay);
+
+                // Calcular sesiones para TODOS los horariosMateria de este grupo (misma materia, mismo profesor)
+                $totalSesiones = 0;
+                $sesionesCompletadas = 0;
+                $todasLasSesiones = [];
+                $todasLasFechasSesiones = [];
+
+                foreach ($horariosUnicos as $horario) {
+                    // Sincronizar sesiones completadas para cada horario
+                    $this->sincronizarSesionesCompletadas(
+                        $horario->idHorarioMateria,
+                        $horario->fechaInicial,
+                        $horario->fechaFinal,
+                        $horario->horaInicial,
+                        $horario->horaFinal,
+                        $horario->idDia
+                    );
+
+                    // Calcular total de sesiones para este horario
+                    $totalSesionesHorario = $this->calcularTotalSesiones(
+                        $horario->fechaInicial,
+                        $horario->fechaFinal,
+                        $horario->idDia
+                    );
+
+                    // Calcular sesiones dadas para este horario
+                    $sesionesDadasHorario = $this->calcularSesionesDadas(
+                        $horario->idHorarioMateria,
+                        $horario->fechaInicial,
+                        $horario->fechaFinal,
+                        $horario->horaFinal,
+                        $horario->idDia
+                    );
+
+                    // Obtener sesiones completadas con fechas para este horario
+                    $sesionesCompletadasHorario = $this->obtenerSesionesCompletadas($horario->idHorarioMateria);
+
+                    // Sumar totales
+                    $totalSesiones += $totalSesionesHorario;
+                    $sesionesCompletadas += $sesionesDadasHorario;
+
+                    // Agregar sesiones individuales completadas
+                    foreach ($sesionesCompletadasHorario as $sesion) {
+                        $todasLasSesiones[] = [
+                            'id' => $sesion['id'],
+                            'numeroSesion' => $sesion['numeroSesion'],
+                            'fechaSesion' => $sesion['fechaSesion'],
+                            'idHorarioMateria' => $horario->idHorarioMateria,
+                            'horaInicial' => $horario->horaInicial,
+                            'horaFinal' => $horario->horaFinal,
+                            'idDia' => $horario->idDia
+                        ];
+                    }
+                }
+
+                // Calcular todas las fechas de sesiones (completadas, en curso, próximas, pendientes)
+                $ahora = Carbon::now();
+                $todasLasFechasSesiones = [];
+
+                // Calcular todas las fechas de sesiones para TODOS los horariosMateria de este grupo
+                foreach ($horariosUnicos as $horario) {
+                    if (!$horario->fechaInicial || !$horario->fechaFinal) {
+                        continue;
+                    }
+
+                    $fechaInicio = Carbon::parse($horario->fechaInicial);
+                    $fechaFin = Carbon::parse($horario->fechaFinal);
+                    $carbonDayOfWeek = $horario->idDia === 7 ? 0 : $horario->idDia;
+
+                    // Calcular todas las fechas de clase desde fechaInicial hasta fechaFinal
+                    $fechaTemporal = $fechaInicio->copy();
+                    
+                    // Si la fecha inicial no coincide con el día de la semana, ajustar al siguiente día válido
+                    if ($fechaTemporal->dayOfWeek !== $carbonDayOfWeek) {
+                        $diasHastaProximoDia = ($carbonDayOfWeek - $fechaTemporal->dayOfWeek + 7) % 7;
+                        if ($diasHastaProximoDia === 0) {
+                            $diasHastaProximoDia = 7;
+                        }
+                        $fechaTemporal->addDays($diasHastaProximoDia);
+                    }
+                    
+                    // Asegurar que no exceda la fecha final
+                    if ($fechaTemporal->lte($fechaFin)) {
+                        // Generar todas las sesiones semanales
+                        while ($fechaTemporal->lte($fechaFin)) {
+                            if ($fechaTemporal->dayOfWeek === $carbonDayOfWeek) {
+                                $horaIni = $this->parseHora($horario->horaInicial);
+                                $horaFin = $this->parseHora($horario->horaFinal);
+                                
+                                if ($horaIni && $horaFin) {
+                                    $fechaHoraInicio = $fechaTemporal->copy()->setTime($horaIni->hour, $horaIni->minute, $horaIni->second);
+                                    $fechaHoraFin = $fechaTemporal->copy()->setTime($horaFin->hour, $horaFin->minute, $horaFin->second);
+
+                                    $todasLasFechasSesiones[] = [
+                                        'fecha' => $fechaTemporal->format('Y-m-d'),
+                                        'fechaHoraInicioCarbon' => $fechaHoraInicio,
+                                        'fechaHoraFinCarbon' => $fechaHoraFin,
+                                        'horaInicial' => $horario->horaInicial,
+                                        'horaFinal' => $horario->horaFinal,
+                                        'idDia' => $horario->idDia,
+                                        'idHorarioMateria' => $horario->idHorarioMateria
+                                    ];
+                                }
+                            }
+                            $fechaTemporal->addWeek();
+                        }
+                    }
+                }
+
+                // Ordenar sesiones por fecha y hora
+                usort($todasLasFechasSesiones, function ($a, $b) {
+                    $comparacionFecha = strcmp($a['fecha'], $b['fecha']);
+                    if ($comparacionFecha !== 0) {
+                        return $comparacionFecha;
+                    }
+                    // Si la fecha es igual, ordenar por hora inicial
+                    return strcmp($a['horaInicial'], $b['horaInicial']);
+                });
+
+                // Asignar número de sesión secuencial y determinar estado
+                // Ordenar primero por fecha y hora para asignar números correctos
+                usort($todasLasFechasSesiones, function ($a, $b) {
+                    $fechaA = Carbon::parse($a['fecha'] . ' ' . $a['horaInicial']);
+                    $fechaB = Carbon::parse($b['fecha'] . ' ' . $b['horaInicial']);
+                    return $fechaA->getTimestamp() <=> $fechaB->getTimestamp();
+                });
+
+                $proximaSesionEncontrada = false;
+                foreach ($todasLasFechasSesiones as $index => &$sesion) {
+                    $sesion['numeroSesion'] = $index + 1;
+                    
+                    // Determinar estado de la sesión usando los objetos Carbon guardados
+                    $fechaHoraInicio = $sesion['fechaHoraInicioCarbon'];
+                    $fechaHoraFin = $sesion['fechaHoraFinCarbon'];
+                    
+                    $estadoSesion = 'PENDIENTE';
+                    if ($ahora->gte($fechaHoraFin)) {
+                        $estadoSesion = 'COMPLETADA';
+                    } elseif ($ahora->gte($fechaHoraInicio) && $ahora->lt($fechaHoraFin)) {
+                        $estadoSesion = 'EN_CURSO';
+                    } elseif (!$proximaSesionEncontrada && $ahora->lt($fechaHoraInicio)) {
+                        $estadoSesion = 'PROXIMO';
+                        $proximaSesionEncontrada = true;
+                    }
+                    
+                    $sesion['estado'] = $estadoSesion;
+                    // Eliminar campos temporales (mantener solo los necesarios para el frontend)
+                    unset($sesion['fechaHoraInicio'], $sesion['fechaHoraFin'], $sesion['fechaHoraInicioCarbon'], $sesion['fechaHoraFinCarbon']);
+                }
+                unset($sesion);
+
+                // Calcular porcentaje de completado
+                $porcentajeCompletado = $totalSesiones > 0 
+                    ? round(($sesionesCompletadas / $totalSesiones) * 100, 0)
+                    : 0;
+
+                // Obtener profesor (del primer horario, todos deberían tener el mismo)
+                $profesorNombre = $primerHorario->profesor_nombre ?? 'Sin asignar';
+                $profesorEmail = $primerHorario->profesor_email ?? '';
+
+                // Obtener aula (del primer horario, o combinar si hay diferentes)
+                $aulaNombre = $primerHorario->aula_nombre ?? 'Sin aula asignada';
+                // Si hay múltiples aulas, combinar
+                $aulasUnicas = $horariosUnicos->pluck('aula_nombre')->filter()->unique()->values();
+                if ($aulasUnicas->count() > 1) {
+                    $aulaNombre = $aulasUnicas->implode(', ');
+                }
+
+                // Combinar todos los idHorariosMateria de este grupo
+                $idHorariosMateria = $horariosUnicos->pluck('idHorarioMateria')->toArray();
+
+                // Agregar la clase combinada
+                $materias[] = [
+                    'idMateria' => $primerHorario->idMateria,
+                    'materia_nombre' => $primerHorario->materia_nombre,
+                    'profesor_nombre' => trim($profesorNombre),
+                    'profesor_email' => $profesorEmail,
+                    'aula_nombre' => $aulaNombre,
+                    'horario_texto' => $horarioTexto,
+                    'horarios' => $diasHorarios,
+                    'total_sesiones' => $totalSesiones,
+                    'sesiones_completadas' => $sesionesCompletadas,
+                    'sesiones_restantes' => max(0, $totalSesiones - $sesionesCompletadas),
+                    'porcentaje_completado' => $porcentajeCompletado,
+                    'sesiones' => $todasLasFechasSesiones,
+                    'idHorariosMateria' => $idHorariosMateria
+                ];
+            }
+
+            return response()->json([
+                'message' => 'Clases del estudiante obtenidas correctamente',
+                'data' => $materias,
+                'total' => count($materias)
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('Error al obtener clases del estudiante', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Error al obtener las clases del estudiante',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     private function parseHora(string $hora): ?Carbon
     {
         if (empty($hora)) {

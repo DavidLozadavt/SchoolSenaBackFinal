@@ -258,6 +258,7 @@ Route::post('store_actividades_riesgo_profesional', [ContratacionController::cla
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
 Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
 Route::get('areas-conocimiento/programa/{idPrograma}', [ContratacionController::class, 'getAreasConocimientoPrograma']);
+Route::post('areas-conocimiento/programas', [ContratacionController::class, 'getAreasConocimientoProgramas']);
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
 Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
@@ -1226,6 +1227,7 @@ Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'updat
 Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
 Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
 Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+Route::get('fichas/estudiante/clases', [FichaController::class, 'clasesEstudiante']);
 Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
 Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
@@ -1324,10 +1326,12 @@ Route::group(['middleware' => 'auth:api'], function () {
 //HORARIOS
 Route::group(['middleware' => 'auth:api'], function () {
     Route::get('dias', [DiaController::class, 'index']); //,obtener todos los dias
+    Route::get('raps/evaluar/contrato', [HorarioMateriaController::class, 'getRapsEvaluarContrato']);
     Route::get('horario/ficha/{idFicha}', [HorarioMateriaController::class, 'getMattersByJornadaPeriodoPrograma']); // obtener el horario de una ficha
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
     Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
+    Route::delete('horarios/materia/{id}', [HorarioMateriaController::class, 'destroy']); //eliminar horario
 });
 
 // Red
@@ -1347,6 +1351,7 @@ Route::middleware('auth:api')->group(function () {
 Route::get('get_student_by_id_materia',[MatriculaAcademicaController::class, 'getStudentByIdMateria']);
 Route::get('estadisticas-asistencia',[AsistenciaController::class, 'getEstadisticasAsistencia']);
 Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
+Route::get('asistencias-por-area',[AsistenciaController::class, 'getAsistenciasPorArea']);
 Route::post('registrar-asistencia',[AsistenciaController::class, 'store']);
 
 // Iniciar clase: crea SesionMateria + Asistencia automáticamente al comenzar la hora de clase
