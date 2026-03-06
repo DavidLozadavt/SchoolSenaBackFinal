@@ -1325,10 +1325,12 @@ Route::group(['middleware' => 'auth:api'], function () {
 //HORARIOS
 Route::group(['middleware' => 'auth:api'], function () {
     Route::get('dias', [DiaController::class, 'index']); //,obtener todos los dias
+    Route::get('raps/evaluar/contrato', [HorarioMateriaController::class, 'getRapsEvaluarContrato']);
     Route::get('horario/ficha/{idFicha}', [HorarioMateriaController::class, 'getMattersByJornadaPeriodoPrograma']); // obtener el horario de una ficha
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
     Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
+    Route::delete('horarios/materia/{id}', [HorarioMateriaController::class, 'destroy']); //eliminar horario
 });
 
 // Red
