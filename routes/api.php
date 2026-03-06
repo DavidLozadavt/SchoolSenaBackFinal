@@ -1350,6 +1350,7 @@ Route::middleware('auth:api')->group(function () {
 Route::get('get_student_by_id_materia',[MatriculaAcademicaController::class, 'getStudentByIdMateria']);
 Route::get('estadisticas-asistencia',[AsistenciaController::class, 'getEstadisticasAsistencia']);
 Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
+Route::get('asistencias-por-area',[AsistenciaController::class, 'getAsistenciasPorArea']);
 Route::post('registrar-asistencia',[AsistenciaController::class, 'store']);
 
 // Iniciar clase: crea SesionMateria + Asistencia automáticamente al comenzar la hora de clase
