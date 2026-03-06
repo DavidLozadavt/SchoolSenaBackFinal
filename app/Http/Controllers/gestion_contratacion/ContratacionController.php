@@ -2354,60 +2354,107 @@ public function getContratosFlujoVT(Request $request)
                 return response()->json(['error' => 'Persona no encontrada'], 404);
             }
 
-            $email = trim($request->input('email'));
-            $identificacion = trim($request->input('identificacion'));
+            // Si solo se está actualizando la foto, no validar ni actualizar otros campos
+            if ($request->hasFile('rutaFotoFile') && $request->allFiles()['rutaFotoFile'] && count($request->all()) === 1) {
+                $persona->rutaFoto = $this->storeLogoPersona($request);
+                $persona->save();
+                DB::commit();
+                return response()->json($persona, 200);
+            }
 
-            $personaExistente = Person::where('id', '<>', $id)
-                ->where(function ($query) use ($email, $identificacion) {
-                    if ($email !== '') {
-                        $query->orWhere('email', $email);
+            // Validar email e identificación solo si vienen en el request
+            $email = $request->has('email') ? trim($request->input('email')) : null;
+            $identificacion = $request->has('identificacion') ? trim($request->input('identificacion')) : null;
+
+            if ($email !== null || $identificacion !== null) {
+                $personaExistente = Person::where('id', '<>', $id)
+                    ->where(function ($query) use ($email, $identificacion) {
+                        if ($email !== null && $email !== '') {
+                            $query->orWhere('email', $email);
+                        }
+                        if ($identificacion !== null && $identificacion !== '') {
+                            $query->orWhere('identificacion', $identificacion);
+                        }
+                    })
+                    ->first();
+
+                if ($personaExistente) {
+                    DB::rollBack();
+                    return response()->json([
+                        'error' => 'El email o la identificación ya pertenecen a otra persona.'
+                    ], 409);
+                }
+
+                $user = User::where('idpersona', $persona->id)->first();
+
+                if ($email !== null && $email !== '') {
+                    $emailDuplicadoUser = User::where('email', $email)
+                        ->when($user, function ($q) use ($user) {
+                            return $q->where('id', '<>', $user->id);
+                        })
+                        ->first();
+
+                    if ($emailDuplicadoUser) {
+                        DB::rollBack();
+                        return response()->json([
+                            'error' => 'El email ya está registrado en un usuario del sistema.'
+                        ], 409);
                     }
-                    if ($identificacion !== '') {
-                        $query->orWhere('identificacion', $identificacion);
-                    }
-                })
-                ->first();
-
-            if ($personaExistente) {
-                return response()->json([
-                    'error' => 'El email o la identificación ya pertenecen a otra persona.'
-                ], 409);
+                }
             }
 
-            $user = User::where('idpersona', $persona->id)->first();
-
-            $emailDuplicadoUser = User::where('email', $email)
-                ->when($user, function ($q) use ($user) {
-                    return $q->where('id', '<>', $user->id);
-                })
-                ->first();
-
-            if ($emailDuplicadoUser) {
-                return response()->json([
-                    'error' => 'El email ya está registrado en un usuario del sistema.'
-                ], 409);
-            }
-
-            $persona->fechaNac = $request->input('fechaNac');
-            
-            $idTipoIdentificacion = $request->input('idtipoIdentificacion');
-            if ($idTipoIdentificacion !== null && $idTipoIdentificacion !== '' && $idTipoIdentificacion !== 0) {
-                $persona->idTipoIdentificacion = $idTipoIdentificacion;
+            // Actualizar solo los campos que vienen en el request
+            if ($request->has('fechaNac')) {
+                $persona->fechaNac = $request->input('fechaNac');
             }
             
-            $persona->identificacion = $identificacion;
-            $persona->nombre1 = $request->input('nombre1');
-            $persona->nombre2 = $request->input('nombre2');
-            $persona->apellido1 = $request->input('apellido1');
-            $persona->apellido2 = $request->input('apellido2');
-            $persona->idCiudadNac = $request->input('idciudadNac');
-            $persona->celular = $request->input('celular');
-            $persona->email = $email;
-            $persona->direccion = $request->input('direccion');
-            $persona->idCiudadUbicacion = $request->input('idciudadUbicacion');
-            $persona->telefonoFijo = $request->input('telefonoFijo');
-            $persona->sexo = $request->input('sexo');
-            $persona->rh = $request->input('rh');
+            if ($request->has('idtipoIdentificacion')) {
+                $idTipoIdentificacion = $request->input('idtipoIdentificacion');
+                if ($idTipoIdentificacion !== null && $idTipoIdentificacion !== '' && $idTipoIdentificacion !== 0) {
+                    $persona->idTipoIdentificacion = $idTipoIdentificacion;
+                }
+            }
+            
+            if ($identificacion !== null) {
+                $persona->identificacion = $identificacion;
+            }
+            
+            if ($request->has('nombre1')) {
+                $persona->nombre1 = $request->input('nombre1');
+            }
+            if ($request->has('nombre2')) {
+                $persona->nombre2 = $request->input('nombre2');
+            }
+            if ($request->has('apellido1')) {
+                $persona->apellido1 = $request->input('apellido1');
+            }
+            if ($request->has('apellido2')) {
+                $persona->apellido2 = $request->input('apellido2');
+            }
+            if ($request->has('idciudadNac')) {
+                $persona->idCiudadNac = $request->input('idciudadNac');
+            }
+            if ($request->has('celular')) {
+                $persona->celular = $request->input('celular');
+            }
+            if ($email !== null) {
+                $persona->email = $email;
+            }
+            if ($request->has('direccion')) {
+                $persona->direccion = $request->input('direccion');
+            }
+            if ($request->has('idciudadUbicacion')) {
+                $persona->idCiudadUbicacion = $request->input('idciudadUbicacion');
+            }
+            if ($request->has('telefonoFijo')) {
+                $persona->telefonoFijo = $request->input('telefonoFijo');
+            }
+            if ($request->has('sexo')) {
+                $persona->sexo = $request->input('sexo');
+            }
+            if ($request->has('rh')) {
+                $persona->rh = $request->input('rh');
+            }
 
             if ($request->hasFile('rutaFotoFile')) {
                 $persona->rutaFoto = $this->storeLogoPersona($request);
@@ -2415,8 +2462,8 @@ public function getContratosFlujoVT(Request $request)
 
             $persona->save();
 
-
-            if ($user) {
+            $user = User::where('idpersona', $persona->id)->first();
+            if ($user && $email !== null && $email !== '') {
                 $user->email = $email;
                 $user->save();
             }
@@ -2471,6 +2518,7 @@ public function getContratosFlujoVT(Request $request)
      * Obtiene las áreas de conocimiento para asinar a una nueva competencia
      * teniendo en cuenta el programa y nivel educativo.
      *
+     * @param int $idPrograma
      * @return \Illuminate\Http\JsonResponse
      */
     public function getAreasConocimientoPrograma(int $idPrograma)
@@ -2486,7 +2534,7 @@ public function getContratosFlujoVT(Request $request)
 
         $areas = AreaConocimiento::whereHas('programas', function ($query) use ($idPrograma) {
             $query->where('idPrograma', $idPrograma);
-        })->get();
+        })->orderBy('nombreAreaConocimiento', 'asc')->get();
 
         return response()->json([
             'message' => 'Áreas obtenidas correctamente',
@@ -2495,7 +2543,53 @@ public function getContratosFlujoVT(Request $request)
     }
 
     /**
-     * Crea una nueva área de conocimiento.
+     * Obtiene las áreas de conocimiento de múltiples programas.
+     * Retorna todas las áreas únicas asociadas a los programas especificados.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAreasConocimientoProgramas(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'idProgramas' => 'required|array|min:1',
+                'idProgramas.*' => 'integer|exists:programa,id'
+            ]);
+
+            $idProgramas = $validated['idProgramas'];
+
+            // Obtener todas las áreas de conocimiento asociadas a los programas especificados
+            $areas = AreaConocimiento::whereHas('programas', function ($query) use ($idProgramas) {
+                $query->whereIn('idPrograma', $idProgramas);
+            })
+            ->orderBy('nombreAreaConocimiento', 'asc')
+            ->get();
+
+            return response()->json([
+                'message' => 'Áreas de conocimiento obtenidas correctamente',
+                'data' => $areas
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error al obtener áreas de conocimiento por programas', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'message' => 'Error al obtener áreas de conocimiento',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Crea una nueva área de conocimiento y la asocia a los programas especificados.
+     * Valida que no exista duplicado en ninguno de los programas.
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
@@ -2504,33 +2598,101 @@ public function getContratosFlujoVT(Request $request)
     {
         try {
             $validated = $request->validate([
-                'nombreAreaConocimiento' => 'required|string|max:255'
+                'nombreAreaConocimiento' => 'required|string|max:255',
+                'idProgramas' => 'nullable|array',
+                'idProgramas.*' => 'integer|exists:programa,id'
             ]);
 
             $nombreArea = trim($validated['nombreAreaConocimiento']);
-            
-            // Buscar si ya existe
+            $idProgramas = $validated['idProgramas'] ?? [];
+
+            // Buscar si el área ya existe (por nombre)
             $areaExistente = AreaConocimiento::where('nombreAreaConocimiento', $nombreArea)->first();
-            
-            if ($areaExistente) {
-                // Si existe, retornar el existente
-                return response()->json([
-                    'message' => 'Área de conocimiento ya existe',
-                    'data' => $areaExistente
-                ], 200);
+
+            // Si el área no existe, crearla
+            if (!$areaExistente) {
+                $areaExistente = AreaConocimiento::create([
+                    'nombreAreaConocimiento' => $nombreArea
+                ]);
             }
 
-            // Si no existe, crear nuevo
-            $area = AreaConocimiento::create([
-                'nombreAreaConocimiento' => $nombreArea
-            ]);
+            // Verificar qué programas ya tienen el área asociada y cuáles no
+            $programasConArea = [];
+            $programasSinArea = [];
+            
+            if (!empty($idProgramas)) {
+                // Obtener programas donde el área ya existe
+                $programasExistentes = DB::table('asignacionAreaConocimientoPrograma')
+                    ->where('idAreaConocimiento', $areaExistente->id)
+                    ->whereIn('idPrograma', $idProgramas)
+                    ->join('programa', 'asignacionAreaConocimientoPrograma.idPrograma', '=', 'programa.id')
+                    ->select('programa.nombrePrograma', 'programa.id')
+                    ->get();
+
+                $programasConArea = $programasExistentes->pluck('nombrePrograma')->toArray();
+                $idsProgramasConArea = $programasExistentes->pluck('id')->toArray();
+                
+                // Programas donde NO existe el área
+                $idsProgramasSinArea = array_diff($idProgramas, $idsProgramasConArea);
+                
+                // Obtener nombres de programas donde no existe
+                if (!empty($idsProgramasSinArea)) {
+                    $programasSinArea = DB::table('programa')
+                        ->whereIn('id', $idsProgramasSinArea)
+                        ->pluck('nombrePrograma')
+                        ->toArray();
+                }
+
+                // Asociar el área solo a los programas donde NO existe
+                foreach ($idsProgramasSinArea as $idPrograma) {
+                    DB::table('asignacionAreaConocimientoPrograma')->insert([
+                        'idAreaConocimiento' => $areaExistente->id,
+                        'idPrograma' => $idPrograma,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+            }
+
+            // Construir mensaje según el caso
+            $message = 'Área de conocimiento procesada correctamente';
+            $warnings = [];
+            
+            if (!empty($programasConArea) && !empty($programasSinArea)) {
+                // El área ya existía en algunos programas pero se asoció a otros
+                $message = 'Área de conocimiento asociada a los programas seleccionados';
+                $warnings[] = "El área ya existía en: " . implode(', ', $programasConArea);
+                $warnings[] = "Se asoció a: " . implode(', ', $programasSinArea);
+            } elseif (!empty($programasConArea) && empty($programasSinArea)) {
+                // El área ya existe en todos los programas seleccionados
+                return response()->json([
+                    'message' => "Área de conocimiento ya existe en todos los programas seleccionados: " . implode(', ', $programasConArea),
+                    'error' => 'DUPLICADO_EN_PROGRAMA',
+                    'data' => [
+                        'area' => $areaExistente,
+                        'programas' => $programasConArea
+                    ]
+                ], 409); // 409 Conflict
+            } elseif (empty($programasConArea) && !empty($programasSinArea)) {
+                // El área no existía en ningún programa, se creó y asoció
+                $message = 'Área de conocimiento creada y asociada correctamente';
+            }
 
             return response()->json([
-                'message' => 'Área de conocimiento creada correctamente',
-                'data' => $area
+                'message' => $message,
+                'warnings' => $warnings,
+                'data' => $areaExistente->load('programas')
             ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
-            Log::error('Error al crear área de conocimiento: ' . $e->getMessage());
+            Log::error('Error al crear área de conocimiento', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'message' => 'Error al crear área de conocimiento',
                 'error' => $e->getMessage()
