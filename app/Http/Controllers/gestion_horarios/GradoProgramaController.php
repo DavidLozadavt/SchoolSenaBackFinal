@@ -7,9 +7,11 @@ use App\Models\GradoPrograma;
 use App\Util\QueryUtil;
 use Exception;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\gestion_materias\MateriaController;
 use App\Models\GradoMateria;
 use App\Models\HorarioMateria;
 use App\Models\Materia;
+use App\Models\MatriculaAcademica;
 use App\Models\TipoGrado;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -136,7 +138,17 @@ class GradoProgramaController extends Controller
                     ]);
 
                     // buscamos los raps de la competencia y los asigamos tambien
-                    $raps = Materia::where('idMateriaPadre', $nueva['id'])->get();
+                    $materiaPadre = Materia::findOrFail($nueva['id']);
+                    $raps = MatriculaAcademica::where('idFicha', $datos['idFicha'])
+                        ->where('estado', '!=', 'APROBADO')
+                        ->whereHas('materia', function ($query) use ($materiaPadre) {
+                            $query->where('idMateriaPadre', $materiaPadre->id);
+                        })
+                        ->with('materia')
+                        ->get()
+                        ->pluck('materia')
+                        ->unique('id')
+                        ->values();;
     
                     foreach ($raps as $rap) {
                         $gradoMateriaRap = GradoMateria::create([
@@ -179,6 +191,16 @@ class GradoProgramaController extends Controller
 
             // en el array de materias solo contiene los ids
                 foreach ($datos['materias'] as $nueva) {
+
+                    $gradoMateriaExistente = GradoMateria::where([
+                        'idGradoPrograma' => $datos['idGradoPrograma'],
+                        'idMateria' => $nueva['id']
+                    ])->first();
+
+                    if($gradoMateriaExistente){
+                        continue;
+                    }
+
                     $newGradoMateria = GradoMateria::create([
                         'idGradoPrograma' => $datos['idGradoPrograma'],
                         'idMateria' => $nueva['id'],
@@ -192,7 +214,17 @@ class GradoProgramaController extends Controller
                         'idGradoMateria' => $newGradoMateria->id
                     ]);
 
-                    $raps = Materia::where('idMateriaPadre', $nueva['id'])->get();
+                    $materiaPadre = Materia::findOrFail($nueva['id']);
+                    $raps = MatriculaAcademica::where('idFicha', $datos['idFicha'])
+                        ->where('estado', '!=', 'APROBADO')
+                        ->whereHas('materia', function ($query) use ($materiaPadre) {
+                            $query->where('idMateriaPadre', $materiaPadre->id);
+                        })
+                        ->with('materia')
+                        ->get()
+                        ->pluck('materia')
+                        ->unique('id')
+                        ->values();
     
                     foreach ($raps as $rap) {
                         $gradoMateriaRap = GradoMateria::create([

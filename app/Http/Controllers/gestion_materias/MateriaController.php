@@ -19,6 +19,7 @@ use App\Models\Contract;
 use App\Models\GradoMateria;
 use App\Models\GradoPrograma;
 use App\Models\HorarioMateria;
+use App\Models\MatriculaAcademica;
 
 use function PHPUnit\Framework\isEmpty;
 
@@ -439,7 +440,7 @@ class MateriaController extends Controller
             $compe = Materia::create([
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
-                'idAreaConocimiento' => $datos['idMateriaPadre'] != null ? $materiaPadre->idAreaConocimiento : $datos['idAreaConocimiento'], 
+                'idAreaConocimiento' => $datos['idMateriaPadre'] != null ? $materiaPadre->idAreaConocimiento : $datos['idAreaConocimiento'],
                 'horas' => $datos['horas'],
                 'creditos' => $datos['creditos'],
                 'idMateriaPadre' => $datos['idMateriaPadre'] ?? null,
@@ -447,7 +448,7 @@ class MateriaController extends Controller
                 'idEmpresa' => $datos['idCompany']
             ]);
 
-            if($compe->idMateriaPadre != null && $datos['idGradoPrograma'] != null){
+            if ($compe->idMateriaPadre != null && $datos['idGradoPrograma'] != null) {
                 $gradoMateria = GradoMateria::create([
                     'idGradoPrograma' => $datos['idGradoPrograma'],
                     'idMateria' => $compe->id,
@@ -465,7 +466,7 @@ class MateriaController extends Controller
                 ]);
             }
 
-            if($compe->idMateriaPadre == null){
+            if ($compe->idMateriaPadre == null) {
                 AgregarMateriaPrograma::create([
                     'idMateria' => $compe->id,
                     'idPrograma' => $datos['idPrograma']
@@ -580,9 +581,21 @@ class MateriaController extends Controller
         }
     }
 
-    public function getMattersChildren($id)
+    public function getMattersChildren(Request $request)
     {
-        $materias = Materia::where('idMateriaPadre', $id)->get();
+        $idMateriaPadre = $request->input('idMateriaPadre');
+        $idFicha = $request->input('idFicha');
+
+        $materias = MatriculaAcademica::where('idFicha', $idFicha)
+            ->whereHas('materia', function ($query) use ($idMateriaPadre) {
+                $query->where('idMateriaPadre', $idMateriaPadre);
+            })
+            ->with('materia')
+            ->get()
+            ->pluck('materia')
+            ->unique('id')
+            ->values();
+
         return response()->json([
             'message' => 'Materias encontradas correctamente',
             'data' => $materias
