@@ -257,6 +257,7 @@ Route::post('store_actividades_riesgo_profesional', [ContratacionController::cla
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
 Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
 Route::get('areas-conocimiento/programa/{idPrograma}', [ContratacionController::class, 'getAreasConocimientoPrograma']);
+Route::post('areas-conocimiento/programas', [ContratacionController::class, 'getAreasConocimientoProgramas']);
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
 Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
@@ -1225,6 +1226,7 @@ Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'updat
 Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
 Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
 Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+Route::get('fichas/estudiante/clases', [FichaController::class, 'clasesEstudiante']);
 Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
 Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
