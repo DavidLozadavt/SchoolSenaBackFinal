@@ -137,6 +137,7 @@ use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
 use App\Http\Controllers\CompromisosController;
 use App\Http\Controllers\gestion_pensum\InasistenciaController;
+use App\Http\Controllers\InstructoresController;
 use App\Http\Controllers\SancionesController;
 
 /*
@@ -1370,3 +1371,6 @@ Route::apiResource('asistencia', AsistenciaController::class);
 Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
 Route::get('get_assistances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
 Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);
+
+//Intructores:
+Route::get('instructores', [InstructoresController::class, 'getInstructors']);
