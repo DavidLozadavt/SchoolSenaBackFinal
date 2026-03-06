@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\gestion_materias;
 
+use App\Enums\Estado;
+use App\Enums\EstadoHorarioMateria;
 use Exception;
 use Carbon\Carbon;
 use App\Util\KeyUtil;
@@ -316,10 +318,20 @@ class MateriaController extends Controller
             ])
             ->get();
 
+        // Ordenar los RAPs por el número despues del -
+        $raps = $raps->sortBy(function ($rap) {
+            $nombre = $rap->materia->nombreMateria;
+            if (preg_match('/-\s*(\d+)/', $nombre, $matches)) {
+                return $matches[1];
+            }
+            return '';
+        })->values();
+
         // Formatear la respuesta
         $resultado = $raps->map(function ($gradoMateria) {
             // Calcular horas usando los horarios asociados
             $horasActuales = 0;
+            $fechaFinalRap = null;
             foreach ($gradoMateria->horarioMateria as $horario) {
                 if ($horario->horaInicial && $horario->horaFinal) {
                     $hI = Carbon::parse($horario->horaInicial);
@@ -328,6 +340,14 @@ class MateriaController extends Controller
 
                     $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
                     $horasActuales += $sesionesDadas * $duracionSesion;
+                }
+                if($horario->fechaFinal != null && $horario->estado != EstadoHorarioMateria::PENDIENTE){
+                    $fF = Carbon::parse($horario->fechaFinal);
+                    if($fechaFinalRap == null){
+                        $fechaFinalRap = $fF;
+                    }else{
+                        $fechaFinalRap = $fF > $fechaFinalRap? $fF : $fechaFinalRap;
+                    }
                 }
             }
 
@@ -340,6 +360,7 @@ class MateriaController extends Controller
                 'descripcion' => $gradoMateria->materia->descripcion ?? '',
                 'codigo' => $gradoMateria->materia->codigo ?? '',
                 'estado' => $gradoMateria->estado,
+                'fechaFinalRap' => $fechaFinalRap instanceof Carbon ? $fechaFinalRap->format('Y-m-d') : null,
                 'horas' => $gradoMateria->materia->horas ?? 0,
                 'horasActuales' => round($horasActuales, 2),
                 'horasFaltantes' => round(max(0, ($gradoMateria->materia->horas ?? 0) - $horasActuales), 2),
@@ -595,6 +616,14 @@ class MateriaController extends Controller
             ->pluck('materia')
             ->unique('id')
             ->values();
+
+        $materias = $materias->sortBy(function ($materia) {
+            $nombre = $materia->nombreMateria;
+            if (preg_match('/-\s*(\d+)/', $nombre, $matches)) {
+                return $matches[1];
+            }
+            return '';
+        })->values();
 
         return response()->json([
             'message' => 'Materias encontradas correctamente',
