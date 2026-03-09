@@ -223,7 +223,7 @@ class MateriaController extends Controller
             $raps = Materia::where('idMateriaPadre', $materia->id)->get();
 
             // si trae raps y el area de conocimiento es diferente, actualiza el area de conocimiento de los raps
-            if($raps->isNotEmpty() && $materia->idAreaConocimiento != $datos['idAreaConocimiento'] && $materia->idMateriaPadre == null){
+            if ($raps->isNotEmpty() && $materia->idAreaConocimiento != $datos['idAreaConocimiento'] && $materia->idMateriaPadre == null) {
                 foreach ($raps as $rap) {
                     $rap->update([
                         'idAreaConocimiento' => $datos['idAreaConocimiento']
@@ -327,12 +327,26 @@ class MateriaController extends Controller
             return '';
         })->values();
 
+        // Cargamos todos los horarios de la ficha con sus conteos de sesiones (igual que getTrimestresFicha)
+        $todosHorariosFicha = HorarioMateria::where('idFicha', $idFicha)
+            ->with(['gradoMateria', 'dia', 'contrato.persona'])
+            ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($q) {
+                $q->whereNotNull('fechaSesion');
+            }])
+            ->get();
+
         // Formatear la respuesta
-        $resultado = $raps->map(function ($gradoMateria) {
-            // Calcular horas usando los horarios asociados
+        $resultado = $raps->map(function ($gradoMateria) use ($todosHorariosFicha) {
+            $materiaId = $gradoMateria->idMateria;
+            // Filtramos de todos los horarios de la ficha los que corresponden a esta materia
+            $todosLosHorariosFicha = $todosHorariosFicha->filter(function ($h) use ($materiaId) {
+                return $h->gradoMateria->idMateria == $materiaId;
+            });
+
             $horasActuales = 0;
             $fechaFinalRap = null;
-            foreach ($gradoMateria->horarioMateria as $horario) {
+
+            foreach ($todosLosHorariosFicha as $horario) {
                 if ($horario->horaInicial && $horario->horaFinal) {
                     $hI = Carbon::parse($horario->horaInicial);
                     $hF = Carbon::parse($horario->horaFinal);
@@ -341,13 +355,9 @@ class MateriaController extends Controller
                     $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
                     $horasActuales += $sesionesDadas * $duracionSesion;
                 }
-                if($horario->fechaFinal != null && $horario->estado != EstadoHorarioMateria::PENDIENTE){
+                if ($horario->fechaFinal != null && $horario->estado != EstadoHorarioMateria::PENDIENTE) {
                     $fF = Carbon::parse($horario->fechaFinal);
-                    if($fechaFinalRap == null){
-                        $fechaFinalRap = $fF;
-                    }else{
-                        $fechaFinalRap = $fF > $fechaFinalRap? $fF : $fechaFinalRap;
-                    }
+                    $fechaFinalRap = is_null($fechaFinalRap) ? $fF : ($fF > $fechaFinalRap ? $fF : $fechaFinalRap);
                 }
             }
 
