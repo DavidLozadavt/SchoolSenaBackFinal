@@ -1330,7 +1330,7 @@ Route::group(['middleware' => 'auth:api'], function () {
 
 // MATERIAS
 Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
+    Route::get('materias-programa', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
     Route::get('materias/raps', [MateriaController::class, 'getCompetenciasHijas']); // materias hijas (raps-resultados)
     Route::get('materias/hijas', [MateriaController::class, 'getMattersChildren']);
     Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
