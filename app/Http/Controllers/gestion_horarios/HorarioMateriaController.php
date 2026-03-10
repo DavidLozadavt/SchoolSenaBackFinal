@@ -523,7 +523,7 @@ class HorarioMateriaController extends Controller
 
                 $horarioMateria->update([
                     'idContrato' => null,
-                    'estado' => $horarioMateria->estado != 'FINALIZADO' && $horarioMateria->estado != 'INTERRUMPIDO' ? EstadoHorarioMateria::PENDIENTE : $horarioMateria->estado
+                    'estado' => $horarioMateria->estado != 'FINALIZADO' || $horarioMateria->estado != 'INTERRUMPIDO' ? EstadoHorarioMateria::PENDIENTE : $horarioMateria->estado
                 ]);
             }
 
@@ -1297,25 +1297,29 @@ class HorarioMateriaController extends Controller
                                 }
                             }
 
-                            // Obtenemos todos los horarios de los hijos (RAPs) de esta materia padre
-                            // que pertenecen a este mismo grado/trimestre
-                            $horariosDeHijos = $horariosPorGrado->filter(function ($h) use ($idMateriaPadre) {
-                                return $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre;
-                            });
+                            // Horarios de hijos en TODA la ficha y solo en este trimestre
+                            $horariosRapsFicha = $horarios->filter(fn($h) => $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre);
+                            $horariosDeHijos = $horariosPorGrado->filter(fn($h) => $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre);
 
-                            if ($horariosDeHijos->every('estado', EstadoHorarioMateria::FINALIZADO)) {
-                                $gradoMateria = GradoMateria::find($idMateriaPadre);
-                                if ($gradoMateria) {
-                                    $gradoMateria->estado = EstadoHorarioMateria::FINALIZADO;
-                                    $gradoMateria->save();
+                            // Horas acumuladas (globales de la ficha)
+                            $horasData = $this->calcularHorasMateria($horarios->filter(fn($h) => $h->gradoMateria->idMateria == $idMateriaPadre || $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre));
+
+                            // Estado global de RAPs en la ficha (si alguno está finalizado o evaluado en cualquier trimestre)
+                            $estadoRapsGlobal = $horariosRapsFicha->groupBy('gradoMateria.idMateria')->map(fn($g) => $g->contains(fn($h) => in_array($h->gradoMateria->estado, [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO])));
+
+                            // Sincronizar estados de RAPs en este trimestre si ya están finalizados globalmente
+                            foreach ($horariosDeHijos as $_h) {
+                                if (($estadoRapsGlobal[$_h->gradoMateria->idMateria] ?? false) && !in_array($_h->gradoMateria->estado, [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO])) {
+                                    $_h->gradoMateria->update(['estado' => EstadoHorarioMateria::FINALIZADO]);
                                 }
                             }
 
-                            // Calculamos las horas usando todos los horarios de la ficha para esta materia
-                            $horasData = $this->calcularHorasMateria($horarios->filter(function ($h) use ($idMateriaPadre) {
-                                return $h->gradoMateria->idMateria == $idMateriaPadre || $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre;
-                            }));
+                            // Verificar y actualizar estado de la competencia (Padre)
                             $gradoMateriaParaEstado = $horariosPorMateriaPadre->first()->gradoMateria;
+                            $todosRapsTerminados = $estadoRapsGlobal->isNotEmpty() && $estadoRapsGlobal->every(fn($f) => $f);
+                            if ($todosRapsTerminados || $horasData['horasActuales'] >= $materiaPadre->horas && !in_array($gradoMateriaParaEstado->estado, [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO])) {
+                                $gradoMateriaParaEstado->update(['estado' => EstadoHorarioMateria::FINALIZADO]);
+                            }
 
                             return [
                                 'id' => $materiaPadre->id,
@@ -1326,20 +1330,15 @@ class HorarioMateriaController extends Controller
                                 'idGradoMateria' => $gradoMateriaParaEstado->id,
                                 'horasTotales' => $materiaPadre->horas,
                                 'horasActuales' => $horasData['horasActuales'],
-                                'horasFaltantes' => $materiaPadre->horas - $horasData['horasActuales'],
+                                'horasFaltantes' => max(0, $materiaPadre->horas - $horasData['horasActuales']),
                                 'porcentajeAvance' => $horasData['porcentajeAvance'],
 
                                 // Horarios de los hijos agrupados por asignación
                                 'horarios' => [
                                     'asignados' => $horariosDeHijos
-                                        ->filter(function ($h) {
-                                            return $h->idDia != null &&
-                                                $h->horaInicial != null &&
-                                                $h->horaFinal != null &&
-                                                $h->fechaInicial != null &&
-                                                $h->idContrato != null;
-                                        })
-                                        ->map(function ($h) {
+                                        ->filter(fn($h) => $h->idDia != null && $h->horaInicial != null && $h->horaFinal != null && $h->fechaInicial != null && $h->idContrato != null)
+                                        ->map(function ($h) use ($estadoRapsGlobal) {
+                                            $isFinished = $estadoRapsGlobal[$h->gradoMateria->idMateria] ?? false;
                                             return [
                                                 'id' => $h->id,
                                                 'dia' => $h->dia,
@@ -1347,20 +1346,15 @@ class HorarioMateriaController extends Controller
                                                 'horaFinal' => $h->horaFinal,
                                                 'fechaInicial' => $h->fechaInicial,
                                                 'fechaFinal' => $h->fechaFinal,
-                                                'estado' => $h->estado,
+                                                'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => $h->contrato->persona ?? null,
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values(),
                                     'sinAsignar' => $horariosDeHijos
-                                        ->filter(function ($h) {
-                                            return $h->idDia != null &&
-                                                $h->horaInicial != null &&
-                                                $h->horaFinal != null &&
-                                                $h->fechaInicial != null &&
-                                                $h->idContrato == null;
-                                        })
-                                        ->map(function ($h) {
+                                        ->filter(fn($h) => $h->idDia != null && $h->horaInicial != null && $h->horaFinal != null && $h->fechaInicial != null && $h->idContrato == null)
+                                        ->map(function ($h) use ($estadoRapsGlobal) {
+                                            $isFinished = $estadoRapsGlobal[$h->gradoMateria->idMateria] ?? false;
                                             return [
                                                 'id' => $h->id,
                                                 'dia' => $h->dia,
@@ -1368,7 +1362,7 @@ class HorarioMateriaController extends Controller
                                                 'horaFinal' => $h->horaFinal,
                                                 'fechaInicial' => $h->fechaInicial,
                                                 'fechaFinal' => $h->fechaFinal,
-                                                'estado' => $h->estado,
+                                                'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => null,
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];

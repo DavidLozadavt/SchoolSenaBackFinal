@@ -41,17 +41,66 @@ class MateriaController extends Controller
      * @return \Illuminate\Http\Response
      */
 
-    public function getAllCompetencesByProgram($idPrograma): JsonResponse
+    public function getAllCompetencesByProgram(Request $request): JsonResponse
     {
+        $idPrograma = $request->input('idPrograma');
+        $idFicha = $request->input('idFicha');
         try {
-            $materias = AgregarMateriaPrograma::where('idPrograma', $idPrograma)
-                ->with('materia', function ($query) {
-                    $query->whereNull('idMateriaPadre');
+            // Obtener todas las materias padre asignadas al programa
+            $materiasPrograma = AgregarMateriaPrograma::where('idPrograma', $idPrograma)
+                ->whereHas('materia', function($q) {
+                    $q->whereNull('idMateriaPadre');
                 })
                 ->get()
                 ->pluck('materia')
                 ->values();
-            return response()->json($materias);
+
+            // Obtener los estados de todas las materias asignadas a esta ficha (competencias y RAPs)
+            $registrosFicha = GradoMateria::whereHas('horarioMateria', function ($query) use ($idFicha) {
+                    $query->where('idFicha', $idFicha);
+                })
+                ->select('idMateria', 'estado')
+                ->get()
+                ->groupBy('idMateria');
+
+            // Obtener todos los RAPs de las materias del programa para verificar
+            $idsMateriasPadre = $materiasPrograma->pluck('id');
+            $todosRaps = Materia::whereIn('idMateriaPadre', $idsMateriasPadre)->get()->groupBy('idMateriaPadre');
+
+            // Mapear cada materia del programa con su estado en la ficha
+            $resultado = $materiasPrograma->map(function ($materia) use ($registrosFicha, $todosRaps) {
+                // Una competencia está finalizada si:
+                // El registro de la competencia padre en la ficha ya está FINALIZADO o EVALUADO
+                $instanciasPadre = $registrosFicha->get($materia->id, collect());
+                $estaFinalizada = $instanciasPadre->contains(function($gm) {
+                    return in_array($gm->estado, ['FINALIZADO', 'EVALUADO']);
+                });
+
+                // si tiene RAPs y todos los RAPs estan FINALIZADO en la ficha
+                $raps = $todosRaps->get($materia->id, collect());
+                if ($raps->isNotEmpty() && !$estaFinalizada) {
+                    $todosRapsTerminados = $raps->every(function($rap) use ($registrosFicha) {
+                        $instanciasRap = $registrosFicha->get($rap->id, collect());
+                        return $instanciasRap->contains(function($gm) {
+                            return in_array($gm->estado, ['FINALIZADO']);
+                        });
+                    });
+                    if ($todosRapsTerminados) {
+                        $estaFinalizada = true;
+                    }
+                }
+
+                return [
+                    'id' => $materia->id,
+                    'nombreMateria' => $materia->nombreMateria,
+                    'codigo' => $materia->codigo,
+                    'horas' => $materia->horas,
+                    'descripcion' => $materia->descripcion,
+                    'isCompleta' => $estaFinalizada
+                ];
+            });
+
+            return response()->json($resultado);
         } catch (\Throwable $error) {
             return response()->json([
                 'message' => 'No se pudieron cargar las competencias',
