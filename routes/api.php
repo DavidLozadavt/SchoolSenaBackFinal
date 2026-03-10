@@ -132,6 +132,8 @@ use App\Http\Controllers\RedController;
 use App\Http\Controllers\gestion_actividades\ActividadController;
 use App\Http\Controllers\ambiente_virtual\GruposFichaController;
 use App\Http\Controllers\ambiente_virtual\AsignacionActividadController;
+use App\Http\Controllers\ambiente_virtual\ActividadesAprendizController;
+use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
@@ -1270,6 +1272,14 @@ Route::middleware('auth:api')->group(function () {
     Route::get('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'show']);
     Route::put('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'update']);
     Route::delete('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'destroy']);
+    Route::post('fichas/{idFicha}/grupos/{id}/unirse', [GruposFichaController::class, 'unirse']);
+
+    // Actividades del aprendiz (vista estudiante)
+    Route::get('actividades-aprendiz', [ActividadesAprendizController::class, 'index']);
+    Route::post('actividades-aprendiz/entregar', [ActividadesAprendizController::class, 'entregar']);
+
+    // Grupos del estudiante (vista aprendiz)
+    Route::get('grupos-estudiante', [GruposFichaController::class, 'gruposEstudiante']);
 
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
     Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);

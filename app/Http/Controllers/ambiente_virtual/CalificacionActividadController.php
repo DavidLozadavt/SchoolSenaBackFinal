@@ -104,37 +104,69 @@ class CalificacionActividadController extends Controller
     }
 
     /**
-     * Listar calificaciones de una actividad para una ficha.
+     * Listar aprendices asignados a una actividad para una ficha.
+     * Incluye: foto, identificación, entrega (archivo, comentario), estado, nota.
      */
     public function listarPorActividad(int $idActividad, int $idFicha): JsonResponse
     {
         try {
             if (!Schema::hasTable('calificacionActividad')) {
-                return response()->json([]);
+                return response()->json(['data' => []]);
             }
 
             $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            $colFicha = Schema::hasColumn($tableMa, 'idFicha') ? 'idFicha' : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : 'idFicha');
+
             $calificaciones = DB::table('calificacionActividad as ca')
                 ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
                 ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
                 ->leftJoin('persona as p', 'm.idPersona', '=', 'p.id')
                 ->where('ca.idActividad', $idActividad)
-                ->where('ma.idFicha', $idFicha)
+                ->where('ma.' . $colFicha, $idFicha)
                 ->select([
-                    'ca.id',
+                    'ca.id as idCalificacionActividad',
                     'ca.idAMartriculaAcademica',
                     'ca.idGrupo',
                     'ca.calificacionNumerica',
+                    'ca.calificacionEstandart',
                     'ca.ComentarioDocente',
+                    'ca.ComentarioEstudiante',
+                    'ca.archivo',
                     'ca.fechaCalificacion',
                     'm.id as idMatricula',
-                    DB::raw("CONCAT(COALESCE(p.nombre1,''), ' ', COALESCE(p.apellido1,'')) as nombreAprendiz"),
+                    'p.identificacion',
+                    'p.rutaFoto',
+                    DB::raw("CONCAT(COALESCE(p.nombre1,''), ' ', COALESCE(p.nombre2,''), ' ', COALESCE(p.apellido1,''), ' ', COALESCE(p.apellido2,'')) as nombreAprendiz"),
                 ])
                 ->get();
 
-            return response()->json($calificaciones);
+            $result = [];
+            foreach ($calificaciones as $c) {
+                $entregado = !empty(trim($c->ComentarioEstudiante ?? '')) || !empty(trim($c->archivo ?? ''));
+                $calificado = $c->calificacionNumerica !== null && $c->calificacionNumerica !== '';
+                $estado = $calificado ? 'CALIFICADO' : ($entregado ? 'ENVIADO' : 'PENDIENTE');
+
+                $result[] = [
+                    'idCalificacionActividad' => $c->idCalificacionActividad,
+                    'idAMartriculaAcademica' => $c->idAMartriculaAcademica,
+                    'idMatricula' => $c->idMatricula,
+                    'idGrupo' => $c->idGrupo,
+                    'nombreAprendiz' => trim($c->nombreAprendiz ?? '') ?: 'Sin nombre',
+                    'identificacion' => $c->identificacion ?? '',
+                    'rutaFoto' => $c->rutaFoto ?? null,
+                    'calificacionNumerica' => $c->calificacionNumerica,
+                    'calificacionEstandart' => $c->calificacionEstandart,
+                    'ComentarioDocente' => $c->ComentarioDocente,
+                    'ComentarioEstudiante' => $c->ComentarioEstudiante,
+                    'archivo' => $c->archivo,
+                    'fechaCalificacion' => $c->fechaCalificacion,
+                    'estado' => $estado,
+                ];
+            }
+
+            return response()->json(['data' => $result]);
         } catch (\Throwable $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            return response()->json(['error' => $e->getMessage(), 'data' => []], 500);
         }
     }
 }
