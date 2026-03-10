@@ -1284,11 +1284,10 @@ Route::middleware('auth:api')->group(function () {
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
     Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);
     Route::post('fichas/{idFicha}/asignacion-actividades', [AsignacionActividadController::class, 'asignar']);
-
-    // Calificación: listar aprendices por actividad y calificar
-    Route::get('actividades/{idActividad}/fichas/{idFicha}/aprendices', [CalificacionActividadController::class, 'listarPorActividad']);
-    Route::post('calificacion-actividad/calificar', [CalificacionActividadController::class, 'calificarIndividual']);
-});//Juicios evaluativos:
+    Route::get('get_student_by_id_materia',[MatriculaAcademicaController::class, 'getStudentByIdMateria']);
+    //calificaciones por ficha, materia e instructor (evaluador)
+    Route::get('calificaciones_ficha_by_instructor/{idInstructor}', [MatriculaAcademicaController::class, 'calificacionesFichaByInstructor']);
+    });//Juicios evaluativos:
 Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 
 //rutas de Jornadas
@@ -1331,6 +1330,7 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
     Route::post('materias', [MateriaController::class, 'crearCompetencia']);
     Route::put('materias/finalizar-rap', [HorarioMateriaController::class, 'finalizarRap']);
+    Route::put('materias/interrumpir-rap', [HorarioMateriaController::class, 'interrumpirRap']);
     Route::put('materias/{id}', [MateriaController::class, 'update']);
     Route::delete('grado-materia', [MateriaController::class, 'deleteMateriaTrimestre']);// elimina competencias y raps del trimestre de la ficha
     Route::get('materias/{id}', [MateriaController::class, 'getById']);

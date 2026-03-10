@@ -259,6 +259,7 @@ class HorarioMateriaController extends Controller
         $query = HorarioMateria::where('idFicha', $data['idFicha'])
             // Filtrar por Día
             ->where('idDia', $data['idDia'])
+            ->where('estado', [EstadoHorarioMateria::PENDIENTE, EstadoHorarioMateria::ASIGNADO, EstadoHorarioMateria::INTERRUMPIDO])
             // Excluir el horario actual si se está editando
             ->when($currentHorarioMateriaId, function ($q) use ($currentHorarioMateriaId) {
                 return $q->where('id', '<>', $currentHorarioMateriaId);
@@ -477,7 +478,7 @@ class HorarioMateriaController extends Controller
                     ], 422);
                 }
 
-                if($horarioMateria->estado != 'FINALIZADO' && $horarioMateria->estado != 'INTERRUMPIDO'){
+                if ($horarioMateria->estado != 'FINALIZADO' && $horarioMateria->estado != 'INTERRUMPIDO') {
                     $horarioMateria->update([
                         'idContrato' => $idContrato,
                         'estado' => EstadoHorarioMateria::ASIGNADO
@@ -1223,7 +1224,7 @@ class HorarioMateriaController extends Controller
             })
 
             // Recorremos cada grado
-            ->map(function ($horariosPorGrado) {
+            ->map(function ($horariosPorGrado) use ($horarios) {
                 // Tomamos el grado una sola vez
                 $gradoPrograma = $horariosPorGrado->first()
                     ->gradoMateria
@@ -1281,7 +1282,7 @@ class HorarioMateriaController extends Controller
 
                             return is_null($materia->idMateriaPadre);
                         })
-                        ->map(function ($horariosPorMateriaPadre, $idMateriaPadre) use ($horariosPorGrado) {
+                        ->map(function ($horariosPorMateriaPadre, $idMateriaPadre) use ($horariosPorGrado, $horarios) {
                             $materiaPadre = $horariosPorMateriaPadre->first()
                                 ->gradoMateria
                                 ->materia;
@@ -1302,11 +1303,18 @@ class HorarioMateriaController extends Controller
                                 return $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre;
                             });
 
-                            // Combinamos los horarios del padre (si tiene) con los de sus hijos
-                            $todosLosHorarios = $horariosPorMateriaPadre->concat($horariosDeHijos);
+                            if ($horariosDeHijos->every('estado', EstadoHorarioMateria::FINALIZADO)) {
+                                $gradoMateria = GradoMateria::find($idMateriaPadre);
+                                if ($gradoMateria) {
+                                    $gradoMateria->estado = EstadoHorarioMateria::FINALIZADO;
+                                    $gradoMateria->save();
+                                }
+                            }
 
-                            // AQUÍ CALCULAMOS LAS HORAS (usando todos los horarios combinados)
-                            $horasData = $this->calcularHorasMateria($todosLosHorarios);
+                            // Calculamos las horas usando todos los horarios de la ficha para esta materia
+                            $horasData = $this->calcularHorasMateria($horarios->filter(function ($h) use ($idMateriaPadre) {
+                                return $h->gradoMateria->idMateria == $idMateriaPadre || $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre;
+                            }));
                             $gradoMateriaParaEstado = $horariosPorMateriaPadre->first()->gradoMateria;
 
                             return [
@@ -1523,18 +1531,22 @@ class HorarioMateriaController extends Controller
         }
     }
 
-    public function finalizarRap (Request $request) 
+    public function finalizarRap(Request $request)
     {
         try {
             $idGradoMateria = $request->input('idGradoMateria');
             DB::beginTransaction();
             $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
-            ->where('estado', '!=', EstadoHorarioMateria::EVALUADO)
-            ->get();
-            
+                ->where('estado', '!=', EstadoHorarioMateria::EVALUADO)
+                ->get();
+
             foreach ($horarios as $horario) {
                 $horario->estado = EstadoHorarioMateria::FINALIZADO;
                 $horario->save();
+
+                $gradoMateria = GradoMateria::find($horario->idGradoMateria);
+                $gradoMateria->estado = EstadoHorarioMateria::FINALIZADO;
+                $gradoMateria->save();
             }
             DB::commit();
             return response()->json([
@@ -1544,6 +1556,33 @@ class HorarioMateriaController extends Controller
             DB::rollBack();
             return response()->json([
                 'message' => 'Ha ocurrido un error al finalizar el rap',
+                'error' => $th->getMessage()
+            ]);
+        }
+    }
+
+    public function interrumpirRap(Request $request)
+    {
+        try {
+            $idGradoMateria = $request->input('idGradoMateria');
+            DB::beginTransaction();
+            $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
+                ->where('estado', '!=', EstadoHorarioMateria::EVALUADO)
+                ->where('estado', '!=', EstadoHorarioMateria::FINALIZADO)
+                ->get();
+
+            foreach ($horarios as $horario) {
+                $horario->estado = EstadoHorarioMateria::INTERRUMPIDO;
+                $horario->save();
+            }
+            DB::commit();
+            return response()->json([
+                'message' => 'Rap interrumpido correctamente'
+            ], 200);
+        } catch (\Throwable $th) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Ha ocurrido un error al interrumpir el rap',
                 'error' => $th->getMessage()
             ]);
         }
@@ -1561,12 +1600,11 @@ class HorarioMateriaController extends Controller
             $contratoIds = collect($contratos)->pluck('id')->filter()->toArray();
             $materias = Materia::whereHas('gradoMateria.horarioMateria', function ($query) use ($contratoIds) {
                 $query->whereIn('idContrato', $contratoIds)
-                      ->where('estado', EstadoHorarioMateria::FINALIZADO);
+                    ->where('estado', EstadoHorarioMateria::FINALIZADO);
             })
-            ->get();
+                ->get();
 
             return response()->json($materias, 200);
-
         } catch (\Throwable $th) {
             return response()->json([
                 'message' => 'Ha ocurrido un error al obtener las materias',
@@ -1574,5 +1612,4 @@ class HorarioMateriaController extends Controller
             ], 500);
         }
     }
-
 }
