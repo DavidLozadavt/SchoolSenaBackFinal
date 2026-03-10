@@ -13,6 +13,87 @@ use Illuminate\Http\JsonResponse;
 class GruposFichaController extends Controller
 {
     /**
+     * Listar grupos del estudiante para todas sus fichas (vista aprendiz).
+     * Retorna fichas con sus grupos y si el estudiante ya está en cada grupo.
+     */
+    public function gruposEstudiante(): JsonResponse
+    {
+        try {
+            $user = auth()->user();
+            if (!$user || !$user->idpersona) {
+                return response()->json(['data' => []], 200);
+            }
+
+            $matriculas = \Illuminate\Support\Facades\DB::table('matricula as m')
+                ->where('m.idPersona', $user->idpersona)
+                ->whereIn('m.estado', ['ACTIVO', 'EN CURSO', 'CURSANDO', 'MATRICULADO', 'EN FORMACION'])
+                ->whereNotNull('m.idFicha')
+                ->select('m.id as idMatricula', 'm.idFicha')
+                ->distinct()
+                ->get();
+
+            if ($matriculas->isEmpty()) {
+                return response()->json(['data' => []], 200);
+            }
+
+            $fichas = [];
+            foreach ($matriculas->unique('idFicha') as $m) {
+                $grupos = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $m->idFicha)
+                    ->with('tipoGrupo')
+                    ->orderBy('id', 'desc')
+                    ->get();
+
+                $tblPart = $this->tablaParticipantes();
+                $integrantesPorGrupo = [];
+                if ($tblPart) {
+                    $counts = \Illuminate\Support\Facades\DB::table($tblPart)
+                        ->whereIn('idGrupo', $grupos->pluck('id'))
+                        ->selectRaw('idGrupo, COUNT(*) as total')
+                        ->groupBy('idGrupo')
+                        ->pluck('total', 'idGrupo');
+                    foreach ($grupos as $g) {
+                        $integrantesPorGrupo[$g->id] = (int) ($counts[$g->id] ?? 0);
+                    }
+                }
+
+                $gruposConEstado = [];
+                foreach ($grupos as $g) {
+                    $integrantes = $integrantesPorGrupo[$g->id] ?? 0;
+                    $yaUnido = false;
+                    if ($tblPart) {
+                        $yaUnido = \Illuminate\Support\Facades\DB::table($tblPart)
+                            ->where('idGrupo', $g->id)
+                            ->where('idMatricula', $m->idMatricula)
+                            ->exists();
+                    }
+                    $gruposConEstado[] = [
+                        'id' => $g->id,
+                        'nombreGrupo' => $g->nombreGrupo,
+                        'descripcion' => $g->descripcion,
+                        'cantidadParticipantes' => $g->cantidadParticipantes,
+                        'estado' => $g->estado,
+                        'integrantesActuales' => $integrantes,
+                        'yaUnido' => $yaUnido,
+                        'tipoGrupo' => $g->tipoGrupo,
+                    ];
+                }
+
+                $ficha = Ficha::find($m->idFicha);
+                $fichas[] = [
+                    'idFicha' => $m->idFicha,
+                    'idMatricula' => $m->idMatricula,
+                    'codigoFicha' => $ficha?->codigo ?? null,
+                    'grupos' => $gruposConEstado,
+                ];
+            }
+
+            return response()->json(['data' => $fichas]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Listar grupos de una ficha (RAPS).
      * idAsignacionPeriodoProgramaJornada = ficha.id
      */
@@ -28,8 +109,9 @@ class GruposFichaController extends Controller
                 ->get();
 
             $integrantesPorGrupo = [];
-            if (\Illuminate\Support\Facades\Schema::hasTable('asignacionparticipantes')) {
-                $counts = \Illuminate\Support\Facades\DB::table('asignacionparticipantes')
+            $tblPart = $this->tablaParticipantes();
+            if ($tblPart) {
+                $counts = \Illuminate\Support\Facades\DB::table($tblPart)
                     ->whereIn('idGrupo', $grupos->pluck('id'))
                     ->selectRaw('idGrupo, COUNT(*) as total')
                     ->groupBy('idGrupo')
@@ -195,14 +277,29 @@ class GruposFichaController extends Controller
     }
 
     /**
-     * Cuenta integrantes del grupo (asignacionparticipantes con idGrupo -> grupos).
+     * Nombre de la tabla de participantes (camelCase o lowercase).
+     */
+    private function tablaParticipantes(): ?string
+    {
+        if (\Illuminate\Support\Facades\Schema::hasTable('asignacionParticipantes')) {
+            return 'asignacionParticipantes';
+        }
+        if (\Illuminate\Support\Facades\Schema::hasTable('asignacionparticipantes')) {
+            return 'asignacionparticipantes';
+        }
+        return null;
+    }
+
+    /**
+     * Cuenta integrantes del grupo (asignacionParticipantes/asignacionparticipantes con idGrupo -> grupos).
      */
     private function contarIntegrantes(int $idGrupo): int
     {
-        if (!\Illuminate\Support\Facades\Schema::hasTable('asignacionparticipantes')) {
+        $tbl = $this->tablaParticipantes();
+        if (!$tbl) {
             return 0;
         }
-        return (int) \Illuminate\Support\Facades\DB::table('asignacionparticipantes')
+        return (int) \Illuminate\Support\Facades\DB::table($tbl)
             ->where('idGrupo', $idGrupo)
             ->count();
     }
@@ -225,11 +322,12 @@ class GruposFichaController extends Controller
             ]);
             $idMatricula = $validated['idMatricula'];
 
-            if (!\Illuminate\Support\Facades\Schema::hasTable('asignacionparticipantes')) {
-                return response()->json(['error' => 'Tabla asignacionparticipantes no disponible'], 500);
+            $tbl = $this->tablaParticipantes();
+            if (!$tbl) {
+                return response()->json(['error' => 'Tabla asignacionParticipantes no disponible'], 500);
             }
 
-            $yaEnEsteGrupo = \Illuminate\Support\Facades\DB::table('asignacionparticipantes')
+            $yaEnEsteGrupo = \Illuminate\Support\Facades\DB::table($tbl)
                 ->where('idGrupo', $id)
                 ->where('idMatricula', $idMatricula)
                 ->exists();
@@ -242,7 +340,7 @@ class GruposFichaController extends Controller
                 return response()->json(['error' => 'El grupo está lleno'], 422);
             }
 
-            $yaEnOtroGrupoMismoRap = \Illuminate\Support\Facades\DB::table('asignacionparticipantes as ap')
+            $yaEnOtroGrupoMismoRap = \Illuminate\Support\Facades\DB::table($tbl . ' as ap')
                 ->join('grupos as g', 'ap.idGrupo', '=', 'g.id')
                 ->where('ap.idMatricula', $idMatricula)
                 ->where('g.idAsignacionPeriodoProgramaJornada', $idFicha)
@@ -252,7 +350,7 @@ class GruposFichaController extends Controller
                 return response()->json(['error' => 'Ya perteneces a un grupo de este RAP'], 422);
             }
 
-            \Illuminate\Support\Facades\DB::table('asignacionparticipantes')->insert([
+            \Illuminate\Support\Facades\DB::table($tbl)->insert([
                 'idGrupo' => $id,
                 'idMatricula' => $idMatricula,
                 'created_at' => now(),
