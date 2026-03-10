@@ -66,6 +66,127 @@ class AsignacionActividadController extends Controller
     }
 
     /**
+     * Actividades asignadas a un estudiante específico en una ficha.
+     * Usado desde la vista del instructor (ModalMisActividades).
+     */
+    public function actividadesEstudiante(Request $request, int $idFicha): JsonResponse
+    {
+        try {
+            $idPersona = (int) $request->query('idPersona', 0);
+            $idMateriaFiltro = $request->query('idMateria') ? (int) $request->query('idMateria') : null;
+
+            if (!$idPersona) {
+                return response()->json(['data' => [], 'message' => 'idPersona requerido']);
+            }
+
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json(['data' => []]);
+            }
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            $colFicha = Schema::hasColumn($tableMa, 'idFicha') ? 'idFicha' : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : null);
+
+            // Obtener matrículas académicas del estudiante en esta ficha
+            $queryMa = DB::table($tableMa . ' as ma')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->where('m.idPersona', $idPersona);
+
+            if ($colFicha) {
+                $queryMa->where('ma.' . $colFicha, $idFicha);
+            }
+
+            $idsMatriculaAcademica = $queryMa->pluck('ma.id');
+
+            if ($idsMatriculaAcademica->isEmpty()) {
+                return response()->json(['data' => []]);
+            }
+
+            $query = DB::table('calificacionActividad as ca')
+                ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->leftJoin('persona as p_asigno', 'ca.idPersona', '=', 'p_asigno.id')
+                ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+                ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
+                ->whereIn('ca.idAMartriculaAcademica', $idsMatriculaAcademica);
+
+            if ($idMateriaFiltro) {
+                $query->where('a.idMateria', $idMateriaFiltro);
+            }
+
+            $calificaciones = $query->select([
+                    'ca.id as idCalificacionActividad',
+                    'ca.idActividad',
+                    'ca.fechaInicial',
+                    'ca.fechaFinal',
+                    'ca.calificacionNumerica',
+                    'ca.calificacionEstandart',
+                    'ca.ComentarioDocente',
+                    'ca.ComentarioEstudiante',
+                    'ca.archivo',
+                    'ca.idGrupo',
+                    'p_asigno.id as idPersonaInstructor',
+                    DB::raw("CONCAT(COALESCE(p_asigno.nombre1,''), ' ', COALESCE(p_asigno.nombre2,''), ' ', COALESCE(p_asigno.apellido1,''), ' ', COALESCE(p_asigno.apellido2,'')) as asignadoPor"),
+                    'p_asigno.rutaFoto as instructorRutaFoto',
+                    'a.tituloActividad',
+                    'a.descripcionActividad',
+                    'a.pathDocumentoActividad',
+                    'a.tipoActividad',
+                    'a.entregables',
+                    'a.idMateria',
+                    'mat.nombreMateria',
+                    'mat.codigo as materiaCodigo',
+                    'mat.descripcion as materiaDescripcion',
+                    'e.estado as estadoActividad',
+                ])
+                ->orderBy('ca.fechaFinal', 'desc')
+                ->get();
+
+            $result = [];
+            foreach ($calificaciones as $c) {
+                $result[] = [
+                    'id' => $c->idCalificacionActividad,
+                    'idActividad' => $c->idActividad,
+                    'codigo' => (string) $c->idActividad,
+                    'instructorRutaFoto' => $c->instructorRutaFoto ?? null,
+                    'actividad' => [
+                        'id' => $c->idActividad,
+                        'tituloActividad' => $c->tituloActividad,
+                        'descripcionActividad' => $c->descripcionActividad,
+                        'pathDocumentoActividad' => $c->pathDocumentoActividad,
+                        'tipoActividad' => $c->tipoActividad,
+                        'entregables' => $c->entregables,
+                        'materia' => $c->nombreMateria ? [
+                            'nombreMateria' => $c->nombreMateria,
+                            'codigo' => $c->materiaCodigo,
+                            'descripcion' => $c->materiaDescripcion,
+                        ] : null,
+                    ],
+                    'tituloActividad' => $c->tituloActividad,
+                    'descripcionActividad' => $c->descripcionActividad,
+                    'tipoActividad' => $c->tipoActividad,
+                    'entregables' => $c->entregables,
+                    'idMateria' => $c->idMateria,
+                    'materia' => $c->nombreMateria ? ['nombreMateria' => $c->nombreMateria, 'codigo' => $c->materiaCodigo] : null,
+                    'estado' => $c->estadoActividad,
+                    'fechaInicial' => $c->fechaInicial,
+                    'fechaFinal' => $c->fechaFinal,
+                    'calificacionNumerica' => $c->calificacionNumerica,
+                    'calificacionEstandart' => $c->calificacionEstandart,
+                    'ComentarioDocente' => $c->ComentarioDocente,
+                    'ComentarioEstudiante' => $c->ComentarioEstudiante,
+                    'archivo' => $c->archivo,
+                    'asignadoPor' => trim($c->asignadoPor ?? '') ?: null,
+                    'entregablesRealizados' => $c->archivo ? 'SÍ' : '-',
+                ];
+            }
+
+            return response()->json(['data' => $result]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage(), 'data' => []], 500);
+        }
+    }
+
+    /**
      * E1-HU2, E1-HU3, E1-HU4: Asignar actividades masivamente.
      * aprendices: array de idMatricula o "todos"
      * grupos: array de idGrupo o "todos"

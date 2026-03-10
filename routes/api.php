@@ -1280,12 +1280,18 @@ Route::middleware('auth:api')->group(function () {
 
     // Grupos del estudiante (vista aprendiz)
     Route::get('grupos-estudiante', [GruposFichaController::class, 'gruposEstudiante']);
-
+     // Actividades asignadas a un estudiante específico (vista instructor)
+    Route::get('fichas/{idFicha}/actividades-estudiante', [AsignacionActividadController::class, 'actividadesEstudiante']);
+ 
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
     Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);
     Route::post('fichas/{idFicha}/asignacion-actividades', [AsignacionActividadController::class, 'asignar']);
     Route::get('get_student_by_id_materia',[MatriculaAcademicaController::class, 'getStudentByIdMateria']);
     //calificaciones por ficha, materia e instructor (evaluador)
+    // Calificaciones de actividades (ambiente virtual)
+    Route::get('actividades/{idActividad}/fichas/{idFicha}/aprendices', [CalificacionActividadController::class, 'listarPorActividad']);
+    Route::post('calificaciones/individual', [CalificacionActividadController::class, 'calificarIndividual']);
+    Route::post('calificaciones/por-grupo', [CalificacionActividadController::class, 'calificarPorGrupo']);
     Route::get('calificaciones_ficha_by_instructor/{idInstructor}', [MatriculaAcademicaController::class, 'calificacionesFichaByInstructor']);
     });//Juicios evaluativos:
 Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
