@@ -112,6 +112,64 @@ class MatriculaAcademicaController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Listar calificaciones de una ficha y materia filtradas por instructor (evaluador).
+     * GET calificaciones_ficha_by_instructor/{idInstructor}?idFicha=...&idMateria=...&page=1&per_page=10&search=
+     */
+    public function calificacionesFichaByInstructor(Request $request, int $idInstructor): JsonResponse
+    {
+        try {
+            $idFicha = (int) $request->input('idFicha');
+            $idMateria = (int) $request->input('idMateria');
+            $page = max(1, (int) $request->input('page', 1));
+            $perPage = max(1, (int) $request->input('per_page', 50));
+            $search = trim((string) $request->input('search', ''));
+
+            $query = MatriculaAcademica::with([
+                'matricula.person',
+                'ficha',
+                'materia',
+                'evaluador',
+            ]);
+
+            if ($idMateria > 0) {
+                $query->where('idMateria', $idMateria);
+            }
+
+            // Filtrar por instructor/evaluador cuando haya evaluador asignado
+            if ($idInstructor > 0) {
+                $query->where(function ($q) use ($idInstructor) {
+                    $q->where('idEvaluador', $idInstructor)
+                        ->orWhereNull('idEvaluador');
+                });
+            }
+
+            if ($search !== '') {
+                $query->whereHas('matricula.person', function ($q) use ($search) {
+                    $q->where('nombre1', 'like', "%{$search}%")
+                        ->orWhere('apellido1', 'like', "%{$search}%")
+                        ->orWhere('identificacion', 'like', "%{$search}%");
+                });
+            }
+
+            $result = $query
+                ->orderBy('id', 'asc')
+                ->paginate($perPage, ['*'], 'page', $page);
+
+            return response()->json($result);
+        } catch (QueryException $th) {
+            return response()->json([
+                'message' => 'Error en la consulta',
+                'error' => $th->getMessage()
+            ], 500);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error general',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
  
     public function getUsuariosByFichaMateria($idFicha, $idMateria): JsonResponse
     {

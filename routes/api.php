@@ -1274,7 +1274,10 @@ Route::middleware('auth:api')->group(function () {
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
     Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);
     Route::post('fichas/{idFicha}/asignacion-actividades', [AsignacionActividadController::class, 'asignar']);
-});//Juicios evaluativos:
+    Route::get('get_student_by_id_materia',[MatriculaAcademicaController::class, 'getStudentByIdMateria']);
+    //calificaciones por ficha, materia e instructor (evaluador)
+    Route::get('calificaciones_ficha_by_instructor/{idInstructor}', [MatriculaAcademicaController::class, 'calificacionesFichaByInstructor']);
+    });//Juicios evaluativos:
 Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 
 //rutas de Jornadas
