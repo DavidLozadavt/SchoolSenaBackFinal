@@ -103,6 +103,43 @@ class MatriculaAcademicaController extends Controller
 
             $result->load('asistencias.sesionMateria');
 
+            // Calcular nota parcial y porcentaje de avance para cada matrícula
+            foreach ($result as $matricula) {
+                // Debido a posibles cruces al momento de asignar actividades, buscamos por todas las matrículas académicas del estudiante
+                $idsMaEstudiante = \DB::table('matriculaAcademica')
+                    ->where('idMatricula', $matricula->idMatricula)
+                    ->pluck('id');
+
+                $actividadesEstudiante = \DB::table('calificacionActividad as ca')
+                    ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                    ->whereIn('ca.idAMartriculaAcademica', $idsMaEstudiante)
+                    ->where('a.idMateria', $matricula->idMateria)
+                    ->get(['ca.*']);
+                
+                $totalAsignadas = $actividadesEstudiante->count();
+                
+                // Actividades ya calificadas (no nulos ni vacíos)
+                $conNota = $actividadesEstudiante->filter(function($a) {
+                    return !is_null($a->calificacionNumerica) && $a->calificacionNumerica !== '';
+                })->count();
+                
+                if ($totalAsignadas > 0) {
+                    $matricula->porcentaje_avance = round(($conNota / $totalAsignadas) * 100, 2);
+                    
+                    if ($conNota > 0) {
+                        $sumaNotas = $actividadesEstudiante->sum(function($a) {
+                            return is_numeric($a->calificacionNumerica) ? (float)$a->calificacionNumerica : 1.0;
+                        });
+                        $matricula->notaParcial = round($sumaNotas / $totalAsignadas, 2);
+                    } else {
+                        $matricula->notaParcial = null;
+                    }
+                } else {
+                    $matricula->porcentaje_avance = null;
+                    $matricula->notaParcial = null;
+                }
+            }
+
             return response()->json($result);
  
         } catch (\Exception $e) {
@@ -156,6 +193,45 @@ class MatriculaAcademicaController extends Controller
             $result = $query
                 ->orderBy('id', 'asc')
                 ->paginate($perPage, ['*'], 'page', $page);
+
+            // Calcular nota parcial y porcentaje de avance
+            $result->getCollection()->transform(function ($matricula) {
+                // Debido a posibles cruces al momento de asignar actividades, buscamos por todas las matrículas académicas del estudiante
+                $idsMaEstudiante = \DB::table('matriculaAcademica')
+                    ->where('idMatricula', $matricula->idMatricula)
+                    ->pluck('id');
+
+                $actividadesEstudiante = \DB::table('calificacionActividad as ca')
+                    ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                    ->whereIn('ca.idAMartriculaAcademica', $idsMaEstudiante)
+                    ->where('a.idMateria', $matricula->idMateria)
+                    ->get(['ca.*']);
+
+                $totalAsignadas = $actividadesEstudiante->count();
+
+                // Actividades ya calificadas (no nulos ni vacíos)
+                $conNota = $actividadesEstudiante->filter(function($a) {
+                    return !is_null($a->calificacionNumerica) && $a->calificacionNumerica !== '';
+                })->count();
+
+                if ($totalAsignadas > 0) {
+                    $matricula->porcentaje_avance = round(($conNota / $totalAsignadas) * 100, 2);
+                    
+                    if ($conNota > 0) {
+                        $sumaNotas = $actividadesEstudiante->sum(function($a) {
+                            return is_numeric($a->calificacionNumerica) ? (float)$a->calificacionNumerica : 1.0;
+                        });
+                        $matricula->notaParcial = round($sumaNotas / $totalAsignadas, 2);
+                    } else {
+                        $matricula->notaParcial = null;
+                    }
+                } else {
+                    $matricula->porcentaje_avance = null;
+                    $matricula->notaParcial = null;
+                }
+                
+                return $matricula;
+            });
 
             return response()->json($result);
         } catch (QueryException $th) {
