@@ -3,9 +3,11 @@ namespace App\Http\Controllers;
 
 use App\Models\Asistencia;
 use App\Models\MatriculaAcademica;
+use App\Models\JustificacionInasistencia;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Storage;
 class AsistenciaController extends Controller
 {
     public function store(Request $request): JsonResponse
@@ -367,6 +369,45 @@ public function getAllAssistance(Request $request): JsonResponse
   }
 
   /**
+   * Endpoint temporal para subir documento de excusa
+   * TODO: Mover a un controlador específico de excusas cuando se implemente la funcionalidad completa
+   */
+  public function subirDocumentoExcusa(Request $request, $idExcusa): JsonResponse
+  {
+    try {
+      $excusa = \App\Models\Excusa::findOrFail($idExcusa);
+      
+      if (!$request->hasFile('documento')) {
+        return response()->json(['error' => 'No se proporcionó ningún archivo'], 400);
+      }
+      
+      $file = $request->file('documento');
+      
+      // Validar que sea PDF
+      if ($file->getClientOriginalExtension() !== 'pdf' && $file->getMimeType() !== 'application/pdf') {
+        return response()->json(['error' => 'Solo se permiten archivos PDF'], 400);
+      }
+      
+      // Guardar el archivo
+      $path = $file->store('excusas', ['disk' => 'public']);
+      
+      // Actualizar la excusa con la ruta del documento
+      $excusa->urlDocumento = $path;
+      $excusa->save();
+      
+      return response()->json([
+        'message' => 'Documento subido correctamente',
+        'excusa' => $excusa
+      ], 200);
+    } catch (\Exception $e) {
+      return response()->json([
+        'error' => 'Error al subir el documento',
+        'message' => $e->getMessage()
+      ], 500);
+    }
+  }
+
+  /**
    * Inicia la clase: lee la sesión existente de hoy y crea registros de
    * inasistencia (asistio=false) para todos los estudiantes que aún no
    * tienen registro de asistencia en esa sesión.
@@ -526,24 +567,73 @@ public function getAllAssistance(Request $request): JsonResponse
 
                   $fechaSesion = $sesionMateria->fechaSesion;
                   
-                  // Contar por área
+                  // Verificar si tiene justificación aprobada
+                  $justificacion = JustificacionInasistencia::where('idAsistencia', $asistencia->id)
+                      ->where('estado', 'APROBADO')
+                      ->with('excusa')
+                      ->first();
+                  
+                  $estaJustificada = $justificacion !== null;
+                  
+                  // Contar por área (las justificadas SÍ cuentan como inasistencias)
                   if ($asistencia->asistio) {
                       $areasMap[$idArea]['asistencias']++;
                       $totalAsistencias++;
                   } else {
+                      // Las justificadas también cuentan como inasistencias
                       $areasMap[$idArea]['inasistencias']++;
                       $totalInasistencias++;
                   }
                   $areasMap[$idArea]['total']++;
 
                   // Agregar registro detallado
-                  $registrosDetallados[] = [
+                  $registro = [
                       'fecha' => $fechaSesion,
                       'idArea' => $idArea,
                       'nombreArea' => $nombreArea,
                       'asistio' => (bool)$asistencia->asistio,
-                      'estado' => $asistencia->asistio ? 'Presente' : 'Ausente'
+                      'estado' => $asistencia->asistio ? 'Presente' : ($estaJustificada ? 'Inasistencia Justificada' : 'Ausente'),
+                      'idAsistencia' => $asistencia->id
                   ];
+                  
+                  // Si está justificada, agregar información de la justificación
+                  if ($estaJustificada && $justificacion) {
+                      $excusa = $justificacion->excusa;
+                      $urlDocumento = null;
+                      if ($excusa && $excusa->urlDocumento) {
+                          $path = $excusa->urlDocumento;
+                          // Si la ruta ya es una URL completa, devolverla tal cual
+                          if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+                              $urlDocumento = $path;
+                          } else {
+                              // Asegurar que la ruta no tenga /storage/ duplicado
+                              // Si la ruta ya empieza con storage/, quitarlo
+                              if (str_starts_with($path, 'storage/')) {
+                                  $path = substr($path, 8); // Quitar 'storage/'
+                              }
+                              // Si la ruta empieza con /storage/, quitarlo
+                              if (str_starts_with($path, '/storage/')) {
+                                  $path = substr($path, 9); // Quitar '/storage/'
+                              }
+                              $urlDocumento = \Illuminate\Support\Facades\Storage::disk('public')->url($path);
+                          }
+                      }
+                      $registro['justificacion'] = [
+                          'id' => $justificacion->id,
+                          'estado' => $justificacion->estado,
+                          'observacion' => $justificacion->observacion,
+                          'excusa' => [
+                              'id' => $excusa->id ?? null,
+                              'tipoExcusa' => $excusa->tipoExcusa ?? null,
+                              'observacion' => $excusa->observacion ?? null,
+                              'fechaInicialJustificacion' => $excusa->fechaInicialJustificacion ?? null,
+                              'fechaFinalJustificacion' => $excusa->fechaFinalJustificacion ?? null,
+                              'urlDocumento' => $urlDocumento
+                          ]
+                      ];
+                  }
+                  
+                  $registrosDetallados[] = $registro;
               }
           }
 
@@ -560,7 +650,7 @@ public function getAllAssistance(Request $request): JsonResponse
               return strtotime($b['fecha']) - strtotime($a['fecha']);
           });
 
-          // Calcular porcentaje general
+          // Calcular porcentaje general (las justificadas SÍ cuentan como inasistencias)
           $totalRegistros = $totalAsistencias + $totalInasistencias;
           $asistenciaGeneral = $totalRegistros > 0 
               ? round(($totalAsistencias / $totalRegistros) * 100) 
