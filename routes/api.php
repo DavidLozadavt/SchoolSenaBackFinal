@@ -1252,6 +1252,8 @@ Route::middleware('auth:api')->group(function () {
     Route::get('actividades/{id}/materiales-apoyo', [ActividadController::class, 'materialesApoyo']);
     Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
     Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
+    Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
+    Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
     Route::get('actividades/{id}', [ActividadController::class, 'show']);
     Route::put('actividades/{id}', [ActividadController::class, 'update']);
     Route::delete('actividades/{id}', [ActividadController::class, 'destroy']);
@@ -1274,9 +1276,10 @@ Route::middleware('auth:api')->group(function () {
     Route::delete('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'destroy']);
     Route::post('fichas/{idFicha}/grupos/{id}/unirse', [GruposFichaController::class, 'unirse']);
 
-    // Actividades del aprendiz (vista estudiante)
-    Route::get('actividades-aprendiz', [ActividadesAprendizController::class, 'index']);
-    Route::post('actividades-aprendiz/entregar', [ActividadesAprendizController::class, 'entregar']);
+    // Actividades del aprendiz (vista estudiante) - RUTA DUPLICADA: se usa la de ActividadController (línea 1255)
+    // Esta ruta está comentada porque ActividadController::actividadesAprendiz devuelve el formato correcto
+    // Route::get('actividades-aprendiz', [ActividadesAprendizController::class, 'index']);
+    // Route::post('actividades-aprendiz/entregar', [ActividadesAprendizController::class, 'entregar']);
 
     // Grupos del estudiante (vista aprendiz)
     Route::get('grupos-estudiante', [GruposFichaController::class, 'gruposEstudiante']);
@@ -1373,6 +1376,8 @@ Route::get('estadisticas-asistencia',[AsistenciaController::class, 'getEstadisti
 Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
 Route::get('asistencias-por-area',[AsistenciaController::class, 'getAsistenciasPorArea']);
 Route::post('registrar-asistencia',[AsistenciaController::class, 'store']);
+// Endpoint temporal para subir documento de excusa
+Route::post('excusas/{idExcusa}/documento',[AsistenciaController::class, 'subirDocumentoExcusa']);
 
 // Iniciar clase: crea SesionMateria + Asistencia automáticamente al comenzar la hora de clase
 Route::post('iniciar-clase',[AsistenciaController::class, 'iniciarClase']);
