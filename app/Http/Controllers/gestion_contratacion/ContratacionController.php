@@ -214,6 +214,10 @@ class ContratacionController extends Controller
      */
     public function getContratoByIdentificacion($identificacion)
     {
+        if (empty($identificacion)) {
+            return response()->json(['error' => 'La identificación es requerida'], 400);
+        }
+
         $user = KeyUtil::user();
         $contratos = Contract::with('persona', 'tipoContrato')
             ->whereHas("persona", function ($q) use ($identificacion) {

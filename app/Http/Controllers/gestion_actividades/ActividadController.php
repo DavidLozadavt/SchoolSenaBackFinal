@@ -17,10 +17,166 @@ use App\Models\Respuesta;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 class ActividadController extends Controller
 {
+    public function actividadesAprendiz(): JsonResponse
+    {
+        try {
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json(['data' => []]);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+
+            if (!$idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+
+            $registros = DB::table('calificacionActividad as ca')
+                ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+                ->leftJoin('area_conocimiento as ac', 'mat.idAreaConocimiento', '=', 'ac.id')
+                ->leftJoin('persona as p', 'a.idPersona', '=', 'p.id')
+                ->where('m.idPersona', $idPersona)
+                ->select([
+                    'ca.id as idCalificacionActividad',
+                    'ca.idActividad',
+                    'ca.archivo as archivoEntrega',
+                    'ca.fechaInicial',
+                    'ca.fechaFinal',
+                    'ca.fechaCalificacion',
+                    'ca.calificacionNumerica',
+                    'ca.calificacionEstandart',
+                    'ca.ComentarioDocente',
+                    'ca.ComentarioEstudiante',
+                    'ca.idGrupo',
+                    'ca.idEstado as idEstadoCalificacion',
+                    'a.tituloActividad',
+                    'a.descripcionActividad',
+                    'a.pathDocumentoActividad',
+                    'a.tipoActividad',
+                    'a.estrategia',
+                    'a.entregables',
+                    'mat.id as idMateria',
+                    'mat.codigo as codigoMateria',
+                    'mat.nombreMateria',
+                    'ac.id as idArea',
+                    'ac.nombreAreaConocimiento',
+                    'p.nombre1 as autorNombre1',
+                    'p.nombre2 as autorNombre2',
+                    'p.apellido1 as autorApellido1',
+                    'p.apellido2 as autorApellido2',
+                    'p.rutaFoto as autorRutaFoto',
+                ])
+                ->orderByDesc('ca.fechaFinal')
+                ->get();
+
+            $idsActividad = $registros->pluck('idActividad')->unique()->filter()->values();
+            $materialesPorActividad = [];
+
+            if ($idsActividad->isNotEmpty()) {
+                $materiales = DB::table('asignacionMaterialApoyoActividad as ama')
+                    ->join('materialApoyoActividad as maa', 'ama.idMaterialApoyo', '=', 'maa.id')
+                    ->whereIn('ama.idActividad', $idsActividad)
+                    ->select([
+                        'ama.idActividad',
+                        'maa.id',
+                        'maa.titulo',
+                        'maa.descripcion',
+                        'maa.urlDocumento',
+                        'maa.urlAdicional',
+                    ])
+                    ->get()
+                    ->groupBy('idActividad');
+
+                foreach ($materiales as $idActividad => $items) {
+                    $materialesPorActividad[$idActividad] = $items->map(function ($item) {
+                        return [
+                            'id' => $item->id,
+                            'titulo' => $item->titulo,
+                            'descripcion' => $item->descripcion,
+                            'urlDocumento' => $item->urlDocumento,
+                            'urlDocumentoUrl' => $this->publicUrl($item->urlDocumento),
+                            'urlAdicional' => $item->urlAdicional,
+                        ];
+                    })->values();
+                }
+            }
+
+            $data = $registros->map(function ($row) use ($materialesPorActividad) {
+                $estadoVisual = $this->resolverEstadoActividadAprendiz($row);
+                $autor = trim(implode(' ', array_filter([
+                    $row->autorNombre1,
+                    $row->autorNombre2,
+                    $row->autorApellido1,
+                    $row->autorApellido2,
+                ])));
+
+                // Calcular fechaVencida basándose en la fecha, no solo en el estado
+                $fechaVencida = false;
+                if ($row->fechaFinal) {
+                    try {
+                        $fechaFinal = \Carbon\Carbon::parse($row->fechaFinal);
+                        $fechaVencida = now()->greaterThan($fechaFinal);
+                    } catch (\Exception $e) {
+                        $fechaVencida = false;
+                    }
+                }
+
+                return [
+                    'idCalificacionActividad' => $row->idCalificacionActividad,
+                    'idActividad' => $row->idActividad,
+                    'tituloActividad' => $row->tituloActividad,
+                    'descripcionActividad' => $row->descripcionActividad,
+                    'tipoActividad' => $row->tipoActividad,
+                    'estrategia' => $row->estrategia,
+                    'entregables' => $row->entregables,
+                    'fechaInicial' => $row->fechaInicial,
+                    'fechaFinal' => $row->fechaFinal,
+                    'fechaCalificacion' => $row->fechaCalificacion,
+                    'calificacionNumerica' => $row->calificacionNumerica,
+                    'calificacionEstandart' => $row->calificacionEstandart,
+                    'comentarioDocente' => $row->ComentarioDocente,
+                    'comentarioEstudiante' => $row->ComentarioEstudiante,
+                    'archivoEntrega' => $row->archivoEntrega,
+                    'archivoEntregaUrl' => $this->publicUrl($row->archivoEntrega),
+                    'pathDocumentoActividad' => $row->pathDocumentoActividad,
+                    'documentoActividadUrl' => $this->publicUrl($row->pathDocumentoActividad),
+                    'materia' => [
+                        'id' => $row->idMateria,
+                        'codigo' => $row->codigoMateria,
+                        'nombreMateria' => $row->nombreMateria,
+                    ],
+                    'area' => [
+                        'id' => $row->idArea,
+                        'nombre' => $row->nombreAreaConocimiento,
+                    ],
+                    'autor' => [
+                        'nombreCompleto' => $autor ?: 'Sin asignar',
+                        'rutaFotoUrl' => $this->publicUrl($row->autorRutaFoto),
+                    ],
+                    'materialesApoyo' => $materialesPorActividad[$row->idActividad] ?? [],
+                    'estadoVisual' => $estadoVisual,
+                    'fechaVencida' => $fechaVencida,
+                    'puedeResponder' => in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true),
+                ];
+            })->values();
+
+            return response()->json(['data' => $data]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function index(Request $request): JsonResponse
     {
         try {
@@ -38,6 +194,75 @@ class ActividadController extends Controller
 
             $actividades = $query->orderBy('id', 'asc')->get();
             return response()->json($actividades);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function responderActividadAprendiz(Request $request, int $idCalificacionActividad): JsonResponse
+    {
+        try {
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json(['error' => 'Tabla no disponible'], 500);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+
+            if (!$idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $validated = $request->validate([
+                'comentarioEstudiante' => 'nullable|string|max:3000',
+                'archivo' => 'nullable|file|mimes:pdf,doc,docx,png,jpg,jpeg|max:10240',
+            ]);
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+
+            $registro = DB::table('calificacionActividad as ca')
+                ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->where('ca.id', $idCalificacionActividad)
+                ->where('m.idPersona', $idPersona)
+                ->select('ca.id', 'ca.archivo')
+                ->first();
+
+            if (!$registro) {
+                return response()->json(['error' => 'Actividad no encontrada para este aprendiz'], 404);
+            }
+
+            $archivoPath = $registro->archivo;
+
+            if ($request->hasFile('archivo')) {
+                if ($archivoPath && Storage::disk('public')->exists($archivoPath)) {
+                    Storage::disk('public')->delete($archivoPath);
+                }
+
+                $file = $request->file('archivo');
+                $dir = "actividades/entregas/{$idCalificacionActividad}";
+                if (!Storage::disk('public')->exists($dir)) {
+                    Storage::disk('public')->makeDirectory($dir, 0755, true);
+                }
+
+                $filename = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
+                $archivoPath = $file->storeAs($dir, $filename, 'public');
+            }
+
+            DB::table('calificacionActividad')
+                ->where('id', $idCalificacionActividad)
+                ->update([
+                    'ComentarioEstudiante' => $validated['comentarioEstudiante'] ?? null,
+                    'archivo' => $archivoPath,
+                    'updated_at' => now(),
+                ]);
+
+            return response()->json([
+                'message' => 'Entrega registrada correctamente',
+                'archivoUrl' => $this->publicUrl($archivoPath),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -604,5 +829,40 @@ class ActividadController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    private function resolverEstadoActividadAprendiz(object $row): string
+    {
+        $calificacion = trim((string) ($row->calificacionNumerica ?? ''));
+        $comentarioEstudiante = trim((string) ($row->ComentarioEstudiante ?? ''));
+        $archivo = trim((string) ($row->archivoEntrega ?? $row->archivo ?? ''));
+        $fechaFinal = $row->fechaFinal ? \Carbon\Carbon::parse($row->fechaFinal) : null;
+
+        if ($calificacion !== '') {
+            return 'CALIFICADO';
+        }
+
+        if ($archivo !== '' || $comentarioEstudiante !== '') {
+            return 'POR_EVALUAR';
+        }
+
+        if ($fechaFinal && now()->greaterThan($fechaFinal)) {
+            return 'SIN_ENTREGAR';
+        }
+
+        return 'PENDIENTE';
+    }
+
+    private function publicUrl(?string $path): ?string
+    {
+        if (!$path) {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        return Storage::disk('public')->url($path);
     }
 }
