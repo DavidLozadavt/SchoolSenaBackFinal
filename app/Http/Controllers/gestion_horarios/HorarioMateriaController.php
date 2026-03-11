@@ -521,10 +521,16 @@ class HorarioMateriaController extends Controller
             foreach ($horarios as $h) {
                 $horarioMateria = HorarioMateria::findOrFail($h['id']);
 
-                $horarioMateria->update([
-                    'idContrato' => null,
-                    'estado' => $horarioMateria->estado != 'FINALIZADO' || $horarioMateria->estado != 'INTERRUMPIDO' ? EstadoHorarioMateria::PENDIENTE : $horarioMateria->estado
-                ]);
+                if($horarioMateria->estado == EstadoHorarioMateria::ASIGNADO){
+                    $horarioMateria->update([
+                        'idContrato' => null,
+                        'estado' => EstadoHorarioMateria::PENDIENTE
+                    ]);
+                }else{
+                    $horarioMateria->update([
+                        'idContrato' => null
+                    ]);
+                }
             }
 
             DB::commit();
@@ -1352,7 +1358,7 @@ class HorarioMateriaController extends Controller
                                             ];
                                         })->values(),
                                     'sinAsignar' => $horariosDeHijos
-                                        ->filter(fn($h) => $h->idDia != null && $h->horaInicial != null && $h->horaFinal != null && $h->fechaInicial != null && $h->idContrato == null)
+                                        ->filter(fn($h) => $h->idDia != null && $h->horaInicial != null && $h->horaFinal != null && $h->fechaInicial != null && $h->idContrato == null && $h->estado == EstadoHorarioMateria::PENDIENTE)
                                         ->map(function ($h) use ($estadoRapsGlobal) {
                                             $isFinished = $estadoRapsGlobal[$h->gradoMateria->idMateria] ?? false;
                                             return [
@@ -1531,7 +1537,7 @@ class HorarioMateriaController extends Controller
             $idGradoMateria = $request->input('idGradoMateria');
             DB::beginTransaction();
             $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
-                ->where('estado', '!=', EstadoHorarioMateria::EVALUADO)
+                ->whereNotIn('estado', [EstadoHorarioMateria::EVALUADO, EstadoHorarioMateria::FINALIZADO])
                 ->get();
 
             foreach ($horarios as $horario) {
@@ -1561,8 +1567,7 @@ class HorarioMateriaController extends Controller
             $idGradoMateria = $request->input('idGradoMateria');
             DB::beginTransaction();
             $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
-                ->where('estado', '!=', EstadoHorarioMateria::EVALUADO)
-                ->where('estado', '!=', EstadoHorarioMateria::FINALIZADO)
+                ->whereNotIn('estado', [EstadoHorarioMateria::EVALUADO, EstadoHorarioMateria::FINALIZADO])
                 ->get();
 
             foreach ($horarios as $horario) {

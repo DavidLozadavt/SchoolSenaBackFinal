@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\gestion_horarios;
 
+use App\Enums\EstadoGradoMateria;
 use App\Models\Grado;
 use App\Models\GradoPrograma;
 use App\Util\QueryUtil;
@@ -140,28 +141,22 @@ class GradoProgramaController extends Controller
                 // buscamos los raps de la competencia y los asigamos tambien
                 $materiaPadre = Materia::findOrFail($nueva['id']);
                 // Solo asignar raps que NO estén finalizados o evaluados en la ficha
-                $rapsFinalizados = GradoMateria::whereHas('horarioMateria', function ($q) use ($datos) {
+                $rapsYaFinalizados = GradoMateria::whereHas('horarioMateria', function ($q) use ($datos) {
                     $q->where('idFicha', $datos['idFicha']);
-                })
-                    ->whereHas('materia', function ($q) use ($materiaPadre) {
-                        $q->where('idMateriaPadre', $materiaPadre->id);
-                    })
-                    ->whereIn('estado', ['FINALIZADO', 'EVALUADO'])
-                    ->pluck('idMateria')
-                    ->toArray();
-
-                $raps = GradoMateria::whereHas('horarioMateria', function ($q) use ($datos) {
-                    $q->where('idFicha', $datos['idFicha']);
-                })
-                    ->whereHas('materia', function ($q) use ($materiaPadre) {
-                        $q->where('idMateriaPadre', $materiaPadre->id);
-                    })
-                    ->whereNotIn('idMateria', $rapsFinalizados)
-                    ->with('materia')
-                    ->get()
-                    ->pluck('materia')
-                    ->unique('id')
-                    ->values();
+                })->where('estado', EstadoGradoMateria::FINALIZADO)
+                ->pluck('idMateria')->toArray();
+                
+                $raps = MatriculaAcademica::where('idFicha', $datos['idFicha'])
+                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
+                        ->whereNotIn('idMateria', $rapsYaFinalizados)
+                        ->whereHas('materia', function ($query) use ($materiaPadre) {
+                            $query->where('idMateriaPadre', $materiaPadre->id);
+                        })
+                        ->with('materia')
+                        ->get()
+                        ->pluck('materia')
+                        ->unique('id')
+                        ->values();
 
                 foreach ($raps as $rap) {
                     $gradoMateriaRap = GradoMateria::create([
@@ -202,9 +197,9 @@ class GradoProgramaController extends Controller
                 'materias' => 'required|array',
             ]);
 
-            // en el array de materias solo contiene los ids
             foreach ($datos['materias'] as $nueva) {
 
+                // verificar si la materia ya existe en el trimestre y no repetirla
                 $gradoMateriaExistente = GradoMateria::where([
                     'idGradoPrograma' => $datos['idGradoPrograma'],
                     'idMateria' => $nueva['id']
@@ -229,28 +224,22 @@ class GradoProgramaController extends Controller
 
                 $materiaPadre = Materia::findOrFail($nueva['id']);
                 // Solo asignar raps que NO estén finalizados o evaluados en la ficha
-                $rapsFinalizados = GradoMateria::whereHas('horarioMateria', function ($q) use ($datos) {
+                $rapsYaFinalizados = GradoMateria::whereHas('horarioMateria', function ($q) use ($datos) {
                     $q->where('idFicha', $datos['idFicha']);
-                })
-                    ->whereHas('materia', function ($q) use ($materiaPadre) {
-                        $q->where('idMateriaPadre', $materiaPadre->id);
-                    })
-                    ->whereIn('estado', ['FINALIZADO', 'EVALUADO'])
-                    ->pluck('idMateria')
-                    ->toArray();
-
-                $raps = GradoMateria::whereHas('horarioMateria', function ($q) use ($datos) {
-                    $q->where('idFicha', $datos['idFicha']);
-                })
-                    ->whereHas('materia', function ($q) use ($materiaPadre) {
-                        $q->where('idMateriaPadre', $materiaPadre->id);
-                    })
-                    ->whereNotIn('idMateria', $rapsFinalizados)
-                    ->with('materia')
-                    ->get()
-                    ->pluck('materia')
-                    ->unique('id')
-                    ->values();
+                })->where('estado', EstadoGradoMateria::FINALIZADO)
+                ->pluck('idMateria')->toArray();
+                
+                $raps = MatriculaAcademica::where('idFicha', $datos['idFicha'])
+                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
+                        ->whereNotIn('idMateria', $rapsYaFinalizados)
+                        ->whereHas('materia', function ($query) use ($materiaPadre) {
+                            $query->where('idMateriaPadre', $materiaPadre->id);
+                        })
+                        ->with('materia')
+                        ->get()
+                        ->pluck('materia')
+                        ->unique('id')
+                        ->values();
 
                 foreach ($raps as $rap) {
                     $gradoMateriaRap = GradoMateria::create([
