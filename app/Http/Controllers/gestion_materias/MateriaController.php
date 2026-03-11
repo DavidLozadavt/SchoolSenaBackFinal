@@ -460,7 +460,8 @@ class MateriaController extends Controller
                                 $h->horaInicial != null &&
                                 $h->horaFinal != null &&
                                 $h->fechaInicial != null &&
-                                $h->idContrato == null;
+                                $h->idContrato == null &&
+                                $h->estado == EstadoHorarioMateria::PENDIENTE;
                         })
                         ->map(function ($h) {
                             return [
@@ -666,17 +667,24 @@ class MateriaController extends Controller
         $idMateriaPadre = $request->input('idMateriaPadre');
         $idFicha = $request->input('idFicha');
 
-        $materias = MatriculaAcademica::where('idFicha', $idFicha)
-            ->whereHas('materia', function ($query) use ($idMateriaPadre) {
-                $query->where('idMateriaPadre', $idMateriaPadre);
-            })
-            ->with('materia')
-            ->get()
-            ->pluck('materia')
-            ->unique('id')
-            ->values();
+        $rapsYaFinalizados = GradoMateria::whereHas('horarioMateria', function ($q) use ($idFicha) {
+                    $q->where('idFicha', $idFicha);
+                })->where('estado', EstadoHorarioMateria::FINALIZADO)
+                ->pluck('idMateria')->toArray();
+                
+                $raps = MatriculaAcademica::where('idFicha', $idFicha)
+                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
+                        ->whereNotIn('idMateria', $rapsYaFinalizados)
+                        ->whereHas('materia', function ($query) use ($idMateriaPadre) {
+                            $query->where('idMateriaPadre', $idMateriaPadre);
+                        })
+                        ->with('materia')
+                        ->get()
+                        ->pluck('materia')
+                        ->unique('id')
+                        ->values();
 
-        $materias = $materias->sortBy(function ($materia) {
+        $materias = $raps->sortBy(function ($materia) {
             $nombre = $materia->nombreMateria;
             if (preg_match('/-\s*(\d+)/', $nombre, $matches)) {
                 return $matches[1];
