@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\ActivationCompanyUser;
+use App\Models\DetalleRmi;
+use App\Models\Rmi;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class InstructoresController extends Controller
 {
@@ -103,12 +106,54 @@ class InstructoresController extends Controller
                     ];
                 });
 
+                // Obtener estado del RMI para el periodo
+                $periodoRmi = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
+                $estadoRmi = 'PENDIENTE';
+                $motivoRechazo = null;
+
+                if ($contrato) {
+                    $rmi = Rmi::where('periodo', $periodoRmi)->first();
+                    if ($rmi) {
+                        // Verificar si todos los detalles están en el mismo estado
+                        $detallesRmi = DetalleRmi::where('idRmi', $rmi->id)
+                            ->whereHas('horarioMateria', function ($q) use ($contrato) {
+                                $q->where('idContrato', $contrato->id);
+                            })
+                            ->get();
+
+                        if ($detallesRmi->isNotEmpty()) {
+                            $estados = $detallesRmi->pluck('estado')->unique();
+                            // Si todos tienen el mismo estado y no es PENDIENTE, usar ese estado
+                            if ($estados->count() === 1 && $estados->first() !== 'PENDIENTE') {
+                                $estadoRmi = $estados->first();
+                                if ($estadoRmi === 'RECHAZADO') {
+                                    $motivoRechazo = $rmi->observacion ?? $detallesRmi->first()->observacion;
+                                }
+                            } else {
+                                // Si hay mezcla o todos son PENDIENTE, usar el estado del RMI principal
+                                $estadoRmi = $rmi->estado;
+                                if ($estadoRmi === 'RECHAZADO') {
+                                    $motivoRechazo = $rmi->observacion;
+                                }
+                            }
+                        } else {
+                            // Si no hay detalles, usar el estado del RMI principal
+                            $estadoRmi = $rmi->estado;
+                            if ($estadoRmi === 'RECHAZADO') {
+                                $motivoRechazo = $rmi->observacion;
+                            }
+                        }
+                    }
+                }
+
                 return [
                     'idActivation' => $acu->id,
                     'emailUsuario' => $user->email,
                     'idContrato'   => $contrato?->id,
                     'roles'        => $acu->getRoleNames(),
                     'horarios'     => $horarios,
+                    'estado'       => $estadoRmi,
+                    'motivoRechazo' => $motivoRechazo,
                     'persona'      => [
                         'identificacion' => $persona->identificacion,
                         'nombre1'        => $persona->nombre1,
@@ -220,5 +265,193 @@ class InstructoresController extends Controller
         })->values();
 
         return response()->json($fichas);
+    }
+
+    public function aceptarRmi($idActivation, Request $request)
+    {
+        DB::beginTransaction();
+        try {
+            $validated = $request->validate([
+                'periodo' => 'nullable|date_format:Y-m',
+            ]);
+
+            $activation = ActivationCompanyUser::with('user.persona.contracts')->findOrFail($idActivation);
+            $contrato = $activation->user->persona->contracts->first();
+
+            if (!$contrato) {
+                DB::rollBack();
+                return response()->json(['message' => 'El instructor no tiene un contrato asociado'], 404);
+            }
+
+            $periodo = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
+            $inicio = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->startOfMonth();
+            $fin = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->endOfMonth();
+
+            // Obtener horarios del contrato en el periodo
+            $horarios = \App\Models\HorarioMateria::where('idContrato', $contrato->id)
+                ->where('estado', 'ASIGNADO')
+                ->where(function ($q) use ($inicio, $fin) {
+                    $q->whereBetween('fechaInicial', [$inicio, $fin])
+                        ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                        ->orWhere(function ($q2) use ($inicio, $fin) {
+                            $q2->where('fechaInicial', '<=', $inicio)
+                                ->where('fechaFinal', '>=', $fin);
+                        });
+                })
+                ->pluck('id');
+
+            if ($horarios->isEmpty()) {
+                DB::rollBack();
+                return response()->json(['message' => 'No se encontraron horarios para el periodo especificado'], 404);
+            }
+
+            // Asegurar que existan los DetalleRmi y RMI para el periodo
+            $rmi = Rmi::firstOrCreate(
+                ['periodo' => $periodo],
+                ['estado' => 'PENDIENTE', 'observacion' => null]
+            );
+
+            // Crear o actualizar DetalleRmi relacionados
+            $detallesActualizados = 0;
+            foreach ($horarios as $idHorario) {
+                $detalle = DetalleRmi::firstOrCreate(
+                    [
+                        'idRmi' => $rmi->id,
+                        'idHorarioMateria' => $idHorario,
+                    ],
+                    [
+                        'estado' => 'PENDIENTE',
+                        'observacion' => null,
+                    ]
+                );
+
+                $detalle->update([
+                    'estado' => 'ACEPTADO',
+                    'observacion' => null
+                ]);
+                $detallesActualizados++;
+            }
+
+            // Actualizar estado del RMI si todos los detalles están aceptados
+            $todosAceptados = DetalleRmi::where('idRmi', $rmi->id)
+                ->where('estado', '!=', 'ACEPTADO')
+                ->doesntExist();
+
+            if ($todosAceptados) {
+                $rmi->update(['estado' => 'ACEPTADO']);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'RMI aceptado con éxito',
+                'estado' => 'ACEPTADO',
+                'detalles_actualizados' => $detallesActualizados
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Error al aceptar RMI: ' . $e->getMessage(), [
+                'idActivation' => $idActivation,
+                'periodo' => $request->input('periodo'),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'Error al aceptar el RMI', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function rechazarRmi($idActivation, Request $request)
+    {
+        DB::beginTransaction();
+        try {
+            $validated = $request->validate([
+                'periodo' => 'nullable|date_format:Y-m',
+                'motivo' => 'required|string|max:500',
+            ]);
+
+            $activation = ActivationCompanyUser::with('user.persona.contracts')->findOrFail($idActivation);
+            $contrato = $activation->user->persona->contracts->first();
+
+            if (!$contrato) {
+                DB::rollBack();
+                return response()->json(['message' => 'El instructor no tiene un contrato asociado'], 404);
+            }
+
+            $periodo = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
+            $inicio = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->startOfMonth();
+            $fin = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->endOfMonth();
+
+            // Obtener horarios del contrato en el periodo
+            $horarios = \App\Models\HorarioMateria::where('idContrato', $contrato->id)
+                ->where('estado', 'ASIGNADO')
+                ->where(function ($q) use ($inicio, $fin) {
+                    $q->whereBetween('fechaInicial', [$inicio, $fin])
+                        ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                        ->orWhere(function ($q2) use ($inicio, $fin) {
+                            $q2->where('fechaInicial', '<=', $inicio)
+                                ->where('fechaFinal', '>=', $fin);
+                        });
+                })
+                ->pluck('id');
+
+            if ($horarios->isEmpty()) {
+                DB::rollBack();
+                return response()->json(['message' => 'No se encontraron horarios para el periodo especificado'], 404);
+            }
+
+            // Asegurar que existan los DetalleRmi y RMI para el periodo
+            $rmi = Rmi::firstOrCreate(
+                ['periodo' => $periodo],
+                ['estado' => 'PENDIENTE', 'observacion' => null]
+            );
+
+            // Crear o actualizar DetalleRmi relacionados
+            $detallesActualizados = 0;
+            foreach ($horarios as $idHorario) {
+                $detalle = DetalleRmi::firstOrCreate(
+                    [
+                        'idRmi' => $rmi->id,
+                        'idHorarioMateria' => $idHorario,
+                    ],
+                    [
+                        'estado' => 'PENDIENTE',
+                        'observacion' => null,
+                    ]
+                );
+
+                $detalle->update([
+                    'estado' => 'RECHAZADO',
+                    'observacion' => $validated['motivo']
+                ]);
+                $detallesActualizados++;
+            }
+
+            // Actualizar estado del RMI
+            $rmi->update([
+                'estado' => 'RECHAZADO',
+                'observacion' => $validated['motivo']
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'RMI rechazado con éxito',
+                'estado' => 'RECHAZADO',
+                'detalles_actualizados' => $detallesActualizados
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Error al rechazar RMI: ' . $e->getMessage(), [
+                'idActivation' => $idActivation,
+                'periodo' => $request->input('periodo'),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'Error al rechazar el RMI', 'error' => $e->getMessage()], 500);
+        }
     }
 }

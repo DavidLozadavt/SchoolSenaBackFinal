@@ -1406,4 +1406,6 @@ Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance'
 Route::middleware('auth:api')->group(function () {
     Route::get('instructores', [InstructoresController::class, 'getInstructors']);
     Route::get('instructores/fichas', [InstructoresController::class, 'getFichasByContrato']);
+    Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
+    Route::put('instructores/{idActivation}/rechazar-rmi', [InstructoresController::class, 'rechazarRmi']);
 });
