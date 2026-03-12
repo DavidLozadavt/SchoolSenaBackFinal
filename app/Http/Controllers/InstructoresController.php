@@ -114,7 +114,7 @@ class InstructoresController extends Controller
                 if ($contrato) {
                     $rmi = Rmi::where('periodo', $periodoRmi)->first();
                     if ($rmi) {
-                        // Verificar si todos los detalles están en el mismo estado
+                        // Traer solo detalles del contrato actual para ese periodo
                         $detallesRmi = DetalleRmi::where('idRmi', $rmi->id)
                             ->whereHas('horarioMateria', function ($q) use ($contrato) {
                                 $q->where('idContrato', $contrato->id);
@@ -122,27 +122,24 @@ class InstructoresController extends Controller
                             ->get();
 
                         if ($detallesRmi->isNotEmpty()) {
-                            $estados = $detallesRmi->pluck('estado')->unique();
-                            // Si todos tienen el mismo estado y no es PENDIENTE, usar ese estado
-                            if ($estados->count() === 1 && $estados->first() !== 'PENDIENTE') {
-                                $estadoRmi = $estados->first();
-                                if ($estadoRmi === 'RECHAZADO') {
-                                    $motivoRechazo = $rmi->observacion ?? $detallesRmi->first()->observacion;
-                                }
+                            // Regla de negocio:
+                            // - Si al menos un detalle está RECHAZADO → estado RECHAZADO
+                            // - Si todos los detalles están ACEPTADO   → estado ACEPTADO
+                            // - En cualquier otro caso                  → PENDIENTE
+
+                            if ($detallesRmi->contains('estado', 'RECHAZADO')) {
+                                $estadoRmi = 'RECHAZADO';
+                                $detalleRechazado = $detallesRmi->firstWhere('estado', 'RECHAZADO');
+                                $motivoRechazo = $detalleRechazado?->observacion;
+                            } elseif ($detallesRmi->every(function ($d) {
+                                return $d->estado === 'ACEPTADO';
+                            })) {
+                                $estadoRmi = 'ACEPTADO';
                             } else {
-                                // Si hay mezcla o todos son PENDIENTE, usar el estado del RMI principal
-                                $estadoRmi = $rmi->estado;
-                                if ($estadoRmi === 'RECHAZADO') {
-                                    $motivoRechazo = $rmi->observacion;
-                                }
-                            }
-                        } else {
-                            // Si no hay detalles, usar el estado del RMI principal
-                            $estadoRmi = $rmi->estado;
-                            if ($estadoRmi === 'RECHAZADO') {
-                                $motivoRechazo = $rmi->observacion;
+                                $estadoRmi = 'PENDIENTE';
                             }
                         }
+                        // Si no hay detalles para ese contrato/periodo, se mantiene PENDIENTE
                     }
                 }
 
@@ -427,12 +424,6 @@ class InstructoresController extends Controller
                 ]);
                 $detallesActualizados++;
             }
-
-            // Actualizar estado del RMI
-            $rmi->update([
-                'estado' => 'RECHAZADO',
-                'observacion' => $validated['motivo']
-            ]);
 
             DB::commit();
 
