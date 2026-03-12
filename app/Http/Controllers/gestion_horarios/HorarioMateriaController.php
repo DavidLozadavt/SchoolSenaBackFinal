@@ -483,6 +483,10 @@ class HorarioMateriaController extends Controller
                         'idContrato' => $idContrato,
                         'estado' => EstadoHorarioMateria::ASIGNADO
                     ]);
+
+                    // Generar RMI ahora que el horario ya tiene idContrato y fechas
+                    $horarioMateria->refresh(); // ← asegura que idContrato esté actualizado
+                    $this->generarRmis($horarioMateria); // ← aquí
                 }
             }
 
