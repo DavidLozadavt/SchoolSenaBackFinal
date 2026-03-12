@@ -15,12 +15,18 @@ class InstructoresController extends Controller
         $validated = $request->validate([
             'idCentroFormacion' => 'required|integer|exists:centroFormacion,id',
             'periodo'           => 'nullable|date_format:Y-m',
+            'estado'            => 'nullable|string|in:PENDIENTE,ACEPTADO,RECHAZADO',
         ]);
 
+        // Determinar periodo
+        $periodoReq = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
+        $inicio = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->startOfMonth();
+        $fin    = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->endOfMonth();
+
         $instructors = ActivationCompanyUser::with([
-            'user.persona.contracts' => function ($q) use ($validated) {
+            'user.persona.contracts' => function ($q) use ($inicio, $fin) {
                 $q->latest()->with([
-                    'horarioMateria' => function ($h) use ($validated) {
+                    'horarioMateria' => function ($h) use ($inicio, $fin) {
                         $h->select(
                             'id',
                             'idContrato',
@@ -31,15 +37,6 @@ class InstructoresController extends Controller
                             'fechaInicial',
                             'fechaFinal'
                         )->where('estado', 'ASIGNADO');
-
-                        // Con o sin periodo, siempre filtrar por rango de fechas
-                        if (!empty($validated['periodo'])) {
-                            $inicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-                            $fin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-                        } else {
-                            $inicio = \Carbon\Carbon::now()->startOfMonth(); // ← mes actual como fallback
-                            $fin    = \Carbon\Carbon::now()->endOfMonth();
-                        }
 
                         $h->where(function ($q) use ($inicio, $fin) {
                             $q->whereBetween('fechaInicial', [$inicio, $fin])
@@ -58,28 +55,31 @@ class InstructoresController extends Controller
             ->whereHas('user', function ($q) use ($validated) {
                 $q->where('idCentroFormacion', $validated['idCentroFormacion']);
             })
+            // Solo instructores con horarios en el periodo
+            ->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
+                $h->where('estado', 'ASIGNADO')
+                    ->where(function ($q) use ($inicio, $fin) {
+                        $q->whereBetween('fechaInicial', [$inicio, $fin])
+                            ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                            ->orWhere(function ($q2) use ($inicio, $fin) {
+                                $q2->where('fechaInicial', '<=', $inicio)
+                                    ->where('fechaFinal', '>=', $fin);
+                            });
+                    });
+            })
             ->get()
-            ->map(function ($acu) use ($validated) {
+            ->map(function ($acu) use ($periodoReq, $inicio, $fin) {
 
                 $user     = $acu->user;
                 $persona  = $user->persona;
                 $contrato = $persona->contracts->first();
 
-                $horarios = $contrato?->horarioMateria->map(function ($h) use ($validated) {
+                $horarios = $contrato?->horarioMateria->map(function ($h) use ($inicio, $fin) {
                     $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
 
-                    // Determinar el rango a calcular
-                    if (!empty($validated['periodo'])) {
-                        $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-                        $rangoFin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-                        $desde       = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
-                        $hasta       = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
-                    } else {
-                        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max(\Carbon\Carbon::now()->startOfMonth());
-                        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min(\Carbon\Carbon::now()->endOfMonth());
-                    }
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
 
-                    // Contar sesiones en el rango
                     $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
                     $cantidadSesiones = 0;
                     $cursor           = $desde->copy();
@@ -107,14 +107,12 @@ class InstructoresController extends Controller
                 });
 
                 // Obtener estado del RMI para el periodo
-                $periodoRmi = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
                 $estadoRmi = 'PENDIENTE';
                 $motivoRechazo = null;
 
                 if ($contrato) {
-                    $rmi = Rmi::where('periodo', $periodoRmi)->first();
+                    $rmi = Rmi::where('periodo', $periodoReq)->first();
                     if ($rmi) {
-                        // Traer solo detalles del contrato actual para ese periodo
                         $detallesRmi = DetalleRmi::where('idRmi', $rmi->id)
                             ->whereHas('horarioMateria', function ($q) use ($contrato) {
                                 $q->where('idContrato', $contrato->id);
@@ -122,11 +120,6 @@ class InstructoresController extends Controller
                             ->get();
 
                         if ($detallesRmi->isNotEmpty()) {
-                            // Regla de negocio:
-                            // - Si al menos un detalle está RECHAZADO → estado RECHAZADO
-                            // - Si todos los detalles están ACEPTADO   → estado ACEPTADO
-                            // - En cualquier otro caso                  → PENDIENTE
-
                             if ($detallesRmi->contains('estado', 'RECHAZADO')) {
                                 $estadoRmi = 'RECHAZADO';
                                 $detalleRechazado = $detallesRmi->firstWhere('estado', 'RECHAZADO');
@@ -139,7 +132,6 @@ class InstructoresController extends Controller
                                 $estadoRmi = 'PENDIENTE';
                             }
                         }
-                        // Si no hay detalles para ese contrato/periodo, se mantiene PENDIENTE
                     }
                 }
 
@@ -169,6 +161,11 @@ class InstructoresController extends Controller
                     ],
                 ];
             });
+
+        // Filtrar por estado si se proporciona
+        if (!empty($validated['estado'])) {
+            $instructors = $instructors->where('estado', $validated['estado'])->values();
+        }
 
         return response()->json($instructors);
     }
