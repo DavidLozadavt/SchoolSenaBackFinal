@@ -44,4 +44,36 @@ class HorarioMateria extends Model
     {
         return $this->hasMany(SesionMateria::class, 'idHorarioMateria', 'id');
     }
+    // En HorarioMateria.php - ejecutar al crear/actualizar un horario
+    public static function generarRmis(HorarioMateria $horario): void
+    {
+        $inicio = \Carbon\Carbon::parse($horario->fechaInicial)->startOfMonth();
+        $fin    = \Carbon\Carbon::parse($horario->fechaFinal)->startOfMonth();
+
+        $cursor = $inicio->copy();
+
+        while ($cursor->lte($fin)) {
+            $periodo = $cursor->format('Y-m');
+
+            // Busca o crea el RMI para ese periodo
+            $rmi = Rmi::firstOrCreate(
+                ['periodo' => $periodo],
+                ['estado' => 'PENDIENTE', 'observacion' => null]
+            );
+
+            // Crea el detalle si no existe
+            DetalleRmi::firstOrCreate(
+                [
+                    'idRmi'            => $rmi->id,
+                    'idHorarioMateria' => $horario->id,
+                ],
+                [
+                    'estado'      => 'PENDIENTE',
+                    'observacion' => null,
+                ]
+            );
+
+            $cursor->addMonth();
+        }
+    }
 }

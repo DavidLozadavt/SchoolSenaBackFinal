@@ -29,19 +29,23 @@ class InstructoresController extends Controller
                             'fechaFinal'
                         )->where('estado', 'ASIGNADO');
 
+                        // Con o sin periodo, siempre filtrar por rango de fechas
                         if (!empty($validated['periodo'])) {
                             $inicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
                             $fin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-
-                            $h->where(function ($q) use ($inicio, $fin) {
-                                $q->whereBetween('fechaInicial', [$inicio, $fin])
-                                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
-                                    ->orWhere(function ($q2) use ($inicio, $fin) {
-                                        $q2->where('fechaInicial', '<=', $inicio)
-                                            ->where('fechaFinal', '>=', $fin);
-                                    });
-                            });
+                        } else {
+                            $inicio = \Carbon\Carbon::now()->startOfMonth(); // ← mes actual como fallback
+                            $fin    = \Carbon\Carbon::now()->endOfMonth();
                         }
+
+                        $h->where(function ($q) use ($inicio, $fin) {
+                            $q->whereBetween('fechaInicial', [$inicio, $fin])
+                                ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                                ->orWhere(function ($q2) use ($inicio, $fin) {
+                                    $q2->where('fechaInicial', '<=', $inicio)
+                                        ->where('fechaFinal', '>=', $fin);
+                                });
+                        });
                     }
                 ]);
             }
@@ -52,27 +56,50 @@ class InstructoresController extends Controller
                 $q->where('idCentroFormacion', $validated['idCentroFormacion']);
             })
             ->get()
-            ->map(function ($acu) {
+            ->map(function ($acu) use ($validated) {
 
                 $user     = $acu->user;
                 $persona  = $user->persona;
                 $contrato = $persona->contracts->first();
 
-                $horarios = $contrato?->horarioMateria->map(function ($h) {
-                    $horaInicial   = strtotime($h->horaInicial);
-                    $horaFinal     = strtotime($h->horaFinal);
-                    $duracionHoras = ($horaFinal - $horaInicial) / 3600;
+                $horarios = $contrato?->horarioMateria->map(function ($h) use ($validated) {
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                    // Determinar el rango a calcular
+                    if (!empty($validated['periodo'])) {
+                        $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
+                        $rangoFin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
+                        $desde       = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
+                        $hasta       = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
+                    } else {
+                        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max(\Carbon\Carbon::now()->startOfMonth());
+                        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min(\Carbon\Carbon::now()->endOfMonth());
+                    }
+
+                    // Contar sesiones en el rango
+                    $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
+                    $cantidadSesiones = 0;
+                    $cursor           = $desde->copy();
+
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
+                            $cantidadSesiones++;
+                        }
+                        $cursor->addDay();
+                    }
 
                     return [
-                        'id'            => $h->id,
-                        'idContrato'    => $h->idContrato,
-                        'horaInicial'   => $h->horaInicial,
-                        'horaFinal'     => $h->horaFinal,
-                        'estado'        => $h->estado,
-                        'idDia'         => $h->idDia,
-                        'fechaInicial'  => $h->fechaInicial,
-                        'fechaFinal'    => $h->fechaFinal,
-                        'duracionHoras' => round($duracionHoras, 2),
+                        'id'               => $h->id,
+                        'idContrato'       => $h->idContrato,
+                        'horaInicial'      => $h->horaInicial,
+                        'horaFinal'        => $h->horaFinal,
+                        'estado'           => $h->estado,
+                        'idDia'            => $h->idDia,
+                        'fechaInicial'     => $h->fechaInicial,
+                        'fechaFinal'       => $h->fechaFinal,
+                        'duracionSesion'   => $duracionSesion,
+                        'cantidadSesiones' => $cantidadSesiones,
+                        'duracionHoras'    => round($duracionSesion * $cantidadSesiones, 2),
                     ];
                 });
 
@@ -107,7 +134,7 @@ class InstructoresController extends Controller
     {
         $validated = $request->validate([
             'idContrato' => 'required|integer|exists:contrato,id',
-            'periodo'    => 'nullable|date_format:Y-m', // ej: 2026-03
+            'periodo'    => 'nullable|date_format:Y-m',
         ]);
 
         $query = \App\Models\HorarioMateria::with([
@@ -117,25 +144,26 @@ class InstructoresController extends Controller
             ->where('idContrato', $validated['idContrato'])
             ->where('estado', 'ASIGNADO');
 
-        // Filtro por periodo (mes/año)
         if (!empty($validated['periodo'])) {
             $inicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
             $fin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-
-            $query->where(function ($q) use ($inicio, $fin) {
-                $q->whereBetween('fechaInicial', [$inicio, $fin])
-                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
-                    ->orWhere(function ($q2) use ($inicio, $fin) {
-                        // Horarios que abarcan todo el mes
-                        $q2->where('fechaInicial', '<=', $inicio)
-                            ->where('fechaFinal', '>=', $fin);
-                    });
-            });
+        } else {
+            $inicio = \Carbon\Carbon::now()->startOfMonth();
+            $fin    = \Carbon\Carbon::now()->endOfMonth();
         }
+
+        $query->where(function ($q) use ($inicio, $fin) {
+            $q->whereBetween('fechaInicial', [$inicio, $fin])
+                ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                ->orWhere(function ($q2) use ($inicio, $fin) {
+                    $q2->where('fechaInicial', '<=', $inicio)
+                        ->where('fechaFinal', '>=', $fin);
+                });
+        });
 
         $horarios = $query->get();
 
-        $fichas = $horarios->groupBy('idFicha')->map(function ($horariosGrupo) {
+        $fichas = $horarios->groupBy('idFicha')->map(function ($horariosGrupo) use ($validated) {
             $ficha    = $horariosGrupo->first()->ficha;
             $programa = $ficha?->asignacion?->programa;
 
@@ -144,9 +172,34 @@ class InstructoresController extends Controller
                 'codigoFicha'       => $ficha?->codigo,
                 'programaFormacion' => $programa?->nombrePrograma,
                 'codigoPrograma'    => $programa?->codigoPrograma,
-                'resultados'        => $horariosGrupo->map(function ($h) {
-                    $rap         = $h->gradoMateria?->materia;
-                    $competencia = $rap?->padre;
+                'resultados'        => $horariosGrupo->map(function ($h) use ($validated) {
+                    $rap            = $h->gradoMateria?->materia;
+                    $competencia    = $rap?->padre;
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                    // Determinar el rango a calcular
+                    if (!empty($validated['periodo'])) {
+                        $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
+                        $rangoFin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
+                        $desde       = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
+                        $hasta       = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
+                    } else {
+                        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max(\Carbon\Carbon::now()->startOfMonth());
+                        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min(\Carbon\Carbon::now()->endOfMonth());
+                    }
+
+                    // Contar cuántas veces cae el día de la semana en el rango
+                    // idDia: 1=Lunes...6=Sabado, 7=Domingo → Carbon: 0=Domingo, 1=Lunes...6=Sabado
+                    $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
+                    $cantidadSesiones = 0;
+                    $cursor           = $desde->copy();
+
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
+                            $cantidadSesiones++;
+                        }
+                        $cursor->addDay();
+                    }
 
                     return [
                         'idHorario'            => $h->id,
@@ -157,7 +210,9 @@ class InstructoresController extends Controller
                         'horaFinal'            => $h->horaFinal,
                         'fechaInicial'         => $h->fechaInicial,
                         'fechaFinal'           => $h->fechaFinal,
-                        'duracionHoras'        => round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2),
+                        'duracionSesion'       => $duracionSesion,
+                        'cantidadSesiones'     => $cantidadSesiones,
+                        'duracionHoras'        => round($duracionSesion * $cantidadSesiones, 2),
                         'idDia'                => $h->idDia,
                     ];
                 })->values(),
