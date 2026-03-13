@@ -341,20 +341,44 @@ class InstructoresController extends Controller
             DB::commit();
 
             $email = $validated['email'];
-
             $nombre = $activation->user->persona->nombre1;
+
             try {
 
-                $texto = "Estimado(a) {$nombre},
+                $html = "
+                <div style='font-family: Arial, sans-serif; line-height:1.6; color:#333'>
+                    <h2 style='color:#2c3e50;'>Notificación de RMI</h2>
 
-                Le informamos que su RMI correspondiente al periodo {$periodo} ha sido aprobado.
+                    <p>Estimado(a) <strong>{$nombre}</strong>,</p>
 
-                Atentamente,
-                Equipo administrativo.";
+                    <p>
+                        Nos complace informarle que su 
+                        <strong>Registro Mensual de Instructor (RMI)</strong>
+                        correspondiente al periodo <strong>{$periodo}</strong>
+                        ha sido <span style='color:green; font-weight:bold;'>APROBADO</span>.
+                    </p>
 
-                Mail::raw($texto, function ($message) use ($email) {
+                    <div style='background:#f4f6f7;padding:12px;border-left:4px solid #2ecc71;margin:15px 0;'>
+                        No se requieren acciones adicionales por su parte.
+                    </div>
+
+                    <p>
+                        Si tiene alguna inquietud, puede comunicarse con el equipo administrativo.
+                    </p>
+
+                    <br>
+
+                    <p>
+                        Atentamente,<br>
+                        <strong>Equipo Administrativo</strong><br>
+                        Sistema de Gestión Académica
+                    </p>
+                </div>
+                ";
+
+                Mail::html($html, function ($message) use ($email) {
                     $message->to($email)
-                        ->subject('Aprobación de RMI');
+                        ->subject('Notificación de aprobación de RMI');
                 });
             } catch (\Exception $e) {
                 \Log::error('Error enviando correo RMI: ' . $e->getMessage());
@@ -451,21 +475,36 @@ class InstructoresController extends Controller
             $email = $validated['email'];
 
             $nombre = $activation->user->persona->nombre1;
+
             try {
 
-                $texto = "Estimado(a) {$nombre},
+                $html = "
+                <p>Estimado(a) <strong>{$nombre}</strong>,</p>
 
-                Le informamos que su RMI correspondiente al periodo {$periodo} ha sido rechazado.
+                <p>
+                    Le informamos que su <strong>RMI</strong> correspondiente al periodo 
+                    <strong>{$periodo}</strong> ha sido <span style='color:red;'><strong>rechazado</strong></span>.
+                </p>
 
-                Motivo del rechazo:
-                {$validated['motivo']}
+                <p><strong>Motivo del rechazo:</strong></p>
 
-                Por favor revise las observaciones y realice las correcciones necesarias.
+                <blockquote style='background:#f8f9fa;padding:10px;border-left:4px solid #dc3545;'>
+                    {$validated['motivo']}
+                </blockquote>
 
-                Atentamente,
-                Equipo administrativo.";
+                <p>
+                    Por favor revise las observaciones y realice las correcciones necesarias.
+                </p>
 
-                Mail::raw($texto, function ($message) use ($email) {
+                <br>
+
+                <p>
+                    Atentamente,<br>
+                    <strong>Equipo administrativo</strong>
+                </p>
+                ";
+
+                Mail::html($html, function ($message) use ($email) {
                     $message->to($email)
                         ->subject('Rechazo de RMI');
                 });
