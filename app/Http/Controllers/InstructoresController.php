@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
 use App\Models\DetalleRmi;
 use App\Models\Rmi;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 
 class InstructoresController extends Controller
 {
@@ -267,6 +269,7 @@ class InstructoresController extends Controller
         try {
             $validated = $request->validate([
                 'periodo' => 'nullable|date_format:Y-m',
+                'email' => 'required|email'
             ]);
 
             $activation = ActivationCompanyUser::with('user.persona.contracts')->findOrFail($idActivation);
@@ -337,6 +340,26 @@ class InstructoresController extends Controller
 
             DB::commit();
 
+            $email = $validated['email'];
+
+            $nombre = $activation->user->persona->nombre1;
+            try {
+
+                $texto = "Estimado(a) {$nombre},
+
+                Le informamos que su RMI correspondiente al periodo {$periodo} ha sido aprobado.
+
+                Atentamente,
+                Equipo administrativo.";
+
+                Mail::raw($texto, function ($message) use ($email) {
+                    $message->to($email)
+                        ->subject('Aprobación de RMI');
+                });
+            } catch (\Exception $e) {
+                \Log::error('Error enviando correo RMI: ' . $e->getMessage());
+            }
+
             return response()->json([
                 'message' => 'RMI aceptado con éxito',
                 'estado' => 'ACEPTADO',
@@ -363,6 +386,7 @@ class InstructoresController extends Controller
             $validated = $request->validate([
                 'periodo' => 'nullable|date_format:Y-m',
                 'motivo' => 'required|string|max:500',
+                'email' => 'required|email'
             ]);
 
             $activation = ActivationCompanyUser::with('user.persona.contracts')->findOrFail($idActivation);
@@ -423,6 +447,31 @@ class InstructoresController extends Controller
             }
 
             DB::commit();
+
+            $email = $validated['email'];
+
+            $nombre = $activation->user->persona->nombre1;
+            try {
+
+                $texto = "Estimado(a) {$nombre},
+
+                Le informamos que su RMI correspondiente al periodo {$periodo} ha sido rechazado.
+
+                Motivo del rechazo:
+                {$validated['motivo']}
+
+                Por favor revise las observaciones y realice las correcciones necesarias.
+
+                Atentamente,
+                Equipo administrativo.";
+
+                Mail::raw($texto, function ($message) use ($email) {
+                    $message->to($email)
+                        ->subject('Rechazo de RMI');
+                });
+            } catch (\Exception $e) {
+                \Log::error('Error enviando correo RMI: ' . $e->getMessage());
+            }
 
             return response()->json([
                 'message' => 'RMI rechazado con éxito',
