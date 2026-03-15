@@ -138,6 +138,7 @@ use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
 use App\Http\Controllers\CompromisosController;
+use App\Http\Controllers\gestion_notificacion\NotificacionesSistemaController;
 use App\Http\Controllers\gestion_pensum\InasistenciaController;
 use App\Http\Controllers\InstructoresController;
 use App\Http\Controllers\SancionesController;
@@ -1408,4 +1409,12 @@ Route::middleware('auth:api')->group(function () {
     Route::get('instructores/fichas', [InstructoresController::class, 'getFichasByContrato']);
     Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
     Route::put('instructores/{idActivation}/rechazar-rmi', [InstructoresController::class, 'rechazarRmi']);
+});
+
+
+//Prueba de las notificaciones para el instructor:
+
+Route::middleware('auth:api')->group(function () {
+    Route::get('notificacionSistema', [NotificacionesSistemaController::class, 'indexByUser']);
+    Route::patch('notificacionSistema/{id}', [NotificacionesSistemaController::class, 'update']); // ✅
 });
