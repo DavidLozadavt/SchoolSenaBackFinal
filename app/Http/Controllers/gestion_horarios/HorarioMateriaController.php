@@ -26,10 +26,13 @@ use Illuminate\Database\QueryException;
 use App\Mail\EmailDocenteHorarioMateria;
 use App\Models\AsignacionPeriodoPrograma;
 use App\Http\Controllers\MateriaController;
+use App\Mail\MailService;
 use App\Models\Ficha;
 use App\Models\Dia;
 use App\Models\Asistencia;
+use App\Models\DetalleRmi;
 use App\Models\MatriculaAcademica;
+use App\Models\NotificacionSistema;
 
 class HorarioMateriaController extends Controller
 {
@@ -387,6 +390,8 @@ class HorarioMateriaController extends Controller
             $horarioMateria = HorarioMateria::findOrFail($id);
 
             $sesionMaterias = $horarioMateria->sesionMaterias()->withCount('asistencia')->get();
+            $detallesRmi = DetalleRmi::where('idHorarioMateria', $horarioMateria->id)->get();
+            $horarios = HorarioMateria::where('idGradoMateria', $horarioMateria->idGradoMateria)->get();
 
             if (
                 $sesionMaterias->isEmpty() ||
@@ -395,8 +400,23 @@ class HorarioMateriaController extends Controller
                     $sesion->asistencia_count == 0
                 )
             ) {
-                $horarioMateria->sesionMaterias()->delete();
-                $horarioMateria->delete();
+                foreach ($detallesRmi as $detalleRmi) {
+                    $detalleRmi->delete();
+                }
+
+                if ($horarios->count() == 1) {
+                    $horarioMateria->sesionMaterias()->delete();
+                    $horarioMateria->idDia = null;
+                    $horarioMateria->idContrato = null;
+                    $horarioMateria->idInfraestructura = null;
+                    $horarioMateria->fechaFinal = null;
+                    $horarioMateria->horaInicial = null;
+                    $horarioMateria->horaFinal = null;
+                    $horarioMateria->save();
+                } else {
+                    $horarioMateria->sesionMaterias()->delete();
+                    $horarioMateria->delete();
+                }
             } else {
                 return response()->json([
                     'message' => 'No es posible eliminar este horario porque tiene sesiones con asistencias registradas.'
@@ -483,7 +503,7 @@ class HorarioMateriaController extends Controller
                         'idContrato' => $idContrato,
                         'estado' => EstadoHorarioMateria::ASIGNADO
                     ]);
- 
+
                     // Generar RMI ahora que el horario ya tiene idContrato y fechas
                     $horarioMateria->refresh(); // ← asegura que idContrato esté actualizado
                     HorarioMateria::generarRmis($horarioMateria); // ← aquí
@@ -525,12 +545,12 @@ class HorarioMateriaController extends Controller
             foreach ($horarios as $h) {
                 $horarioMateria = HorarioMateria::findOrFail($h['id']);
 
-                if($horarioMateria->estado == EstadoHorarioMateria::ASIGNADO){
+                if ($horarioMateria->estado == EstadoHorarioMateria::ASIGNADO) {
                     $horarioMateria->update([
                         'idContrato' => null,
                         'estado' => EstadoHorarioMateria::PENDIENTE
                     ]);
-                }else{
+                } else {
                     $horarioMateria->update([
                         'idContrato' => null
                     ]);
@@ -1552,7 +1572,58 @@ class HorarioMateriaController extends Controller
                 $gradoMateria->estado = EstadoHorarioMateria::FINALIZADO;
                 $gradoMateria->save();
             }
+
+            // INFORMACION PARA ENVIAR EN EL EMAIL Y LA NOTIFICACION
+            
+            // RAP, Competencia y Trimestre
+            $gradoMateria = GradoMateria::with(['materia.padre', 'gradoPrograma.grado'])
+                ->find($idGradoMateria);
+            
+            $nombreRap = $gradoMateria->materia->nombreMateria ?? 'Materia/RAP';
+            $nombreCompetencia = $gradoMateria->materia->padre->nombreMateria ?? 'Competencia';
+            $numeroTrimestre = $gradoMateria->gradoPrograma->grado->numeroGrado ?? 'N/A';
+
+            // Ficha e Instructor
+            $horarioConDocente = HorarioMateria::with(['contrato.persona.usuario', 'ficha'])
+                ->where('idGradoMateria', $idGradoMateria)
+                ->whereNotNull('idContrato')
+                ->first();
+            $ficha = $horarioConDocente->ficha;
+
+            if ($horarioConDocente && $horarioConDocente->contrato && $horarioConDocente->contrato->persona) {
+                $instructor = $horarioConDocente->contrato->persona;
+                $ficha = $ficha->codigo;
+                $correo = $instructor->email;
+                $nombreDocente = $instructor->nombre1 . ' ' . $instructor->apellido1;
+                $asunto = "Ha finalizado el RAP: " . $nombreRap;
+                $mensaje = "Hola $nombreDocente,\n\n"
+                         . "Te informamos que el RAP $nombreRap \n perteneciente a la competencia $nombreCompetencia "
+                         . "ha finalizado. \n\n"
+                         . "Ficha: $ficha \n"
+                         . "Trimestre: $numeroTrimestre \n"
+                         . "Por favor evalúa en Sofía Plus y carga los juicios evaluativos.\n\n"
+                         . "Gracias por tu labor.";
+
+                \App\Jobs\SendBasicEmail::dispatch($correo, $asunto, $mensaje);
+
+                if ($instructor && $instructor->usuario) {
+                    NotificacionSistema::create([
+                        'fecha' => now()->toDateString(),
+                        'hora' => now()->toTimeString(),
+                        'asunto' => 'RAP FINALIZADO',
+                        'mensaje' => "El RAP $nombreRap de la competencia $nombreCompetencia ha sido finalizado para la ficha $ficha.",
+                        'estado_id' => 1, // Pendiente/No leído
+                        'idUsuarioReceptor' => $instructor->usuario->id,
+                        'idUsuarioRemitente' => KeyUtil::user()->id,
+                        'idTipoNotificacion' => 1,
+                        'idEmpresa' => KeyUtil::idCompany(),
+                        'route' => '/raps'
+                    ]);
+                }
+            }
+
             DB::commit();
+
             return response()->json([
                 'message' => 'Rap finalizado correctamente'
             ], 200);

@@ -44,6 +44,11 @@ class HorarioMateria extends Model
     {
         return $this->hasMany(SesionMateria::class, 'idHorarioMateria', 'id');
     }
+
+    public function detallesRmi(): HasMany
+    {
+        return $this->hasMany(DetalleRmi::class, 'idHorarioMateria', 'id');
+    }
     // En HorarioMateria.php - ejecutar al crear/actualizar un horario
     public static function generarRmis(HorarioMateria $horario): void
     {
