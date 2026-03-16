@@ -29,6 +29,7 @@ use App\Http\Controllers\MateriaController;
 use App\Models\Ficha;
 use App\Models\Dia;
 use App\Models\Asistencia;
+use App\Models\DetalleRmi;
 use App\Models\MatriculaAcademica;
 
 class HorarioMateriaController extends Controller
@@ -387,6 +388,8 @@ class HorarioMateriaController extends Controller
             $horarioMateria = HorarioMateria::findOrFail($id);
 
             $sesionMaterias = $horarioMateria->sesionMaterias()->withCount('asistencia')->get();
+            $detallesRmi = DetalleRmi::where('idHorarioMateria', $horarioMateria->id)->get();
+            $horarios = HorarioMateria::where('idGradoMateria', $horarioMateria->idGradoMateria)->get();
 
             if (
                 $sesionMaterias->isEmpty() ||
@@ -395,8 +398,24 @@ class HorarioMateriaController extends Controller
                     $sesion->asistencia_count == 0
                 )
             ) {
-                $horarioMateria->sesionMaterias()->delete();
-                $horarioMateria->delete();
+                foreach ($detallesRmi as $detalleRmi) {
+                    $detalleRmi->delete();
+                }
+
+                if($horarios->count() == 1){
+                    $horarioMateria->sesionMaterias()->delete();
+                    $horarioMateria->idDia = null;
+                    $horarioMateria->idContrato = null;
+                    $horarioMateria->idInfraestructura = null;
+                    $horarioMateria->fechaFinal = null;
+                    $horarioMateria->horaInicial = null;
+                    $horarioMateria->horaFinal = null;
+                    $horarioMateria->save();
+                }else{   
+                    $horarioMateria->sesionMaterias()->delete();
+                    $horarioMateria->delete();
+                }
+                
             } else {
                 return response()->json([
                     'message' => 'No es posible eliminar este horario porque tiene sesiones con asistencias registradas.'
