@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
 use App\Models\DetalleRmi;
+use App\Models\NotificacionSistema;
 use App\Models\Rmi;
+use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -337,6 +339,9 @@ class InstructoresController extends Controller
             if ($todosAceptados) {
                 $rmi->update(['estado' => 'ACEPTADO']);
             }
+            $user = KeyUtil::user(); //Con esto atrapo el id del usuario que rechaza el rmi:
+
+            $this->enviarNotificacionRmi($user->id, $activation->user->id, $periodo, null, 'ACEPTADO');
 
             DB::commit();
 
@@ -469,6 +474,11 @@ class InstructoresController extends Controller
                 ]);
                 $detallesActualizados++;
             }
+            // Aqui empieza la prueba para el envio de la notificación:
+
+            $user = KeyUtil::user(); //Con esto atrapo el id del usuario que rechaza el rmi:
+
+            $this->enviarNotificacionRmi($user->id, $activation->user->id, $periodo, $validated['motivo'], 'RECHAZADO');
 
             DB::commit();
 
@@ -515,7 +525,7 @@ class InstructoresController extends Controller
             return response()->json([
                 'message' => 'RMI rechazado con éxito',
                 'estado' => 'RECHAZADO',
-                'detalles_actualizados' => $detallesActualizados
+
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
@@ -529,5 +539,25 @@ class InstructoresController extends Controller
             ]);
             return response()->json(['message' => 'Error al rechazar el RMI', 'error' => $e->getMessage()], 500);
         }
+    }
+    protected function enviarNotificacionRmi($remitenteId, $receptorId, $periodo, $motivo = null, $tipo = 'ACEPTADO')
+    {
+        $asunto = $tipo === 'ACEPTADO' ? 'Estado del RMI' : 'Estado del RMI';
+        $mensaje = $tipo === 'ACEPTADO'
+            ? "Su RMI del periodo {$periodo} ha sido aprobado."
+            : "Su RMI del periodo {$periodo} ha sido rechazado. Motivo: {$motivo}";
+
+        return NotificacionSistema::create([
+            'fecha' => now()->toDateString(),
+            'hora' => now()->toTimeString(),
+            'asunto' => $asunto,
+            'mensaje' => $mensaje,
+            'estado_id' => 1,
+            'idUsuarioReceptor' => $receptorId,
+            'idUsuarioRemitente' => $remitenteId,
+            'idTipoNotificacion' => 1,
+            'idEmpresa' => KeyUtil::idCompany(),
+            'route' => '/rmi'
+        ]);
     }
 }
