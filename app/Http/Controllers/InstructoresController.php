@@ -749,4 +749,83 @@ class InstructoresController extends Controller
             'route' => '/rmi'
         ]);
     }
+    public function revertirRmi($idActivation, Request $request)
+    {
+        DB::beginTransaction();
+        try {
+            $validated = $request->validate([
+                'periodo' => 'nullable|date_format:Y-m',
+            ]);
+
+            $activation = ActivationCompanyUser::with('user.persona.contracts')->findOrFail($idActivation);
+            $contrato = $activation->user->persona->contracts->first();
+
+            if (!$contrato) {
+                DB::rollBack();
+                return response()->json(['message' => 'El instructor no tiene un contrato asociado'], 404);
+            }
+
+            $periodo = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
+            $inicio  = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->startOfMonth();
+            $fin     = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->endOfMonth();
+
+            // Obtener horarios del contrato en el periodo
+            $horarios = \App\Models\HorarioMateria::where('idContrato', $contrato->id)
+                ->where('estado', 'ASIGNADO')
+                ->where(function ($q) use ($inicio, $fin) {
+                    $q->whereBetween('fechaInicial', [$inicio, $fin])
+                        ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                        ->orWhere(function ($q2) use ($inicio, $fin) {
+                            $q2->where('fechaInicial', '<=', $inicio)
+                                ->where('fechaFinal', '>=', $fin);
+                        });
+                })
+                ->pluck('id');
+
+            if ($horarios->isEmpty()) {
+                DB::rollBack();
+                return response()->json(['message' => 'No se encontraron horarios para el periodo especificado'], 404);
+            }
+
+            $rmi = Rmi::where('periodo', $periodo)->first();
+
+            if (!$rmi) {
+                DB::rollBack();
+                return response()->json(['message' => 'No existe un RMI para el periodo especificado'], 404);
+            }
+
+            // Revertir todos los DetalleRmi a PENDIENTE
+            $detallesActualizados = DetalleRmi::where('idRmi', $rmi->id)
+                ->whereIn('idHorarioMateria', $horarios)
+                ->update([
+                    'estado'      => 'PENDIENTE',
+                    'observacion' => null,
+                ]);
+
+            // Revertir estado del RMI a PENDIENTE
+            $rmi->update(['estado' => 'PENDIENTE']);
+
+            $user = KeyUtil::user();
+            $this->enviarNotificacionRmi($user->id, $activation->user->id, $periodo, null, 'PENDIENTE');
+
+            DB::commit();
+
+            return response()->json([
+                'message'              => 'RMI revertido a pendiente con éxito',
+                'estado'               => 'PENDIENTE',
+                'detalles_actualizados' => $detallesActualizados,
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Error al revertir RMI: ' . $e->getMessage(), [
+                'idActivation' => $idActivation,
+                'periodo'      => $request->input('periodo'),
+                'trace'        => $e->getTraceAsString(),
+            ]);
+            return response()->json(['message' => 'Error al revertir el RMI', 'error' => $e->getMessage()], 500);
+        }
+    }
 }

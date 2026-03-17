@@ -1410,6 +1410,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('instructores/fichas', [InstructoresController::class, 'getFichasByContrato']);
     Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
     Route::put('instructores/{idActivation}/rechazar-rmi', [InstructoresController::class, 'rechazarRmi']);
+    Route::put('instructores/{idActivation}/revertir-rmi', [InstructoresController::class, 'revertirRmi']);
 });
 
 
