@@ -370,56 +370,84 @@ class InstructoresController extends Controller
             $ficha    = $horariosGrupo->first()->ficha;
             $programa = $ficha?->asignacion?->programa;
 
+            // Paso 1: mapear cada horario con todos sus datos y su idGradoMateria
+            $horariosConDatos = $horariosGrupo->map(function ($h) use ($validated) {
+                $rap            = $h->gradoMateria?->materia;
+                $competencia    = $rap?->padre;
+                $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                // Determinar el rango a calcular
+                if (!empty($validated['periodo'])) {
+                    $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
+                    $rangoFin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
+                    $desde       = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
+                    $hasta       = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
+                } else {
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max(\Carbon\Carbon::now()->startOfMonth());
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min(\Carbon\Carbon::now()->endOfMonth());
+                }
+
+                // idDia: 1=Lunes...6=Sabado, 7=Domingo → Carbon: 0=Domingo, 1=Lunes...6=Sabado
+                $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
+                $cantidadSesiones = 0;
+                $cursor           = $desde->copy();
+
+                while ($cursor->lte($hasta)) {
+                    if ($cursor->dayOfWeek === $diaSemanaCarbon) {
+                        $cantidadSesiones++;
+                    }
+                    $cursor->addDay();
+                }
+
+                return [
+                    'idGradoMateria'       => $h->idGradoMateria,
+                    'competencia'          => $competencia?->nombreMateria,
+                    'resultadoAprendizaje' => $rap?->nombreMateria,
+                    'idHorario'            => $h->id,
+                    'horaInicial'          => $h->horaInicial,
+                    'horaFinal'            => $h->horaFinal,
+                    'fechaInicial'         => $h->fechaInicial,
+                    'fechaFinal'           => $h->fechaFinal,
+                    'duracionSesion'       => $duracionSesion,
+                    'cantidadSesiones'     => $cantidadSesiones,
+                    'duracionHoras'        => round($duracionSesion * $cantidadSesiones, 2),
+                    'idDia'                => $h->idDia,
+                    'estadoAsociacion'     => $h->detallesRmi->first()?->estadoAsociacion,
+                ];
+            });
+
+            // Paso 2: agrupar por idGradoMateria
+            $resultados = $horariosConDatos
+                ->groupBy('idGradoMateria')
+                ->map(function ($horariosGM) {
+                    $primero = $horariosGM->first();
+                    return [
+                        'idGradoMateria'       => $primero['idGradoMateria'],
+                        'competencia'          => $primero['competencia'],
+                        'resultadoAprendizaje' => $primero['resultadoAprendizaje'],
+                        'horarios'             => $horariosGM->map(function ($item) {
+                            return [
+                                'idHorario'        => $item['idHorario'],
+                                'horaInicial'      => $item['horaInicial'],
+                                'horaFinal'        => $item['horaFinal'],
+                                'fechaInicial'     => $item['fechaInicial'],
+                                'fechaFinal'       => $item['fechaFinal'],
+                                'duracionSesion'   => $item['duracionSesion'],
+                                'cantidadSesiones' => $item['cantidadSesiones'],
+                                'duracionHoras'    => $item['duracionHoras'],
+                                'idDia'            => $item['idDia'],
+                                'estadoAsociacion' => $item['estadoAsociacion'],
+                            ];
+                        })->values(),
+                    ];
+                })->values();
+
             return [
                 'idFicha'           => $ficha?->id,
                 'codigoFicha'       => $ficha?->codigo,
                 'programaFormacion' => $programa?->nombrePrograma,
                 'codigoPrograma'    => $programa?->codigoPrograma,
-                'resultados'        => $horariosGrupo->map(function ($h) use ($validated) {
-                    $rap            = $h->gradoMateria?->materia;
-                    $competencia    = $rap?->padre;
-                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-
-                    // Determinar el rango a calcular
-                    if (!empty($validated['periodo'])) {
-                        $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-                        $rangoFin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-                        $desde       = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
-                        $hasta       = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
-                    } else {
-                        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max(\Carbon\Carbon::now()->startOfMonth());
-                        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min(\Carbon\Carbon::now()->endOfMonth());
-                    }
-
-                    // Contar cuántas veces cae el día de la semana en el rango
-                    // idDia: 1=Lunes...6=Sabado, 7=Domingo → Carbon: 0=Domingo, 1=Lunes...6=Sabado
-                    $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
-                    $cantidadSesiones = 0;
-                    $cursor           = $desde->copy();
-
-                    while ($cursor->lte($hasta)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                            $cantidadSesiones++;
-                        }
-                        $cursor->addDay();
-                    }
-
-                    return [
-                        'idHorario'            => $h->id,
-                        'idGradoMateria'       => $h->idGradoMateria,
-                        'competencia'          => $competencia?->nombreMateria,
-                        'resultadoAprendizaje' => $rap?->nombreMateria,
-                        'horaInicial'          => $h->horaInicial,
-                        'horaFinal'            => $h->horaFinal,
-                        'fechaInicial'         => $h->fechaInicial,
-                        'fechaFinal'           => $h->fechaFinal,
-                        'duracionSesion'       => $duracionSesion,
-                        'cantidadSesiones'     => $cantidadSesiones,
-                        'duracionHoras'        => round($duracionSesion * $cantidadSesiones, 2),
-                        'idDia'                => $h->idDia,
-                        'estadoAsociacion'     => $h->detallesRmi->first()->estadoAsociacion
-                    ];
-                })->values(),
+                'resultados'        => $resultados,
             ];
         })->values();
 
