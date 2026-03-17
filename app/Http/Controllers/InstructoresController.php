@@ -342,6 +342,7 @@ class InstructoresController extends Controller
         $query = \App\Models\HorarioMateria::with([
             'ficha.asignacion.programa',
             'gradoMateria.materia.padre',
+            'detallesRmi'
         ])
             ->where('idContrato', $validated['idContrato'])
             ->where('estado', 'ASIGNADO');
@@ -416,6 +417,7 @@ class InstructoresController extends Controller
                         'cantidadSesiones'     => $cantidadSesiones,
                         'duracionHoras'        => round($duracionSesion * $cantidadSesiones, 2),
                         'idDia'                => $h->idDia,
+                        'estadoAsociacion'     => $h->detallesRmi->first()->estadoAsociacion
                     ];
                 })->values(),
             ];
