@@ -20,17 +20,18 @@ class InstructoresController extends Controller
             'idCentroFormacion' => 'required|integer|exists:centroFormacion,id',
             'periodo'           => 'nullable|date_format:Y-m',
             'estado'            => 'nullable|string|in:PENDIENTE,ACEPTADO,RECHAZADO',
+            'sinPeriodo' => 'nullable|in:true,false,1,0',
         ]);
 
-        // Determinar periodo
+        $sinPeriodo = filter_var($validated['sinPeriodo'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $periodoReq = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
-        $inicio = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->startOfMonth();
-        $fin    = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->endOfMonth();
+        $inicio     = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->startOfMonth();
+        $fin        = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->endOfMonth();
 
-        $instructors = ActivationCompanyUser::with([
-            'user.persona.contracts' => function ($q) use ($inicio, $fin) {
+        $query = ActivationCompanyUser::with([
+            'user.persona.contracts' => function ($q) use ($inicio, $fin, $sinPeriodo) {
                 $q->latest()->with([
-                    'horarioMateria' => function ($h) use ($inicio, $fin) {
+                    'horarioMateria' => function ($h) use ($inicio, $fin, $sinPeriodo) {
                         $h->select(
                             'id',
                             'idContrato',
@@ -42,25 +43,28 @@ class InstructoresController extends Controller
                             'fechaFinal'
                         )->where('estado', 'ASIGNADO');
 
-                        $h->where(function ($q) use ($inicio, $fin) {
-                            $q->whereBetween('fechaInicial', [$inicio, $fin])
-                                ->orWhereBetween('fechaFinal', [$inicio, $fin])
-                                ->orWhere(function ($q2) use ($inicio, $fin) {
-                                    $q2->where('fechaInicial', '<=', $inicio)
-                                        ->where('fechaFinal', '>=', $fin);
-                                });
-                        });
+                        // Solo filtrar por periodo si no es sinPeriodo
+                        if (!$sinPeriodo) {
+                            $h->where(function ($q) use ($inicio, $fin) {
+                                $q->whereBetween('fechaInicial', [$inicio, $fin])
+                                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                                    ->orWhere(function ($q2) use ($inicio, $fin) {
+                                        $q2->where('fechaInicial', '<=', $inicio)
+                                            ->where('fechaFinal', '>=', $fin);
+                                    });
+                            });
+                        }
                     }
                 ]);
             }
         ])
             ->active()
             ->role('INSTRUCTOR SENA')
-            ->whereHas('user', function ($q) use ($validated) {
-                $q->where('idCentroFormacion', $validated['idCentroFormacion']);
-            })
-            // Solo instructores con horarios en el periodo
-            ->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
+            ->whereHas('user', fn($q) => $q->where('idCentroFormacion', $validated['idCentroFormacion']));
+
+        // Solo filtrar por periodo en el whereHas si no es sinPeriodo
+        if (!$sinPeriodo) {
+            $query->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
                 $h->where('estado', 'ASIGNADO')
                     ->where(function ($q) use ($inicio, $fin) {
                         $q->whereBetween('fechaInicial', [$inicio, $fin])
@@ -70,103 +74,96 @@ class InstructoresController extends Controller
                                     ->where('fechaFinal', '>=', $fin);
                             });
                     });
-            })
-            ->get()
-            ->map(function ($acu) use ($periodoReq, $inicio, $fin) {
+            });
+        }
 
-                $user     = $acu->user;
-                $persona  = $user->persona;
-                $contrato = $persona->contracts->first();
+        $instructors = $query->get()->map(function ($acu) use ($periodoReq, $inicio, $fin, $sinPeriodo) {
+            $user     = $acu->user;
+            $persona  = $user->persona;
+            $contrato = $persona->contracts->first();
 
-                $horarios = $contrato?->horarioMateria->map(function ($h) use ($inicio, $fin) {
-                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+            $horarios = $contrato?->horarioMateria->map(function ($h) use ($inicio, $fin, $sinPeriodo) {
+                $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
 
-                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                $desde = $sinPeriodo
+                    ? \Carbon\Carbon::parse($h->fechaInicial)
+                    : \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                $hasta = $sinPeriodo
+                    ? \Carbon\Carbon::parse($h->fechaFinal)
+                    : \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
 
-                    $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
-                    $cantidadSesiones = 0;
-                    $cursor           = $desde->copy();
+                $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
+                $cantidadSesiones = 0;
+                $cursor           = $desde->copy();
 
-                    while ($cursor->lte($hasta)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                            $cantidadSesiones++;
-                        }
-                        $cursor->addDay();
-                    }
-
-                    return [
-                        'id'               => $h->id,
-                        'idContrato'       => $h->idContrato,
-                        'horaInicial'      => $h->horaInicial,
-                        'horaFinal'        => $h->horaFinal,
-                        'estado'           => $h->estado,
-                        'idDia'            => $h->idDia,
-                        'fechaInicial'     => $h->fechaInicial,
-                        'fechaFinal'       => $h->fechaFinal,
-                        'duracionSesion'   => $duracionSesion,
-                        'cantidadSesiones' => $cantidadSesiones,
-                        'duracionHoras'    => round($duracionSesion * $cantidadSesiones, 2),
-                    ];
-                });
-
-                // Obtener estado del RMI para el periodo
-                $estadoRmi = 'PENDIENTE';
-                $motivoRechazo = null;
-
-                if ($contrato) {
-                    $rmi = Rmi::where('periodo', $periodoReq)->first();
-                    if ($rmi) {
-                        $detallesRmi = DetalleRmi::where('idRmi', $rmi->id)
-                            ->whereHas('horarioMateria', function ($q) use ($contrato) {
-                                $q->where('idContrato', $contrato->id);
-                            })
-                            ->get();
-
-                        if ($detallesRmi->isNotEmpty()) {
-                            if ($detallesRmi->contains('estado', 'RECHAZADO')) {
-                                $estadoRmi = 'RECHAZADO';
-                                $detalleRechazado = $detallesRmi->firstWhere('estado', 'RECHAZADO');
-                                $motivoRechazo = $detalleRechazado?->observacion;
-                            } elseif ($detallesRmi->every(function ($d) {
-                                return $d->estado === 'ACEPTADO';
-                            })) {
-                                $estadoRmi = 'ACEPTADO';
-                            } else {
-                                $estadoRmi = 'PENDIENTE';
-                            }
-                        }
-                    }
+                while ($cursor->lte($hasta)) {
+                    if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantidadSesiones++;
+                    $cursor->addDay();
                 }
 
                 return [
-                    'idActivation' => $acu->id,
-                    'emailUsuario' => $user->email,
-                    'idContrato'   => $contrato?->id,
-                    'roles'        => $acu->getRoleNames(),
-                    'horarios'     => $horarios,
-                    'estado'       => $estadoRmi,
-                    'motivoRechazo' => $motivoRechazo,
-                    'persona'      => [
-                        'identificacion' => $persona->identificacion,
-                        'nombre1'        => $persona->nombre1,
-                        'nombre2'        => $persona->nombre2,
-                        'apellido1'      => $persona->apellido1,
-                        'apellido2'      => $persona->apellido2,
-                        'fechaNac'       => $persona->fechaNac,
-                        'direccion'      => $persona->direccion,
-                        'email'          => $persona->email,
-                        'celular'        => $persona->celular,
-                        'telefonoFijo'   => $persona->telefonoFijo,
-                        'perfil'         => $persona->perfil,
-                        'sexo'           => $persona->sexo,
-                        'rh'             => $persona->rh,
-                        'rutaFoto'       => $persona->rutaFotoUrl,
-                    ],
+                    'id'               => $h->id,
+                    'idContrato'       => $h->idContrato,
+                    'horaInicial'      => $h->horaInicial,
+                    'horaFinal'        => $h->horaFinal,
+                    'estado'           => $h->estado,
+                    'idDia'            => $h->idDia,
+                    'fechaInicial'     => $h->fechaInicial,
+                    'fechaFinal'       => $h->fechaFinal,
+                    'duracionSesion'   => $duracionSesion,
+                    'cantidadSesiones' => $cantidadSesiones,
+                    'duracionHoras'    => round($duracionSesion * $cantidadSesiones, 2),
                 ];
-            });
+            }) ?? collect();
 
-        // Filtrar por estado si se proporciona
+            $estadoRmi     = 'PENDIENTE';
+            $motivoRechazo = null;
+
+            if ($contrato) {
+                $rmi = Rmi::where('periodo', $periodoReq)->first();
+                if ($rmi) {
+                    $detallesRmi = DetalleRmi::where('idRmi', $rmi->id)
+                        ->whereHas('horarioMateria', fn($q) => $q->where('idContrato', $contrato->id))
+                        ->get();
+
+                    if ($detallesRmi->isNotEmpty()) {
+                        if ($detallesRmi->contains('estado', 'RECHAZADO')) {
+                            $estadoRmi     = 'RECHAZADO';
+                            $motivoRechazo = $detallesRmi->firstWhere('estado', 'RECHAZADO')?->observacion;
+                        } elseif ($detallesRmi->every(fn($d) => $d->estado === 'ACEPTADO')) {
+                            $estadoRmi = 'ACEPTADO';
+                        }
+                    }
+                }
+            }
+
+            return [
+                'idActivation'  => $acu->id,
+                'emailUsuario'  => $user->email,
+                'idContrato'    => $contrato?->id,
+                'roles'         => $acu->getRoleNames(),
+                'horarios'      => $horarios,
+                'estado'        => $estadoRmi,
+                'motivoRechazo' => $motivoRechazo,
+                'persona'       => [
+                    'identificacion' => $persona->identificacion,
+                    'nombre1'        => $persona->nombre1,
+                    'nombre2'        => $persona->nombre2,
+                    'apellido1'      => $persona->apellido1,
+                    'apellido2'      => $persona->apellido2,
+                    'fechaNac'       => $persona->fechaNac,
+                    'direccion'      => $persona->direccion,
+                    'email'          => $persona->email,
+                    'celular'        => $persona->celular,
+                    'telefonoFijo'   => $persona->telefonoFijo,
+                    'perfil'         => $persona->perfil,
+                    'sexo'           => $persona->sexo,
+                    'rh'             => $persona->rh,
+                    'rutaFoto'       => $persona->rutaFotoUrl,
+                ],
+            ];
+        });
+
         if (!empty($validated['estado'])) {
             $instructors = $instructors->where('estado', $validated['estado'])->values();
         }
