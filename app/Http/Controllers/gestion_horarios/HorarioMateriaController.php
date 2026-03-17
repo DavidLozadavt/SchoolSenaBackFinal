@@ -555,6 +555,13 @@ class HorarioMateriaController extends Controller
                         'idContrato' => null
                     ]);
                 }
+                $detallesRmi = DetalleRmi::where('idHorarioMateria', $horarioMateria->id)->get();
+                foreach ($detallesRmi as $detalleRmi) {
+                    $detalleRmi->update([
+                        'estado' => 'PENDIENTE',
+                        'estadoAsociado' => 0
+                    ]);
+                }
             }
 
             DB::commit();
