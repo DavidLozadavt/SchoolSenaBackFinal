@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 class AsistenciaController extends Controller
 {
+    
     public function store(Request $request): JsonResponse
 {
     try {

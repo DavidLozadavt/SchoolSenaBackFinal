@@ -904,5 +904,6 @@ class InstructoresController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+        
     }
 }
