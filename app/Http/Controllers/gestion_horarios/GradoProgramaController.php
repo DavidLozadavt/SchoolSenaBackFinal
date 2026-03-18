@@ -2,17 +2,13 @@
 
 namespace App\Http\Controllers\gestion_horarios;
 
-use App\Enums\EstadoGradoMateria;
 use App\Models\Grado;
 use App\Models\GradoPrograma;
 use App\Util\QueryUtil;
 use Exception;
 use App\Http\Controllers\Controller;
-use App\Http\Controllers\gestion_materias\MateriaController;
 use App\Models\GradoMateria;
 use App\Models\HorarioMateria;
-use App\Models\Materia;
-use App\Models\MatriculaAcademica;
 use App\Models\TipoGrado;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -104,12 +100,12 @@ class GradoProgramaController extends Controller
             ]);
 
             // consultar el id del tipo de grado(TRIMESTRE)
-            $tipoGrado = TipoGrado::where('nombreTipoGrado', 'TRIMESTRE')->firstOrFail();
+                $tipoGrado = TipoGrado::where('nombreTipoGrado', 'TRIMESTRE')->firstOrFail();
             // buscar el grado con ese tipo de grado
             $grado = Grado::where('idTipoGrado', $tipoGrado->id)
                 ->where('numeroGrado', $datos['numeroGrado'])
                 ->firstOrFail();
-
+                
             $gradoPrograma = GradoPrograma::updateOrCreate(
                 [
                     'idPrograma' => $datos['idPrograma'],
@@ -124,54 +120,20 @@ class GradoProgramaController extends Controller
 
             // crear gradoMateria con las materias seleccionadas (asignar las materias al trimestre)
             // en el array de materias solo contiene los ids
-            foreach ($datos['materias'] as $nueva) {
-                $newGradoMateria = GradoMateria::create([
-                    'idGradoPrograma' => $gradoPrograma->id,
-                    'idMateria' => $nueva['id'],
-                    'estado' => 'PENDIENTE'
-                ]);
-
-                // crear el horarioMateria vacio con el id de la ficha
-                HorarioMateria::create([
-                    'estado' => 'PENDIENTE',
-                    'idFicha' => $datos['idFicha'],
-                    'idGradoMateria' => $newGradoMateria->id
-                ]);
-
-                // buscamos los raps de la competencia y los asigamos tambien
-                $materiaPadre = Materia::findOrFail($nueva['id']);
-                // Solo asignar raps que NO estén finalizados o evaluados en la ficha
-                $rapsYaFinalizados = GradoMateria::whereHas('horarioMateria', function ($q) use ($datos) {
-                    $q->where('idFicha', $datos['idFicha']);
-                })->where('estado', EstadoGradoMateria::FINALIZADO)
-                ->pluck('idMateria')->toArray();
-                
-                $raps = MatriculaAcademica::where('idFicha', $datos['idFicha'])
-                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
-                        ->whereNotIn('idMateria', $rapsYaFinalizados)
-                        ->whereHas('materia', function ($query) use ($materiaPadre) {
-                            $query->where('idMateriaPadre', $materiaPadre->id);
-                        })
-                        ->with('materia')
-                        ->get()
-                        ->pluck('materia')
-                        ->unique('id')
-                        ->values();
-
-                foreach ($raps as $rap) {
-                    $gradoMateriaRap = GradoMateria::create([
+                foreach ($datos['materias'] as $nueva) {
+                    $newGradoMateria = GradoMateria::create([
                         'idGradoPrograma' => $gradoPrograma->id,
-                        'idMateria' => $rap->id,
+                        'idMateria' => $nueva['id'],
                         'estado' => 'PENDIENTE'
                     ]);
 
+                    // crear el horarioMateria vacio con el id de la ficha
                     HorarioMateria::create([
                         'estado' => 'PENDIENTE',
                         'idFicha' => $datos['idFicha'],
-                        'idGradoMateria' => $gradoMateriaRap->id
+                        'idGradoMateria' => $newGradoMateria->id
                     ]);
                 }
-            }
 
             DB::commit();
             return response()->json([
@@ -197,64 +159,21 @@ class GradoProgramaController extends Controller
                 'materias' => 'required|array',
             ]);
 
-            foreach ($datos['materias'] as $nueva) {
-
-                // verificar si la materia ya existe en el trimestre y no repetirla
-                $gradoMateriaExistente = GradoMateria::where([
-                    'idGradoPrograma' => $datos['idGradoPrograma'],
-                    'idMateria' => $nueva['id']
-                ])->first();
-
-                if ($gradoMateriaExistente) {
-                    continue;
-                }
-
-                $newGradoMateria = GradoMateria::create([
-                    'idGradoPrograma' => $datos['idGradoPrograma'],
-                    'idMateria' => $nueva['id'],
-                    'estado' => 'PENDIENTE'
-                ]);
-
-                // crear el horarioMateria vacio con el id de la ficha
-                HorarioMateria::create([
-                    'estado' => 'PENDIENTE',
-                    'idFicha' => $datos['idFicha'],
-                    'idGradoMateria' => $newGradoMateria->id
-                ]);
-
-                $materiaPadre = Materia::findOrFail($nueva['id']);
-                // Solo asignar raps que NO estén finalizados o evaluados en la ficha
-                $rapsYaFinalizados = GradoMateria::whereHas('horarioMateria', function ($q) use ($datos) {
-                    $q->where('idFicha', $datos['idFicha']);
-                })->where('estado', EstadoGradoMateria::FINALIZADO)
-                ->pluck('idMateria')->toArray();
-                
-                $raps = MatriculaAcademica::where('idFicha', $datos['idFicha'])
-                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
-                        ->whereNotIn('idMateria', $rapsYaFinalizados)
-                        ->whereHas('materia', function ($query) use ($materiaPadre) {
-                            $query->where('idMateriaPadre', $materiaPadre->id);
-                        })
-                        ->with('materia')
-                        ->get()
-                        ->pluck('materia')
-                        ->unique('id')
-                        ->values();
-
-                foreach ($raps as $rap) {
-                    $gradoMateriaRap = GradoMateria::create([
+            // en el array de materias solo contiene los ids
+                foreach ($datos['materias'] as $nueva) {
+                    $newGradoMateria = GradoMateria::create([
                         'idGradoPrograma' => $datos['idGradoPrograma'],
-                        'idMateria' => $rap->id,
+                        'idMateria' => $nueva['id'],
                         'estado' => 'PENDIENTE'
                     ]);
 
+                    // crear el horarioMateria vacio con el id de la ficha
                     HorarioMateria::create([
                         'estado' => 'PENDIENTE',
                         'idFicha' => $datos['idFicha'],
-                        'idGradoMateria' => $gradoMateriaRap->id
+                        'idGradoMateria' => $newGradoMateria->id
                     ]);
                 }
-            }
 
             DB::commit();
             return response()->json([

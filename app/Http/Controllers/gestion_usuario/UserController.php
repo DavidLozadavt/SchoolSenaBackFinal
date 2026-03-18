@@ -33,7 +33,8 @@ class UserController extends Controller
         $search = $request->input('search', '');
         $perPage = $request->input('per_page', 15);
 
-        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado');
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
+            ->where('company_id', $id);
 
         if (!empty($search)) {
             $query->whereHas('user.persona', function ($q) use ($search) {
@@ -79,8 +80,8 @@ class UserController extends Controller
       // Inicializar variable
             $passwordUpdated = false;
 
-        // Solo actualizar contraseña si se proporciona dentro del objeto user
-        if (isset($userData['contrasena']) && !empty($userData['contrasena'])) {
+// Solo actualizar contraseña si se proporciona
+        if ($request->input('contrasena')) {
             $user->contrasena = bcrypt($userData['contrasena']);
             $user->save();
             $passwordUpdated = true;
@@ -94,13 +95,53 @@ class UserController extends Controller
             $activacion->save();
         }
 
-        // Actualizar roles según el tipo de usuario (APRENDIZ o INSTRUCTOR)
-        if ($activacion->hasRole('ESTUDIANTEUP')) {
-            $activacion->removeRole('ESTUDIANTEUP');
-            $activacion->assignRole('APRENDIZ');
-        } elseif ($activacion->hasRole('DOCENTEUP')) {
-            $activacion->removeRole('DOCENTEUP');
-            $activacion->assignRole('INSTRUCTOR SENA');
+        $companyId = KeyUtil::idCompany();
+        $estudianteUpRoleId = DB::table('roles')
+            ->where('name', 'APRENDIZUP')
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        $role = DB::table('model_has_roles')
+            ->where('model_id', $activacion->id)
+            ->where('model_type', ActivationCompanyUser::class)
+            ->where('role_id', $estudianteUpRoleId)
+            ->first();
+
+        $estudianteRoleId = DB::table('roles')
+            ->where('name', 'APRENDIZ SENA')
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        if ($role) {
+            DB::table('model_has_roles')
+                ->where('model_id', $activacion->id)
+                ->where('model_type', ActivationCompanyUser::class)
+                ->where('role_id', $estudianteUpRoleId)
+                ->update(['role_id' => $estudianteRoleId]);
+        }
+
+        $docenteUpRoleId = DB::table('roles')
+            ->where('name', 'DOCENTEUP')
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        $roleDocente = DB::table('model_has_roles')
+            ->where('model_id', $activacion->id)
+            ->where('model_type', ActivationCompanyUser::class)
+            ->where('role_id', $docenteUpRoleId)
+            ->first();
+
+        $docenteRoleId = DB::table('roles')
+            ->where('name', 'INSTRUCTOR SENA')
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        if ($roleDocente) {
+            DB::table('model_has_roles')
+                ->where('model_id', $activacion->id)
+                ->where('model_type', ActivationCompanyUser::class)
+                ->where('role_id', $docenteUpRoleId)
+                ->update(['role_id' => $docenteRoleId]);
         }
         
        // $contrato = $persona->contrato;

@@ -33,11 +33,4 @@ class SesionMateria extends Model
   {
     return $this->belongsTo(HorarioMateria::class, 'idHorarioMateria', 'id');
   }
-
-  public function asistencia(): HasMany
-  {
-    return $this->hasMany(Asistencia::class, 'idSesionMateria', 'id');
-  }
-
-
 }

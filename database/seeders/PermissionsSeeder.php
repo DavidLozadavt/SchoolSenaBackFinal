@@ -26,16 +26,6 @@ class PermissionsSeeder extends Seeder
                 'guard_name' => 'web',
                 'description' => 'Gestión de los centros de formacion para las regionales',
             ],
-            [
-                'name' => 'AULA_VIRTUAL_INSTRUCTOR',
-                'guard_name' => 'web',
-                'description' => 'Aula virtual para instructores - Historial RAPs, detalle de clase',
-            ],
-            [
-                'name' => 'AULA_VIRTUAL_APRENDIZ',
-                'guard_name' => 'web',
-                'description' => 'Aula virtual para aprendices - Mis clases, Mis notas',
-            ],
         ];
 
         foreach ($permissions as $permission) {
