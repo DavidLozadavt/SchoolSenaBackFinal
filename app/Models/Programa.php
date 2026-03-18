@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Programa extends Model
 {
@@ -21,7 +22,8 @@ class Programa extends Model
         'idNivelEducativo',
         'idTipoFormacion',
         'idEstadoPrograma',
-        'idCompany'
+        'idCompany',
+        'idRed'
     ];
 
     public function nivel()
@@ -69,5 +71,56 @@ class Programa extends Model
     public function agregarMateriaPrograma(): HasMany
     {
         return $this->hasMany(AgregarMateriaPrograma::class, 'idPrograma');
+    }
+
+    // 🔥 NUEVA RELACIÓN: Programa tiene muchos GradoPrograma
+    public function gradoProgramas(): HasMany
+    {
+        return $this->hasMany(GradoPrograma::class, 'idPrograma');
+    }
+
+    // 🔥 NUEVA RELACIÓN: Acceso directo a los grados a través de la tabla pivot
+    public function grados(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            Grado::class,
+            'gradoPrograma',  // Tabla pivot
+            'idPrograma',     // FK en la tabla pivot para este modelo
+            'idGrado'         // FK en la tabla pivot para el modelo relacionado
+        )->withPivot('cupos', 'fechaInicio', 'fechaFin', 'estado')
+            ->withTimestamps();
+    }
+    public function red()
+    {
+        return $this->belongsTo(Red::class, 'idRed');
+    }
+
+    //Para ver el conteo de fichas que tiene un programa:
+    public function fichas()
+    {
+        return $this->hasManyThrough(
+            Ficha::class,
+            AperturarPrograma::class,
+            'idPrograma',     // FK en aperturarprograma
+            'idAsignacion',   // FK en ficha
+            'id',             // PK en programa
+            'id'              // PK en aperturarprograma
+        );
+    }
+    public function fichasActivas()
+    {
+        return $this->hasManyThrough(
+            Ficha::class,
+            AperturarPrograma::class,
+            'idPrograma',
+            'idAsignacion',
+            'id',
+            'id'
+        )->whereIn('aperturarprograma.estado', ['ACTIVO', 'EN CURSO']);
+    }
+
+    public function areasConocimiento()
+    {
+        return $this->belongsToMany(AreaConocimiento::class, 'asignacionAreaConocimientoPrograma', 'idPrograma', 'idAreaConocimiento');
     }
 }

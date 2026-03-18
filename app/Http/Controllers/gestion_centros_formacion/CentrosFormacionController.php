@@ -245,9 +245,8 @@ class CentrosFormacionController extends Controller
 
             $rol = Rol::firstOrCreate(
                 [
-                    'name' => 'ADMINISTRADOR SENA',
+                    'name' => 'ADMIN CENTRO',
                     'guard_name' => 'web',
-                    'company_id' => $request->idEmpresa
                 ],
                 [
                     'created_at' => now(),
@@ -290,6 +289,7 @@ class CentrosFormacionController extends Controller
             'data' => $centros
         ]);
     }
+    
     public function destroy($id)
     {
         DB::beginTransaction();

@@ -42,6 +42,8 @@ use App\Models\TipoTerminacionContrato;
 use App\Models\AreaConocimiento;
 use App\Models\Programa;
 use App\Models\NivelEducativo;
+use App\Models\Company;
+use App\Models\CentrosFormacion;
 
 class ContratacionController extends Controller
 {
@@ -192,7 +194,7 @@ class ContratacionController extends Controller
      */
     public function getRoles()
     {
-        $roles = Rol::where('company_id', KeyUtil::idCompany())
+        $roles = Rol::query()
             ->with('salario')
             ->get();
 
@@ -212,6 +214,10 @@ class ContratacionController extends Controller
      */
     public function getContratoByIdentificacion($identificacion)
     {
+        if (empty($identificacion)) {
+            return response()->json(['error' => 'La identificación es requerida'], 400);
+        }
+
         $user = KeyUtil::user();
         $contratos = Contract::with('persona', 'tipoContrato')
             ->whereHas("persona", function ($q) use ($identificacion) {
@@ -357,6 +363,7 @@ class ContratacionController extends Controller
             $contrato = new Contract();
             $contrato->idpersona = $persona_id;
             $contrato->idempresa = $company_id;
+            $contrato->idCompany = $company_id;
             $contrato->idtipoContrato = $request->input('idtipoContrato');
             $contrato->fechaContratacion = $fechaInicio;
 
@@ -860,23 +867,304 @@ class ContratacionController extends Controller
      *
      * @return \Illuminate\Http\JsonResponse
      */
-    public function getAllContratos()
-    {
-        $companyId = KeyUtil::idCompany();
+public function getAllContratos(Request $request)
+{
+    try {
+        $user = auth()->user();
         
-        $contratos = Contract::with('persona', 'salario.rol', 'transacciones.pago', 'estado', 'area')
-            ->where('idempresa', $companyId)
-            ->where('idEstado', '!=', 14)
-            ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
-            ->orderBy('fechaContratacion')
-            ->get();
-
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+        
+        // Obtener los roles del usuario
+        $userRoles = [];
+        $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
+        
+        if ($activationUser) {
+            $userRoles = $activationUser->roles->pluck('name')->toArray();
+        }
+        
+        Log::info('=== getAllContratos - INICIO ===');
+        Log::info('Usuario ID: ' . $user->id);
+        Log::info('Roles del usuario: ' . json_encode($userRoles));
+        Log::info('Parámetros recibidos: ' . json_encode($request->all()));
+        
+        // Iniciar la consulta base
+        $query = Contract::with(
+            'persona',
+            'salario.rol',
+            'transacciones.pago',
+            'estado',
+            'area'
+        )
+        ->where('idEstado', '!=', 14)
+        ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
+        ->orderBy('fechaContratacion');
+ 
+        // Verificar consulta base
+        Log::info('Consulta base creada');
+ 
+        //Validar roles específicos o dar contratos por centro
+        if (in_array('ADMINISTRADOR VT', $userRoles)) {
+            Log::info('Es ADMINISTRADOR VT');
+            
+            // ADMINISTRADOR VT: puede filtrar por empresa y centro
+            if ($request->has('idCompany') && $request->input('idCompany')) {
+                $idCompany = $request->input('idCompany');
+                
+                // Filtrar por AMBOS campos de empresa para compatibilidad
+                $query->where(function($q) use ($idCompany) {
+                    $q->where('idCompany', $idCompany)
+                      ->orWhere('idempresa', $idCompany);
+                });
+                
+                Log::info('Aplicando filtro por empresa (idCompany o idempresa): ' . $idCompany);
+            } else {
+                Log::info('No se recibió idCompany o está vacío');
+            }
+            
+            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                $idCentroFormacion = $request->input('idCentroFormacion');
+                $query->where('idCentroFormacion', $idCentroFormacion);
+                Log::info('Aplicando filtro idCentroFormacion: ' . $idCentroFormacion);
+            } else {
+                Log::info('No se recibió idCentroFormacion o está vacío - mostrar todos los de la empresa');
+            }
+        }
+        elseif (in_array('ADMIN REGIONAL', $userRoles)) {
+            Log::info('Es ADMIN REGIONAL');
+            
+            // ADMIN REGIONAL: puede filtrar por centro
+            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                $idCentroFormacion = $request->input('idCentroFormacion');
+                $query->where('idCentroFormacion', $idCentroFormacion);
+                Log::info('Aplicando filtro idCentroFormacion: ' . $idCentroFormacion);
+            } else {
+                Log::info('No se recibió idCentroFormacion - mostrar todos los centros');
+            }
+        }
+        else {
+            //PARA TODOS LOS DEMÁS: Solo dar contratos por idCentroFormacion
+            Log::info('Usuario sin rol administrativo específico - filtrando por centro asignado');
+            
+            if ($user->idCentroFormacion) {
+                $query->where('idCentroFormacion', $user->idCentroFormacion);
+                Log::info('Aplicando filtro por centro asignado: ' . $user->idCentroFormacion);
+            } else {
+                Log::info('Usuario no tiene centro asignado - sin contratos');
+                return response()->json(['error' => 'No tienes centro asignado'], 403);
+            }
+        }
+ 
+        // LOGGING: Obtener SQL y resultados
+        $sql = $query->toSql();
+        Log::info('SQL generado: ' . $sql);
+        Log::info('Bindings: ' . json_encode($query->getBindings()));
+        
+        $contratos = $query->get();
+        Log::info('Contratos encontrados: ' . $contratos->count());
+        
+        // LOGGING: Mostrar detalles de los contratos
+        if ($contratos->count() > 0) {
+            Log::info('Primer contrato encontrado:');
+            $primerContrato = $contratos->first();
+            Log::info('ID: ' . $primerContrato->id);
+            Log::info('idCompany: ' . ($primerContrato->idCompany ?? 'NULL'));
+            Log::info('idempresa: ' . ($primerContrato->idempresa ?? 'NULL'));
+            Log::info('idCentroFormacion: ' . ($primerContrato->idCentroFormacion ?? 'NULL'));
+            Log::info('idEstado: ' . ($primerContrato->idEstado ?? 'NULL'));
+            
+            // Mostrar todos los contratos con sus filtros
+            Log::info('Todos los contratos encontrados:');
+            foreach ($contratos as $index => $contrato) {
+                Log::info("Contrato " . ($index + 1) . ": ID={$contrato->id}, idCompany={$contrato->idCompany}, idempresa={$contrato->idempresa}, idCentroFormacion={$contrato->idCentroFormacion}");
+            }
+        } else {
+            Log::info('No se encontraron contratos con los filtros aplicados');
+            
+            // DEBUG: Mostrar contratos sin filtros para comparar
+            Log::info('DEBUG: Verificando contratos sin filtros...');
+            $contratosSinFiltros = Contract::with('persona', 'salario.rol', 'estado', 'area')
+                ->where('idEstado', '!=', 14)
+                ->limit(5)
+                ->get();
+            
+            Log::info('Contratos sin filtros (primeros 5): ' . $contratosSinFiltros->count());
+            foreach ($contratosSinFiltros as $contrato) {
+                Log::info("DEBUG - Contrato: ID={$contrato->id}, idCompany={$contrato->idCompany}, idempresa={$contrato->idempresa}, idCentroFormacion={$contrato->idCentroFormacion}");
+            }
+        }
+ 
+        Log::info('=== getAllContratos - FIN ===');
+        
         return response()->json($contratos);
+        
+    } catch (\Exception $e) {
+        Log::error('Error en getAllContratos: ' . $e->getMessage());
+        Log::error('Stack trace: ' . $e->getTraceAsString());
+        return response()->json([
+            'error' => 'Error al obtener los contratos',
+            'message' => $e->getMessage()
+        ], 500);
     }
+}
+ 
+/**
+ * Endpoint específico para ADMINISTRADOR VT - Flujo completo
+ * Empresa → Centros → Contratos filtrados
+ */
+public function getContratosFlujoVT(Request $request)
+{
+    try {
+        $user = auth()->user();
+        
+        Log::info('=== getContratosFlujoVT (ADMINISTRADOR VT) ===', ['method' => 'getContratosFlujoVT']);
+        Log::info('Usuario: ' . $user->id, ['user_id' => $user->id]);
+        Log::info('Parámetros recibidos:', $request->all());
+        
+        if (!$user) {
+            return response()->json(['error' => 'Usuario no autenticado'], 401);
+        }
+        
+        // Verificar que sea ADMINISTRADOR VT
+        $userRoles = [];
+        $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
+        
+        if ($activationUser) {
+            $userRoles = $activationUser->roles->pluck('name')->toArray();
+        }
+        
+        Log::info('Roles del usuario:', ['roles' => $userRoles]);
+        
+        // VALIDAR QUE SEA ADMINISTRADOR VT
+        if (!in_array('ADMINISTRADOR VT', $userRoles)) {
+            Log::info('Usuario no es ADMINISTRADOR VT', ['roles' => $userRoles]);
+            return response()->json(['error' => 'Este endpoint es solo para ADMINISTRADOR VT'], 403);
+        }
 
+        // Validar parámetros
+        $request->validate([
+            'idCompany' => 'required|integer|exists:empresa,id',
+            'idCentroFormacion' => 'nullable|integer|exists:centroFormacion,id'
+        ]);
 
+        $idCompany = $request->input('idCompany');
+        $idCentroFormacion = $request->input('idCentroFormacion');
 
+        Log::info('Filtrando contratos', ['idCompany' => $idCompany, 'idCentroFormacion' => $idCentroFormacion]);
 
+        // 1. Obtener información de la empresa
+        $empresa = Company::find($idCompany);
+        Log::info('Empresa encontrada:', ['empresa' => $empresa ? $empresa->razonSocial : 'No encontrada']);
+
+        // 2. Obtener centros de formación de esa empresa
+        $centrosQuery = CentrosFormacion::where('idEmpresa', $idCompany)
+            ->with(['ciudad:id,descripcion', 'empresa:id,razonSocial'])
+            ->orderBy('nombre', 'asc');
+
+        // Si se proporciona idCentroFormacion, filtrar también por centro
+        if ($idCentroFormacion) {
+            $centrosQuery->where('id', $idCentroFormacion);
+            Log::info('Aplicando filtro adicional por idCentroFormacion', ['idCentroFormacion' => $idCentroFormacion]);
+        }
+
+        $centros = $centrosQuery->get();
+        Log::info('Centros encontrados:', ['count' => $centros->count()]);
+
+        // 3. Obtener contratos filtrados
+        $contratosQuery = Contract::with(
+            'persona',
+            'salario.rol',
+            'transacciones.pago',
+            'estado',
+            'area'
+        )
+        ->where('idEstado', '!=', 14)
+        ->where(function($q) use ($idCompany) {
+            $q->where('idCompany', $idCompany)
+              ->orWhere('idempresa', $idCompany);
+        }) //Filtrar por AMBOS campos
+        ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
+        ->orderBy('fechaContratacion');
+
+        // Si se proporciona idCentroFormacion, filtrar también por centro
+        if ($idCentroFormacion) {
+            $contratosQuery->where('idCentroFormacion', $idCentroFormacion);
+            Log::info('Aplicando filtro adicional por idCentroFormacion', ['idCentroFormacion' => $idCentroFormacion]);
+        }
+
+        $contratos = $contratosQuery->get();
+        Log::info('Contratos encontrados:', ['count' => $contratos->count()]);
+
+        // 4. Preparar respuesta completa
+        $response = [
+            'status' => 'success',
+            'message' => 'Datos obtenidos correctamente',
+            'data' => [
+                'empresa' => [
+                    'id' => $empresa->id,
+                    'razonSocial' => $empresa->razonSocial
+                ],
+                'centros' => $centros->map(function($centro) {
+                    return [
+                        'id' => $centro->id,
+                        'nombre' => $centro->nombre,
+                        'direccion' => $centro->direccion,
+                        'telefono' => $centro->telefono,
+                        'ciudad' => $centro->ciudad?->descripcion,
+                        'empresa' => $centro->empresa?->razonSocial
+                    ];
+                }),
+                'contratos' => $contratos->map(function($contrato) {
+                    return [
+                        'id' => $contrato->id,
+                        'persona' => [
+                            'nombreCompleto' => trim(($contrato->persona->nombre1 ?? '') . ' ' . 
+                                              ($contrato->persona->nombre2 ?? '') . ' ' . 
+                                              ($contrato->persona->apellido1 ?? '') . ' ' . 
+                                              ($contrato->persona->apellido2 ?? '')),
+                            'identificacion' => $contrato->persona->identificacion
+                        ],
+                        'salario' => [
+                            'rol' => $contrato->salario?->rol?->name
+                        ],
+                        'area' => [
+                            'nombre' => $contrato->area?->nombre
+                        ],
+                        'estado' => [
+                            'estado' => $contrato->estado?->estado
+                        ],
+                        'fechaContratacion' => $contrato->fechaContratacion,
+                        'fechaFinalContrato' => $contrato->fechaFinalContrato,
+                        'idCompany' => $contrato->idCompany,
+                        'idempresa' => $contrato->idempresa,
+                        'idCentroFormacion' => $contrato->idCentroFormacion
+                    ];
+                })
+            ],
+            'filters' => [
+                'idCompany' => $idCompany,
+                'idCentroFormacion' => $idCentroFormacion,
+                'hasCentroFilter' => $idCentroFormacion ? true : false
+            ],
+            'counts' => [
+                'centros' => $centros->count(),
+                'contratos' => $contratos->count()
+            ]
+        ];
+
+        Log::info('Respuesta preparada con éxito', ['status' => 'success']);
+        return response()->json($response);
+
+    } catch (\Exception $e) {
+        Log::error('Error en getContratosFlujoVT: ' . $e->getMessage(), ['error' => $e->getMessage()]);
+        return response()->json([
+            'error' => 'Error al obtener los datos',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
+    
     /**
      * Obtiene un contrato por su ID, incluyendo información detallada y otros contratos relacionados
      * en donde el idContrato sea igual a $id.
@@ -2070,60 +2358,107 @@ class ContratacionController extends Controller
                 return response()->json(['error' => 'Persona no encontrada'], 404);
             }
 
-            $email = trim($request->input('email'));
-            $identificacion = trim($request->input('identificacion'));
+            // Si solo se está actualizando la foto, no validar ni actualizar otros campos
+            if ($request->hasFile('rutaFotoFile') && $request->allFiles()['rutaFotoFile'] && count($request->all()) === 1) {
+                $persona->rutaFoto = $this->storeLogoPersona($request);
+                $persona->save();
+                DB::commit();
+                return response()->json($persona, 200);
+            }
 
-            $personaExistente = Person::where('id', '<>', $id)
-                ->where(function ($query) use ($email, $identificacion) {
-                    if ($email !== '') {
-                        $query->orWhere('email', $email);
+            // Validar email e identificación solo si vienen en el request
+            $email = $request->has('email') ? trim($request->input('email')) : null;
+            $identificacion = $request->has('identificacion') ? trim($request->input('identificacion')) : null;
+
+            if ($email !== null || $identificacion !== null) {
+                $personaExistente = Person::where('id', '<>', $id)
+                    ->where(function ($query) use ($email, $identificacion) {
+                        if ($email !== null && $email !== '') {
+                            $query->orWhere('email', $email);
+                        }
+                        if ($identificacion !== null && $identificacion !== '') {
+                            $query->orWhere('identificacion', $identificacion);
+                        }
+                    })
+                    ->first();
+
+                if ($personaExistente) {
+                    DB::rollBack();
+                    return response()->json([
+                        'error' => 'El email o la identificación ya pertenecen a otra persona.'
+                    ], 409);
+                }
+
+                $user = User::where('idpersona', $persona->id)->first();
+
+                if ($email !== null && $email !== '') {
+                    $emailDuplicadoUser = User::where('email', $email)
+                        ->when($user, function ($q) use ($user) {
+                            return $q->where('id', '<>', $user->id);
+                        })
+                        ->first();
+
+                    if ($emailDuplicadoUser) {
+                        DB::rollBack();
+                        return response()->json([
+                            'error' => 'El email ya está registrado en un usuario del sistema.'
+                        ], 409);
                     }
-                    if ($identificacion !== '') {
-                        $query->orWhere('identificacion', $identificacion);
-                    }
-                })
-                ->first();
-
-            if ($personaExistente) {
-                return response()->json([
-                    'error' => 'El email o la identificación ya pertenecen a otra persona.'
-                ], 409);
+                }
             }
 
-            $user = User::where('idpersona', $persona->id)->first();
-
-            $emailDuplicadoUser = User::where('email', $email)
-                ->when($user, function ($q) use ($user) {
-                    return $q->where('id', '<>', $user->id);
-                })
-                ->first();
-
-            if ($emailDuplicadoUser) {
-                return response()->json([
-                    'error' => 'El email ya está registrado en un usuario del sistema.'
-                ], 409);
-            }
-
-            $persona->fechaNac = $request->input('fechaNac');
-            
-            $idTipoIdentificacion = $request->input('idtipoIdentificacion');
-            if ($idTipoIdentificacion !== null && $idTipoIdentificacion !== '' && $idTipoIdentificacion !== 0) {
-                $persona->idTipoIdentificacion = $idTipoIdentificacion;
+            // Actualizar solo los campos que vienen en el request
+            if ($request->has('fechaNac')) {
+                $persona->fechaNac = $request->input('fechaNac');
             }
             
-            $persona->identificacion = $identificacion;
-            $persona->nombre1 = $request->input('nombre1');
-            $persona->nombre2 = $request->input('nombre2');
-            $persona->apellido1 = $request->input('apellido1');
-            $persona->apellido2 = $request->input('apellido2');
-            $persona->idCiudadNac = $request->input('idciudadNac');
-            $persona->celular = $request->input('celular');
-            $persona->email = $email;
-            $persona->direccion = $request->input('direccion');
-            $persona->idCiudadUbicacion = $request->input('idciudadUbicacion');
-            $persona->telefonoFijo = $request->input('telefonoFijo');
-            $persona->sexo = $request->input('sexo');
-            $persona->rh = $request->input('rh');
+            if ($request->has('idtipoIdentificacion')) {
+                $idTipoIdentificacion = $request->input('idtipoIdentificacion');
+                if ($idTipoIdentificacion !== null && $idTipoIdentificacion !== '' && $idTipoIdentificacion !== 0) {
+                    $persona->idTipoIdentificacion = $idTipoIdentificacion;
+                }
+            }
+            
+            if ($identificacion !== null) {
+                $persona->identificacion = $identificacion;
+            }
+            
+            if ($request->has('nombre1')) {
+                $persona->nombre1 = $request->input('nombre1');
+            }
+            if ($request->has('nombre2')) {
+                $persona->nombre2 = $request->input('nombre2');
+            }
+            if ($request->has('apellido1')) {
+                $persona->apellido1 = $request->input('apellido1');
+            }
+            if ($request->has('apellido2')) {
+                $persona->apellido2 = $request->input('apellido2');
+            }
+            if ($request->has('idciudadNac')) {
+                $persona->idCiudadNac = $request->input('idciudadNac');
+            }
+            if ($request->has('celular')) {
+                $persona->celular = $request->input('celular');
+            }
+            if ($email !== null) {
+                $persona->email = $email;
+            }
+            if ($request->has('direccion')) {
+                $persona->direccion = $request->input('direccion');
+            }
+            if ($request->has('idciudadUbicacion')) {
+                $persona->idCiudadUbicacion = $request->input('idciudadUbicacion');
+            }
+            if ($request->has('telefonoFijo')) {
+                $persona->telefonoFijo = $request->input('telefonoFijo');
+            }
+            if ($request->has('sexo')) {
+                $persona->sexo = $request->input('sexo');
+            }
+            if ($request->has('rh')) {
+                $persona->rh = $request->input('rh');
+            }
 
             if ($request->hasFile('rutaFotoFile')) {
                 $persona->rutaFoto = $this->storeLogoPersona($request);
@@ -2131,8 +2466,8 @@ class ContratacionController extends Controller
 
             $persona->save();
 
-
-            if ($user) {
+            $user = User::where('idpersona', $persona->id)->first();
+            if ($user && $email !== null && $email !== '') {
                 $user->email = $email;
                 $user->save();
             }
@@ -2187,6 +2522,7 @@ class ContratacionController extends Controller
      * Obtiene las áreas de conocimiento para asinar a una nueva competencia
      * teniendo en cuenta el programa y nivel educativo.
      *
+     * @param int $idPrograma
      * @return \Illuminate\Http\JsonResponse
      */
     public function getAreasConocimientoPrograma(int $idPrograma)
@@ -2200,10 +2536,9 @@ class ContratacionController extends Controller
             ], 404);
         }
 
-        $areas = AreaConocimiento::where(
-            'idNivelEducativo',
-            $programa->idNivelEducativo
-        )->get();
+        $areas = AreaConocimiento::whereHas('programas', function ($query) use ($idPrograma) {
+            $query->where('idPrograma', $idPrograma);
+        })->orderBy('nombreAreaConocimiento', 'asc')->get();
 
         return response()->json([
             'message' => 'Áreas obtenidas correctamente',
@@ -2212,7 +2547,53 @@ class ContratacionController extends Controller
     }
 
     /**
-     * Crea una nueva área de conocimiento.
+     * Obtiene las áreas de conocimiento de múltiples programas.
+     * Retorna todas las áreas únicas asociadas a los programas especificados.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAreasConocimientoProgramas(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'idProgramas' => 'required|array|min:1',
+                'idProgramas.*' => 'integer|exists:programa,id'
+            ]);
+
+            $idProgramas = $validated['idProgramas'];
+
+            // Obtener todas las áreas de conocimiento asociadas a los programas especificados
+            $areas = AreaConocimiento::whereHas('programas', function ($query) use ($idProgramas) {
+                $query->whereIn('idPrograma', $idProgramas);
+            })
+            ->orderBy('nombreAreaConocimiento', 'asc')
+            ->get();
+
+            return response()->json([
+                'message' => 'Áreas de conocimiento obtenidas correctamente',
+                'data' => $areas
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error al obtener áreas de conocimiento por programas', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'message' => 'Error al obtener áreas de conocimiento',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Crea una nueva área de conocimiento y la asocia a los programas especificados.
+     * Valida que no exista duplicado en ninguno de los programas.
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
@@ -2221,16 +2602,90 @@ class ContratacionController extends Controller
     {
         try {
             $validated = $request->validate([
-                'nombreAreaConocimiento' => 'required|string|max:255|unique:area_conocimiento,nombreAreaConocimiento'
+                'nombreAreaConocimiento' => 'required|string|max:255',
+                'idProgramas' => 'nullable|array',
+                'idProgramas.*' => 'integer|exists:programa,id'
             ]);
 
-            $area = AreaConocimiento::create([
-                'nombreAreaConocimiento' => $validated['nombreAreaConocimiento']
-            ]);
+            $nombreArea = trim($validated['nombreAreaConocimiento']);
+            $idProgramas = $validated['idProgramas'] ?? [];
+
+            // Buscar si el área ya existe (por nombre)
+            $areaExistente = AreaConocimiento::where('nombreAreaConocimiento', $nombreArea)->first();
+
+            // Si el área no existe, crearla
+            if (!$areaExistente) {
+                $areaExistente = AreaConocimiento::create([
+                    'nombreAreaConocimiento' => $nombreArea
+                ]);
+            }
+
+            // Verificar qué programas ya tienen el área asociada y cuáles no
+            $programasConArea = [];
+            $programasSinArea = [];
+            
+            if (!empty($idProgramas)) {
+                // Obtener programas donde el área ya existe
+                $programasExistentes = DB::table('asignacionAreaConocimientoPrograma')
+                    ->where('idAreaConocimiento', $areaExistente->id)
+                    ->whereIn('idPrograma', $idProgramas)
+                    ->join('programa', 'asignacionAreaConocimientoPrograma.idPrograma', '=', 'programa.id')
+                    ->select('programa.nombrePrograma', 'programa.id')
+                    ->get();
+
+                $programasConArea = $programasExistentes->pluck('nombrePrograma')->toArray();
+                $idsProgramasConArea = $programasExistentes->pluck('id')->toArray();
+                
+                // Programas donde NO existe el área
+                $idsProgramasSinArea = array_diff($idProgramas, $idsProgramasConArea);
+                
+                // Obtener nombres de programas donde no existe
+                if (!empty($idsProgramasSinArea)) {
+                    $programasSinArea = DB::table('programa')
+                        ->whereIn('id', $idsProgramasSinArea)
+                        ->pluck('nombrePrograma')
+                        ->toArray();
+                }
+
+                // Asociar el área solo a los programas donde NO existe
+                foreach ($idsProgramasSinArea as $idPrograma) {
+                    DB::table('asignacionAreaConocimientoPrograma')->insert([
+                        'idAreaConocimiento' => $areaExistente->id,
+                        'idPrograma' => $idPrograma,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+            }
+
+            // Construir mensaje según el caso
+            $message = 'Área de conocimiento procesada correctamente';
+            $warnings = [];
+            
+            if (!empty($programasConArea) && !empty($programasSinArea)) {
+                // El área ya existía en algunos programas pero se asoció a otros
+                $message = 'Área de conocimiento asociada a los programas seleccionados';
+                $warnings[] = "El área ya existía en: " . implode(', ', $programasConArea);
+                $warnings[] = "Se asoció a: " . implode(', ', $programasSinArea);
+            } elseif (!empty($programasConArea) && empty($programasSinArea)) {
+                // El área ya existe en todos los programas seleccionados
+                return response()->json([
+                    'message' => "Área de conocimiento ya existe en todos los programas seleccionados: " . implode(', ', $programasConArea),
+                    'error' => 'DUPLICADO_EN_PROGRAMA',
+                    'data' => [
+                        'area' => $areaExistente,
+                        'programas' => $programasConArea
+                    ]
+                ], 409); // 409 Conflict
+            } elseif (empty($programasConArea) && !empty($programasSinArea)) {
+                // El área no existía en ningún programa, se creó y asoció
+                $message = 'Área de conocimiento creada y asociada correctamente';
+            }
 
             return response()->json([
-                'message' => 'Área de conocimiento creada correctamente',
-                'data' => $area
+                'message' => $message,
+                'warnings' => $warnings,
+                'data' => $areaExistente->load('programas')
             ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -2238,7 +2693,10 @@ class ContratacionController extends Controller
                 'errors' => $e->errors()
             ], 422);
         } catch (\Exception $e) {
-            Log::error('Error al crear área de conocimiento: ' . $e->getMessage());
+            Log::error('Error al crear área de conocimiento', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
             return response()->json([
                 'message' => 'Error al crear área de conocimiento',
                 'error' => $e->getMessage()
@@ -2258,6 +2716,14 @@ class ContratacionController extends Controller
             $programas = Programa::with('nivel', 'tipoFormacion', 'estado')
                 ->orderBy('nombrePrograma', 'asc')
                 ->get();
+            
+            // Contar fichas reales para cada programa
+            $programas->each(function ($programa) {
+                $fichasCount = \App\Models\Ficha::whereHas('asignacion', function ($query) use ($programa) {
+                    $query->where('idPrograma', $programa->id);
+                })->count();
+                $programa->fichas = $fichasCount;
+            });
             
             return response()->json($programas);
         } catch (\Exception $e) {

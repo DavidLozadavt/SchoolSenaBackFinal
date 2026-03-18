@@ -9,15 +9,12 @@ class Grupo extends Model
 {
     use HasFactory;
 
-
     protected $table = "grupo";
     public static $snakeAttributes = false;
     public $timestamps = false;
 
-
-     public function clase()
+    public function clase()
     {
         return $this->belongsTo(Clase::class, 'clase_id');
     }
-   
 }

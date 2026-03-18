@@ -34,10 +34,57 @@ class PensumController extends Controller
         ], 200);
     }
 
+    public function storeNivelEducativo(Request $request)
+    {
+        try {
+            $request->validate([
+                'nombreNivel' => 'required|string|max:100'
+            ]);
+
+            $nombreNivel = strtoupper(trim($request->nombreNivel));
+
+            // Buscar si ya existe
+            $nivelExistente = NivelEducativo::where('nombreNivel', $nombreNivel)->first();
+
+            if ($nivelExistente) {
+                // Si existe, retornar el existente
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Nivel educativo ya existe',
+                    'data' => [
+                        'id' => $nivelExistente->id,
+                        'nombre' => $nivelExistente->nombreNivel
+                    ]
+                ], 200);
+            }
+
+            // Si no existe, crear nuevo
+            $nivelEducativo = NivelEducativo::create([
+                'nombreNivel' => $nombreNivel,
+                'activo' => true
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Nivel educativo creado correctamente',
+                'data' => [
+                    'id' => $nivelEducativo->id,
+                    'nombre' => $nivelEducativo->nombreNivel
+                ]
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al crear nivel educativo',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function index()
     {
         try {
-            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado'])->get();
+            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'grados'])->get();
             return response()->json([
                 'status' => 'success',
                 'data' => $programas
@@ -65,6 +112,43 @@ class PensumController extends Controller
         }
     }
 
+    public function indexByRed(Request $request, int $idRed)
+    {
+        try {
+            // Verificamos si se pasó el centro
+            if (!$request->filled('centro')) {
+                return response()->json([
+                    'status' => 'success',
+                    'data' => [] // Retorna vacío si no hay centro
+                ]);
+            }
+
+            $idCentro = $request->centro;
+
+            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'red'])
+                ->where('idRed', $idRed)
+                ->withCount([
+                    'fichasActivas as fichas_activas_count' => function ($q) use ($idCentro) {
+                        $q->whereHas('aperturarPrograma.sede', function ($sub) use ($idCentro) {
+                            $sub->where('idCentroFormacion', $idCentro);
+                        });
+                    }
+                ])
+                ->orderByDesc('fichas_activas_count')
+                ->orderBy('nombrePrograma')
+                ->get();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $programas
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 
 
     public function store(Request $request)
@@ -77,6 +161,7 @@ class PensumController extends Controller
             'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
             'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
             'documento'        => 'nullable|file|mimes:pdf|max:5120',
+            'idRed' => 'required|integer|exists:red,id',
         ]);
 
         try {
@@ -89,6 +174,7 @@ class PensumController extends Controller
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
                 'idCompany'           => KeyUtil::idCompany(),
+                'idRed' => $request->idRed,
             ]);
 
             $sanitize = function ($string) {
@@ -165,6 +251,7 @@ class PensumController extends Controller
             'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
             'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
             'documento'        => 'nullable|file|mimes:pdf|max:5120',
+            'idRed' => 'nullable|integer'
         ]);
 
         try {
@@ -177,6 +264,7 @@ class PensumController extends Controller
                 'idNivelEducativo'    => $request->idNivelEducativo,
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
+                'idRed' => $request->idRed
             ];
 
             if ($request->hasFile('documento')) {

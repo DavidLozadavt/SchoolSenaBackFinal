@@ -22,7 +22,7 @@ trait UtilNotification
         $notificacion->idUsuarioReceptor = $idUsuarioReceptor;
         $notificacion->idUsuarioRemitente  = auth()->user()->id;
         $notificacion->idEmpresa =  KeyUtil::idCompany();
-        $notificacion->metadataInfo = $metaDataInfo;
+        // $notificacion->metadataInfo = $metaDataInfo; // Column does not exist in DB
         $notificacion->hora = $currentTime->toTimeString();
         $notificacion->fecha = $currentTime->toDateString();
         $notificacion->estado_id = Status::ID_ACTIVE;

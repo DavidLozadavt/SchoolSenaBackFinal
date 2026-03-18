@@ -186,4 +186,9 @@ class Contract extends Model
     {
         return $this->hasMany(HorarioMateria::class, 'idContrato', 'id');
     }
+
+    public function asignacionContratoAreaConocimiento()
+    {
+        return $this->hasMany(AsignacionContratoAreaConocimiento::class, 'idContrato', 'id');
+    }
 }

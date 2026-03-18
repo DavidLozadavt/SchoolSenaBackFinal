@@ -23,6 +23,22 @@ class CentrosFormacion extends Model
         'foto'
     ];
 
+    const RUTA_FOTO = "foto";
+    const RUTA_FOTO_DEFAULT = "/default/logoweb.png";
+
+    protected $appends = ['rutaFotoUrl'];
+
+    public function getRutaFotoUrlAttribute()
+    {
+        if (
+            isset($this->attributes['foto']) &&
+            isset($this->attributes['foto'][0])
+        ) {
+            return url($this->attributes['foto']);
+        }
+        return url(self::RUTA_FOTO_DEFAULT);
+    }
+
     public function ciudad()
     {
         return $this->belongsTo(City::class, 'idCiudad');
