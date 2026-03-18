@@ -419,8 +419,7 @@ class InstructoresController extends Controller
                     'duracionSesion'       => $duracionSesion,
                     'cantidadSesiones'     => $cantidadSesiones,
                     'duracionHoras'        => round($duracionSesion * $cantidadSesiones, 2),
-                    'idDia'                => $h->idDia,
-                    'estadoAsociacion'     => $h->detallesRmi->first()?->estadoAsociacion,
+                    'idDia'                => $h->idDia
                 ];
             });
 
@@ -429,11 +428,15 @@ class InstructoresController extends Controller
                 ->groupBy('idGradoMateria')
                 ->map(function ($horariosGM) {
                     $primero = $horariosGM->first();
+                    $detallesRmi = DetalleRmi::whereHas('horarioMateria', function ($query) use ($primero) {
+                        $query->where('idGradoMateria', $primero['idGradoMateria']);
+                    })->get();
                     return [
                         'idGradoMateria'       => $primero['idGradoMateria'],
                         'competencia'          => $primero['competencia'],
                         'resultadoAprendizaje' => $primero['resultadoAprendizaje'],
-                        'horarios'             => $horariosGM->map(function ($item) {
+                        'estadoAsociacion'     => $detallesRmi->first()?->estadoAsociacion,
+                        'horarios'             => $horariosGM->map(function ($item) use ($detallesRmi) {
                             return [
                                 'idHorario'        => $item['idHorario'],
                                 'horaInicial'      => $item['horaInicial'],
@@ -443,8 +446,7 @@ class InstructoresController extends Controller
                                 'duracionSesion'   => $item['duracionSesion'],
                                 'cantidadSesiones' => $item['cantidadSesiones'],
                                 'duracionHoras'    => $item['duracionHoras'],
-                                'idDia'            => $item['idDia'],
-                                'estadoAsociacion' => $item['estadoAsociacion'],
+                                'idDia'            => $item['idDia']
                             ];
                         })->values(),
                     ];
@@ -780,6 +782,36 @@ class InstructoresController extends Controller
                 'trace'        => $e->getTraceAsString(),
             ]);
             return response()->json(['message' => 'Error al revertir el RMI', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    
+    // cambiar el estado de asociacion de un detalleRmi
+    public function setEstadoAsociacion($idGradoMateria, Request $request)
+    {
+        try {
+            $estadoAsociacion = $request->input('estado');
+            if ($idGradoMateria == null) {
+                return response()->json(['message' => 'Parametros no proporcionados'], 400);
+            }
+
+            $detallesRmi = DetalleRmi::whereHas('horarioMateria', function ($query) use ($idGradoMateria) {
+                $query->where('idGradoMateria', $idGradoMateria);
+            })->get();
+
+            foreach ($detallesRmi as $detalle) {
+                $detalle->estadoAsociacion = $estadoAsociacion;
+                $detalle->save();
+            }
+
+            return response()->json([
+                'message' => 'Estado de la asociación actualizado correctamente',
+                'detalles' => $detallesRmi
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Error al actualizar el estado de la asociación', 'error' => $e->getMessage()], 500);
         }
     }
 }

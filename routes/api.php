@@ -1400,7 +1400,7 @@ Route::post('sanciones',  [SancionesController::class, 'store']);
 //asistencia y inasistencia
 Route::apiResource('asistencia', AsistenciaController::class);
 Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
-Route::get('get_assistances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
+Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
 Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);
 
 //Intructores:
@@ -1419,4 +1419,9 @@ Route::middleware('auth:api')->group(function () {
 Route::middleware('auth:api')->group(function () {
     Route::get('notificacionSistema', [NotificacionesSistemaController::class, 'indexByUser']);
     Route::patch('notificacionSistema/{id}', [NotificacionesSistemaController::class, 'update']); // ✅
+});
+
+// RMI
+Route::middleware('auth:api')->group(function () {
+    Route::patch('set-estado-asociacion/{idGradoMateria}', [InstructoresController::class, 'setEstadoAsociacion']);
 });

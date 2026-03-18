@@ -8,7 +8,7 @@ class DetalleRmi extends Model
 {
     protected $table = 'detalleRmi';
 
-    protected $fillable = ['idRmi', 'idHorarioMateria', 'estado', 'observacion'];
+    protected $fillable = ['idRmi', 'idHorarioMateria', 'estado', 'observacion', 'estadoAsociacion'];
 
     public function rmi()
     {
