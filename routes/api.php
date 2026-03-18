@@ -1371,8 +1371,6 @@ Route::middleware('auth:api')->group(function () {
     Route::get('materias-by-contrato', [HorarioMateriaController::class, 'getMateriasByContrato']);
 });
 
-//buscar estudiantes por idMateria
-Route::get('get_student_by_id_materia', [MatriculaAcademicaController::class, 'getStudentByIdMateria']);
 Route::get('estadisticas-asistencia', [AsistenciaController::class, 'getEstadisticasAsistencia']);
 Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
 Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
@@ -1425,3 +1423,13 @@ Route::middleware('auth:api')->group(function () {
 Route::middleware('auth:api')->group(function () {
     Route::patch('set-estado-asociacion/{idGradoMateria}', [InstructoresController::class, 'setEstadoAsociacion']);
 });
+// Rutas del aprendiz autenticado (requieren auth)
+Route::middleware('auth:api')->group(function () {
+    Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
+    Route::get('mis-asistencias-generales', [AsistenciaController::class, 'misAsistenciasGenerales']);
+    Route::get('estudiante/mi-dashboard', [AsistenciaController::class, 'getDashboardEstudiante']);
+    Route::get('estudiante/dashboard/{idPersona}', [AsistenciaController::class, 'getDashboardEstudiantePorId']);
+});
+//dashboard para instructores
+Route::get('instructores/mi-dashboard', [InstructoresController::class, 'getDashboardInstructor']);
+Route::get('misAsistenciasEstudiante', [AsistenciaController::class, 'misAsistenciasEstudiante']);

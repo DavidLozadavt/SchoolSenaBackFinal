@@ -814,4 +814,95 @@ class InstructoresController extends Controller
             return response()->json(['message' => 'Error al actualizar el estado de la asociación', 'error' => $e->getMessage()], 500);
         }
     }
+    /**
+     * Dashboard del instructor autenticado.
+     * No requiere parámetros: usa auth()->user() para obtener el contrato activo.
+     * Devuelve fichas con RAPs (resultados planos), sesiones y horas del mes actual.
+     */
+    public function getDashboardInstructor(Request $request)
+    {
+        try {
+            $user    = auth()->user();
+            $persona = $user?->persona;
+
+            if (!$persona) {
+                return response()->json(['fichas' => [], 'message' => 'Sin persona asociada'], 200);
+            }
+
+            // Contrato activo del instructor
+            $contrato = $persona->contracts()->latest()->first();
+
+            if (!$contrato) {
+                return response()->json(['fichas' => [], 'message' => 'Sin contrato activo'], 200);
+            }
+
+            $inicio = \Carbon\Carbon::now()->startOfMonth();
+            $fin    = \Carbon\Carbon::now()->endOfMonth();
+
+            $horarios = \App\Models\HorarioMateria::with([
+                'ficha.asignacion.programa',
+                'gradoMateria.materia.padre',
+            ])
+                ->where('idContrato', $contrato->id)
+                ->where('estado', 'ASIGNADO')
+                ->where(function ($q) use ($inicio, $fin) {
+                    $q->whereBetween('fechaInicial', [$inicio, $fin])
+                        ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                        ->orWhere(function ($q2) use ($inicio, $fin) {
+                            $q2->where('fechaInicial', '<=', $inicio)
+                                ->where('fechaFinal', '>=', $fin);
+                        });
+                })
+                ->get();
+
+            $fichas = $horarios->groupBy('idFicha')->map(function ($grupo) use ($inicio, $fin) {
+                $ficha    = $grupo->first()->ficha;
+                $programa = $ficha?->asignacion?->programa;
+
+                // Resultados planos (un registro por horario)
+                $resultados = $grupo->map(function ($h) use ($inicio, $fin) {
+                    $rap         = $h->gradoMateria?->materia;
+                    $competencia = $rap?->padre;
+                    $durSesion   = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+
+                    $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                    $cantSesiones    = 0;
+                    $cursor          = $desde->copy();
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantSesiones++;
+                        $cursor->addDay();
+                    }
+
+                    return [
+                        'idHorario'            => $h->id,
+                        'competencia'          => $competencia?->nombreMateria,
+                        'resultadoAprendizaje' => $rap?->nombreMateria,
+                        'horaInicial'          => $h->horaInicial,
+                        'horaFinal'            => $h->horaFinal,
+                        'fechaInicial'         => $h->fechaInicial,
+                        'fechaFinal'           => $h->fechaFinal,
+                        'idDia'                => $h->idDia,
+                        'duracionSesion'       => $durSesion,
+                        'cantidadSesiones'     => $cantSesiones,
+                        'duracionHoras'        => round($durSesion * $cantSesiones, 2),
+                    ];
+                })->values();
+
+                return [
+                    'idFicha'           => $ficha?->id,
+                    'codigoFicha'       => $ficha?->codigo,
+                    'programaFormacion' => $programa?->nombrePrograma,
+                    'codigoPrograma'    => $programa?->codigoPrograma,
+                    'resultados'        => $resultados,
+                ];
+            })->values();
+
+            return response()->json(['fichas' => $fichas]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
 }
