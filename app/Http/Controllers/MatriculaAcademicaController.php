@@ -235,6 +235,7 @@ class MatriculaAcademicaController extends Controller
                     $matricula->notaParcial = null;
                 }
                 
+                
                 return $matricula;
             });
 
