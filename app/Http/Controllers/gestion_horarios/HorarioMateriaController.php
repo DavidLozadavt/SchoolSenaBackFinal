@@ -31,6 +31,7 @@ use App\Models\Ficha;
 use App\Models\Dia;
 use App\Models\Asistencia;
 use App\Models\DetalleRmi;
+use App\Models\Rmi;
 use App\Models\MatriculaAcademica;
 use App\Models\NotificacionSistema;
 
@@ -505,8 +506,24 @@ class HorarioMateriaController extends Controller
                     ]);
 
                     // Generar RMI ahora que el horario ya tiene idContrato y fechas
-                    $horarioMateria->refresh(); // ← asegura que idContrato esté actualizado
-                    HorarioMateria::generarRmis($horarioMateria); // ← aquí
+                    $horarioMateria->refresh();
+                    HorarioMateria::generarRmis($horarioMateria);
+                }
+
+                // Actualizar el estado del detalle RMI del periodo actual a PENDIENTE
+                $periodoActual = now()->format('Y-m');
+                $rmiActual = Rmi::where('periodo', $periodoActual)->first();
+                $horarios = HorarioMateria::where('idContrato', $idContrato)->get();
+
+                if ($rmiActual && $horarios) {
+                    foreach ($horarios as $horario) {
+                        DetalleRmi::where('idHorarioMateria', $horario->id)
+                            ->where('idRmi', $rmiActual->id)
+                            ->update([
+                                'estado'      => 'PENDIENTE',
+                                'observacion' => null
+                            ]);
+                    }
                 }
             }
 
