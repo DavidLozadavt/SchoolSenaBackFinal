@@ -44,14 +44,14 @@ class InstructoresController extends Controller
                             'fechaInicial',
                             'fechaFinal'
                         )->where('estado', 'ASIGNADO')
-                        ->where(function ($q) use ($inicio, $fin) {
-                            $q->whereBetween('fechaInicial', [$inicio, $fin])
-                                ->orWhereBetween('fechaFinal', [$inicio, $fin])
-                                ->orWhere(function ($q2) use ($inicio, $fin) {
-                                    $q2->where('fechaInicial', '<=', $inicio)
-                                        ->where('fechaFinal', '>=', $fin);
-                                });
-                        });
+                            ->where(function ($q) use ($inicio, $fin) {
+                                $q->whereBetween('fechaInicial', [$inicio, $fin])
+                                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                                    ->orWhere(function ($q2) use ($inicio, $fin) {
+                                        $q2->where('fechaInicial', '<=', $inicio)
+                                            ->where('fechaFinal', '>=', $fin);
+                                    });
+                            });
                     }
                 ]);
             }
@@ -84,11 +84,11 @@ class InstructoresController extends Controller
                 // Obtener detallesRmi PENDIENTE/RECHAZADO del periodo actual para este contrato
                 $detallesRmi = $rmi
                     ? DetalleRmi::where('idRmi', $rmi->id)
-                        ->whereIn('estado', ['PENDIENTE', 'RECHAZADO'])
-                        ->whereHas('horarioMateria', function ($q) use ($contrato) {
-                            $q->where('idContrato', $contrato->id);
-                        })
-                        ->get()
+                    ->whereIn('estado', ['PENDIENTE', 'RECHAZADO'])
+                    ->whereHas('horarioMateria', function ($q) use ($contrato) {
+                        $q->where('idContrato', $contrato->id);
+                    })
+                    ->get()
                     : collect();
 
                 // Si no tiene detallesRmi PENDIENTE/RECHAZADO en el periodo, excluir
@@ -545,46 +545,16 @@ class InstructoresController extends Controller
             $email = $validated['email'];
             $nombre = $activation->user->persona->nombre1;
 
-            try {
+            $asunto  = 'Aprobación de RMI - Periodo ' . $periodo;
+            $mensaje = "Estimado(a) $nombre,\n\n"
+                . "Nos complace informarle que su RMI correspondiente al periodo $periodo ha sido APROBADO.\n\n"
+                . "No se requieren acciones adicionales por su parte.\n\n"
+                . "Si tiene alguna inquietud, puede comunicarse con el equipo administrativo.\n\n"
+                . "Atentamente,\n"
+                . "Equipo Administrativo\n"
+                . "Sistema de Gestión Académica";
 
-                $html = "
-                <div style='font-family: Arial, sans-serif; line-height:1.6; color:#333'>
-                    <h2 style='color:#2c3e50;'>Notificación de RMI</h2>
-
-                    <p>Estimado(a) <strong>{$nombre}</strong>,</p>
-
-                    <p>
-                        Nos complace informarle que su 
-                        <strong>Registro Mensual de Instructor (RMI)</strong>
-                        correspondiente al periodo <strong>{$periodo}</strong>
-                        ha sido <span style='color:green; font-weight:bold;'>APROBADO</span>.
-                    </p>
-
-                    <div style='background:#f4f6f7;padding:12px;border-left:4px solid #2ecc71;margin:15px 0;'>
-                        No se requieren acciones adicionales por su parte.
-                    </div>
-
-                    <p>
-                        Si tiene alguna inquietud, puede comunicarse con el equipo administrativo.
-                    </p>
-
-                    <br>
-
-                    <p>
-                        Atentamente,<br>
-                        <strong>Equipo Administrativo</strong><br>
-                        Sistema de Gestión Académica
-                    </p>
-                </div>
-                ";
-
-                Mail::html($html, function ($message) use ($email) {
-                    $message->to($email)
-                        ->subject('Notificación de aprobación de RMI');
-                });
-            } catch (\Exception $e) {
-                \Log::error('Error enviando correo RMI: ' . $e->getMessage());
-            }
+            \App\Jobs\SendBasicEmail::dispatch($email, $asunto, $mensaje);
 
             return response()->json([
                 'message' => 'RMI aceptado con éxito',
@@ -683,41 +653,17 @@ class InstructoresController extends Controller
 
             $nombre = $activation->user->persona->nombre1;
 
-            try {
+            $nombre   = $activation->user->persona->nombre1;
+            $asunto   = 'Rechazo de RMI - Periodo ' . $periodo;
+            $mensaje  = "Estimado(a) $nombre,\n\n"
+                . "Le informamos que su RMI correspondiente al periodo $periodo ha sido RECHAZADO.\n\n"
+                . "Motivo del rechazo:\n"
+                . $validated['motivo'] . "\n\n"
+                . "Por favor revise las observaciones y realice las correcciones necesarias.\n\n"
+                . "Atentamente,\n"
+                . "Equipo administrativo";
 
-                $html = "
-                <p>Estimado(a) <strong>{$nombre}</strong>,</p>
-
-                <p>
-                    Le informamos que su <strong>RMI</strong> correspondiente al periodo 
-                    <strong>{$periodo}</strong> ha sido <span style='color:red;'><strong>rechazado</strong></span>.
-                </p>
-
-                <p><strong>Motivo del rechazo:</strong></p>
-
-                <blockquote style='background:#f8f9fa;padding:10px;border-left:4px solid #dc3545;'>
-                    {$validated['motivo']}
-                </blockquote>
-
-                <p>
-                    Por favor revise las observaciones y realice las correcciones necesarias.
-                </p>
-
-                <br>
-
-                <p>
-                    Atentamente,<br>
-                    <strong>Equipo administrativo</strong>
-                </p>
-                ";
-
-                Mail::html($html, function ($message) use ($email) {
-                    $message->to($email)
-                        ->subject('Rechazo de RMI');
-                });
-            } catch (\Exception $e) {
-                \Log::error('Error enviando correo RMI: ' . $e->getMessage());
-            }
+            \App\Jobs\SendBasicEmail::dispatch($email, $asunto, $mensaje);
 
             return response()->json([
                 'message' => 'RMI rechazado con éxito',
