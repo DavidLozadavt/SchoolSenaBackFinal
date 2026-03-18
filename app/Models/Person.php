@@ -112,7 +112,7 @@ class Person extends Model
         return $this->hasOne(InformacionPersonaNatural::class, 'idPersona', 'id');
     }
 
-      public function asignacionPropietario()
+    public function asignacionPropietario()
     {
         return $this->hasOne(AsignacionPropietario::class, 'idPropietario', 'id');
     }
@@ -121,5 +121,10 @@ class Person extends Model
     public function referenciasPersonales()
     {
         return $this->hasMany(ReferenciaPersonal::class, 'idPersona');
+    }
+
+    public function contracts()
+    {
+        return $this->hasMany(Contract::class, 'idpersona');
     }
 }
