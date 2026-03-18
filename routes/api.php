@@ -126,22 +126,6 @@ use App\Http\Controllers\gestion_horarios\HorarioMateriaController;
 use App\Http\Controllers\gestion_horarios\GradoProgramaController;
 use App\Http\Controllers\gestion_materias\MateriaController;
 use App\Http\Controllers\auth\ForgotPasswordController;
-use App\Http\Controllers\TmpRapController;
-use App\Http\Controllers\gestion_horarios\DiaController;
-use App\Http\Controllers\RedController;
-use App\Http\Controllers\gestion_actividades\ActividadController;
-use App\Http\Controllers\ambiente_virtual\GruposFichaController;
-use App\Http\Controllers\ambiente_virtual\AsignacionActividadController;
-use App\Http\Controllers\ambiente_virtual\ActividadesAprendizController;
-use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
-use App\Http\Controllers\MatriculaAcademicaController;
-use App\Http\Controllers\AnotacionesDisciplinariasController;
-use App\Http\Controllers\AsistenciaController;
-use App\Http\Controllers\CompromisosController;
-use App\Http\Controllers\gestion_notificacion\NotificacionesSistemaController;
-use App\Http\Controllers\gestion_pensum\InasistenciaController;
-use App\Http\Controllers\InstructoresController;
-use App\Http\Controllers\SancionesController;
 
 /*
 |--------------------------------------------------------------------------
@@ -261,7 +245,6 @@ Route::post('store_actividades_riesgo_profesional', [ContratacionController::cla
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
 Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
 Route::get('areas-conocimiento/programa/{idPrograma}', [ContratacionController::class, 'getAreasConocimientoPrograma']);
-Route::post('areas-conocimiento/programas', [ContratacionController::class, 'getAreasConocimientoProgramas']);
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
 Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
@@ -491,7 +474,6 @@ Route::group([
 ], function () {
 
     Route::get('contrato-tipos-identificacion', [ContratacionController::class, 'tiposIdentificacion']);
-    Route::get('contrato-tipos-contrato', [ContratacionController::class, 'tiposContrato']);
     Route::get('contrato-persona/{identificacion}', [ContratacionController::class, 'getPersonaByIdentificacion']);
     Route::post('contrato-persona', [ContratacionController::class, 'storePersona']);
     Route::put('contrato-persona', [ContratacionController::class, 'storePersona']);
@@ -1128,7 +1110,7 @@ Route::get('get_viajes_for_autorizacion', [AutorizacionController::class, 'getVi
 
 Route::apiResource('grupos_nomina', GrupoNominaController::class);
 
-// configuaracion productos
+// configuaracion productos 
 
 Route::get('products_by_tipo_producto', [ConfiguracionProductosController::class, 'getProductosByTipoProducto']);
 Route::post('update_valor_venta_producto', [ConfiguracionProductosController::class, 'updateValorVentaProducto']);
@@ -1153,7 +1135,6 @@ Route::get('get_all_categories_company/{id}', [CategoriasProController::class, '
 
 //ruta para traer asociados administradores activos
 Route::get('programasporRegional/{idRegional}', [PensumController::class, 'indexByRegional']);
-Route::get('programasporRed/{idRed}', [PensumController::class, 'indexByRed']);
 Route::get('get_asociados_admin', [PolizasController::class, 'getAsociadosAdmin']);
 Route::post('store_cuenta_cobrar_poliza', [PolizasController::class, 'storeCuentaCobrarPagoPoliza']);
 
@@ -1183,7 +1164,7 @@ Route::get('programa/{idPrograma}/fichas', [DocumentoFichaController::class, 'fi
 Route::get('programa/{idPrograma}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizados']);
 Route::put('programa/{idPrograma}/documento/{idTipoDocumento}/autorizar', [DocumentoFichaController::class, 'autorizarDocumento']);
 
-//ruta de Periodos
+//ruta de Periodos 
 Route::post('/periodos', [PeriodosController::class, 'store']);
 Route::get('/periodos', [PeriodosController::class, 'index']);
 Route::put('/periodos/{id}', [PeriodosController::class, 'update']);
@@ -1199,7 +1180,6 @@ Route::delete('regional/{id}', [RegionalController::class, 'destroy']);
 
 //rutas SHOOL SENA para gestión de Centros de Formación:
 Route::get('centrosFormacion/regional-contratacion/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegionalForContratacion']);
-Route::get('contratos/flujo-vt', [ContratacionController::class, 'getContratosFlujoVT']);
 Route::get('centrosFormacion/regional/{idRegional}', [CentrosFormacionController::class, 'showCentrosByRegional']);
 Route::post('centrosFormacion/user/', [CentrosFormacionController::class, 'storeWithUser']);
 Route::post('centrosFormacion', [CentrosFormacionController::class, 'store']);
@@ -1220,87 +1200,27 @@ Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'g
 
 
 //rutas SHOOL SENA para gestión de aperturaPrograma:
-Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
-Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
-Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
-Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
+Route::get('aperturaPrograma',[AperturarProgramaController::class, 'index']);
+Route::post('aperturaPrograma',[AperturarProgramaController::class, 'store']);
+Route::get('aperturaPrograma/{id}',[AperturarProgramaController::class, 'show']);
+Route::patch('aperturaPrograma/{id}',[AperturarProgramaController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Fichas:
-// IMPORTANTE: Las rutas específicas deben ir ANTES de las genéricas
-Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
-Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
-Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
-Route::get('fichas/estudiante/clases', [FichaController::class, 'clasesEstudiante']);
-Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
-Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
-Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
-Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
-Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
-Route::get('fichas', [FichaController::class, 'index']);
-Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas/{id}', [FichaController::class, 'show']);
 Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
+Route::post('fichas', [FichaController::class, 'store']);
+Route::get('fichas', [FichaController::class, 'index']);
+Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
+Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
+Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
+Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 
-// Rutas Actividades (módulo académico)
-Route::middleware('auth:api')->group(function () {
-    Route::get('actividades', [ActividadController::class, 'index']);
-    Route::post('actividades', [ActividadController::class, 'store']);
-    Route::post('cuestionarios', [ActividadController::class, 'storeCuestionario']);
-    Route::match(['put', 'post'], 'cuestionarios/{id}', [ActividadController::class, 'updateCuestionario']);
-    Route::post('actividades/upload-documento', [ActividadController::class, 'uploadDocumento']);
-    Route::post('actividades/{id}/upload-documento', [ActividadController::class, 'uploadDocumentoActividad']);
-    Route::get('actividades/{id}/materiales-apoyo', [ActividadController::class, 'materialesApoyo']);
-    Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
-    Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
-    Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
-    Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
-    Route::get('actividades/{id}', [ActividadController::class, 'show']);
-    Route::put('actividades/{id}', [ActividadController::class, 'update']);
-    Route::delete('actividades/{id}', [ActividadController::class, 'destroy']);
-    Route::get('tipo_actividades', [ActividadController::class, 'tipoActividades']);
-    Route::get('clasificacionactividad', [ActividadController::class, 'clasificaciones']);
-    Route::get('materia', [ActividadController::class, 'materias']);
-    Route::get('estados', [ActividadController::class, 'estados']);
-    Route::get('planeacion/ficha/{id}', [ActividadController::class, 'planeacionPorFicha']);
-    Route::get('planeacionactividades/ficha/{id}', [ActividadController::class, 'planeacionActividadesPorFicha']);
-    Route::post('planeacionactividades', [ActividadController::class, 'asignarPlaneacionActividad']);
-    Route::delete('planeacionactividades/{id}', [ActividadController::class, 'quitarPlaneacionActividad']);
 
-    // Grupos por ficha (ambiente virtual) - tabla grupos
-    Route::get('fichas/{idFicha}/grupos', [GruposFichaController::class, 'index']);
-    Route::get('fichas/{idFicha}/grupos/datos-crear', [GruposFichaController::class, 'datosCrear']);
-    Route::get('tipos-grupo', [GruposFichaController::class, 'tiposGrupo']);
-    Route::post('fichas/{idFicha}/grupos', [GruposFichaController::class, 'store']);
-    Route::get('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'show']);
-    Route::put('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'update']);
-    Route::delete('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'destroy']);
-    Route::post('fichas/{idFicha}/grupos/{id}/unirse', [GruposFichaController::class, 'unirse']);
-
-    // Actividades del aprendiz (vista estudiante) - RUTA DUPLICADA: se usa la de ActividadController (línea 1255)
-    // Esta ruta está comentada porque ActividadController::actividadesAprendiz devuelve el formato correcto
-    // Route::get('actividades-aprendiz', [ActividadesAprendizController::class, 'index']);
-    // Route::post('actividades-aprendiz/entregar', [ActividadesAprendizController::class, 'entregar']);
-
-    // Grupos del estudiante (vista aprendiz)
-    Route::get('grupos-estudiante', [GruposFichaController::class, 'gruposEstudiante']);
-     // Actividades asignadas a un estudiante específico (vista instructor)
-    Route::get('fichas/{idFicha}/actividades-estudiante', [AsignacionActividadController::class, 'actividadesEstudiante']);
- 
-    // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
-    Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);
-    Route::post('fichas/{idFicha}/asignacion-actividades', [AsignacionActividadController::class, 'asignar']);
-    Route::get('get_student_by_id_materia',[MatriculaAcademicaController::class, 'getStudentByIdMateria']);
-    //calificaciones por ficha, materia e instructor (evaluador)
-    // Calificaciones de actividades (ambiente virtual)
-    Route::get('actividades/{idActividad}/fichas/{idFicha}/aprendices', [CalificacionActividadController::class, 'listarPorActividad']);
-    Route::post('calificacion-actividad/calificar', [CalificacionActividadController::class, 'calificarIndividual']);
-    Route::post('calificaciones/individual', [CalificacionActividadController::class, 'calificarIndividual']);
-    Route::post('calificaciones/por-grupo', [CalificacionActividadController::class, 'calificarPorGrupo']);
-    Route::get('calificaciones_ficha_by_instructor/{idInstructor}', [MatriculaAcademicaController::class, 'calificacionesFichaByInstructor']);
-    }); //Juicios evaluativos:
-Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
@@ -1318,7 +1238,7 @@ Route::get('sedes-institucionales/{id}', [SedeInstitucionalController::class, 's
 
 // Rutas de Infraestructura
 Route::post('tiposInfraestructuras', [InfraestructuraController::class, 'storeTiposInfraestructura']); // Tipo de infraestructura
-Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']);
+Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']); 
 Route::get('sedes/{idSede}/infraestructuras', [InfraestructuraController::class, 'index']);
 Route::get('regionalInfraestructuras/{idRegional}', [InfraestructuraController::class, 'infraestructurasPorRegional']);
 Route::post('infraestructuras', [InfraestructuraController::class, 'store']);
@@ -1327,109 +1247,18 @@ Route::put('infraestructuras/{id}', [InfraestructuraController::class, 'update']
 Route::delete('infraestructuras/{id}', [InfraestructuraController::class, 'destroy']);
 
 // MALLA CURRICULAR
-Route::group(['middleware' => 'auth:api'], function () {
+//Route::group(['middleware' => 'auth:api'], function () {
     Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']); // trae todos los trimestres con las competencias de la ficha
     Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']); // crear nuevo trimestre con minimo una competencia asignada
     Route::post('competencias/trimestre', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // agregar competencias a un trimestre ya creado
-    //Route::post('trimestres-ficha/competencias', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // asignar nuevas competencias a un trimestre
-});
+    Route::post('trimestres-ficha/competencias', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // asignar nuevas competencias a un trimestre
+//});
 
 // MATERIAS
-Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('materias-programa', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
-    Route::get('materias/raps', [MateriaController::class, 'getCompetenciasHijas']); // materias hijas (raps-resultados)
-    Route::get('materias/hijas', [MateriaController::class, 'getMattersChildren']);
-    Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
+//Route::group(['middleware' => 'auth:api'], function () {
+    Route::get('materias-programa/{idPrograma}', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
+    Route::get('materias-hijas/{idMateriaPadre}', [MateriaController::class, 'getCompeteciasHijas']); // materias hijas (raps-resultados)
     Route::post('materias', [MateriaController::class, 'crearCompetencia']);
-    Route::put('materias/finalizar-rap', [HorarioMateriaController::class, 'finalizarRap']);
-    Route::put('materias/interrumpir-rap', [HorarioMateriaController::class, 'interrumpirRap']);
     Route::put('materias/{id}', [MateriaController::class, 'update']);
-    Route::delete('grado-materia', [MateriaController::class, 'deleteMateriaTrimestre']); // elimina competencias y raps del trimestre de la ficha
     Route::get('materias/{id}', [MateriaController::class, 'getById']);
-});
-
-//HORARIOS
-Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('dias', [DiaController::class, 'index']); //,obtener todos los dias
-    Route::get('raps/evaluar/contrato', [HorarioMateriaController::class, 'getRapsEvaluarContrato']);
-    Route::get('horario/ficha/{idFicha}', [HorarioMateriaController::class, 'getMattersByJornadaPeriodoPrograma']); // obtener el horario de una ficha
-    Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
-    Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
-    Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
-    Route::delete('horarios/materia/{id}', [HorarioMateriaController::class, 'destroy']); //eliminar horario
-});
-
-// Red
-Route::middleware('auth:api')->group(function () {
-
-    Route::get('red', [RedController::class, 'index']);
-    Route::get('red/{id}', [RedController::class, 'show']);
-
-    Route::post('red', [RedController::class, 'store']);
-    Route::put('red/{id}', [RedController::class, 'update']);
-    Route::delete('red/{id}', [RedController::class, 'destroy']);
-    Route::get('materias-by-contrato', [HorarioMateriaController::class, 'getMateriasByContrato']);
-});
-
-Route::get('estadisticas-asistencia', [AsistenciaController::class, 'getEstadisticasAsistencia']);
-Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
-Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
-Route::post('registrar-asistencia', [AsistenciaController::class, 'store']);
-// Endpoint temporal para subir documento de excusa
-Route::post('excusas/{idExcusa}/documento',[AsistenciaController::class, 'subirDocumentoExcusa']);
-
-// Iniciar clase: crea SesionMateria + Asistencia automáticamente al comenzar la hora de clase
-Route::post('iniciar-clase', [AsistenciaController::class, 'iniciarClase']);
-
-Route::get('anotaciones_by_matricula/{idMatricula}', [AnotacionesDisciplinariasController::class, 'getAnotacionesByMatriculaAcademica']);
-Route::post('anotacionesdisciplinarias/{idMatricula}/matricula', [AnotacionesDisciplinariasController::class, 'anotacionesMatricula']);
-Route::put('sanciones/{id}', [SancionesController::class, 'update']);
-
-//compromisos
-Route::get('compromisos_by_anotacion/{idAnotacion}',  [CompromisosController::class, 'commitmentsByAnotation']);
-Route::post('compromisos', [CompromisosController::class, 'store']);
-Route::post('compromisos/update-cumplido', [CompromisosController::class, 'updateCumplido']);
-
-//sanciones
-Route::get('sanciones_by_anotacion/{idAnotacion}',  [SancionesController::class, 'getPenaltiesforannotations']);
-Route::post('sanciones',  [SancionesController::class, 'store']);
-
-
-//asistencia y inasistencia
-Route::apiResource('asistencia', AsistenciaController::class);
-Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
-Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
-Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);
-
-//Intructores:
-Route::middleware('auth:api')->group(function () {
-    Route::get('instructores', [InstructoresController::class, 'getInstructors']);
-    Route::get('instructores/historial', [InstructoresController::class, 'getInstructorsHistorial']);
-    Route::get('instructores/fichas', [InstructoresController::class, 'getFichasByContrato']);
-    Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
-    Route::put('instructores/{idActivation}/rechazar-rmi', [InstructoresController::class, 'rechazarRmi']);
-    Route::put('instructores/{idActivation}/revertir-rmi', [InstructoresController::class, 'revertirRmi']);
-});
-
-
-//Prueba de las notificaciones para el instructor:
-
-Route::middleware('auth:api')->group(function () {
-    Route::get('notificacionSistema', [NotificacionesSistemaController::class, 'indexByUser']);
-    Route::patch('notificacionSistema/{id}', [NotificacionesSistemaController::class, 'update']); // ✅
-});
-
-// RMI
-Route::middleware('auth:api')->group(function () {
-    Route::patch('set-estado-asociacion/{idGradoMateria}', [InstructoresController::class, 'setEstadoAsociacion']);
-});
-// Rutas del aprendiz autenticado (requieren auth)
-Route::middleware('auth:api')->group(function () {
-    Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
-    Route::get('mis-asistencias-generales', [AsistenciaController::class, 'misAsistenciasGenerales']);
-    Route::get('estudiante/mi-dashboard', [AsistenciaController::class, 'getDashboardEstudiante']);
-    Route::get('estudiante/dashboard/{idPersona}', [AsistenciaController::class, 'getDashboardEstudiantePorId']);
-});
-//dashboard para instructores
-Route::get('instructores/mi-dashboard', [InstructoresController::class, 'getDashboardInstructor']);
-Route::get('misAsistenciasEstudiante', [AsistenciaController::class, 'misAsistenciasEstudiante']);
+//});

@@ -26,7 +26,7 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $credentials = $request->validate([
-            'email' => ['required'],
+            'email' => ['required', 'email'],
             'password' => ['required'],
 
         ]);
@@ -152,7 +152,7 @@ class AuthController extends Controller
         $roles = $user_active->roles;
         $permissions = $roles->pluck('permissions')->flatten()->unique('id')->pluck('name');
         $token = JWTAuth::claims([
-            'idCompany' => $user_active->company_id,
+            'idCompany' => $user_active->idCompany,
             'roles' => $roles->pluck('name'),
             'permissions' => $permissions,
             'company' => $user_active->company,

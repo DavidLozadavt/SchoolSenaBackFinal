@@ -14,12 +14,14 @@ class Jornada extends Model
     protected $fillable = [
         'nombreJornada',
         'descripcion',
+        'diaSemana',
         'horaInicial',
         'horaFinal',
         'numeroHoras',
         'estado',
-        'idCentroFormacion',
-        'idTipoJornada'
+        'grupoJornada',
+        'idEmpresa',
+        'idTipoJornada',
     ];
 
     /**
@@ -31,18 +33,10 @@ class Jornada extends Model
     }
 
     /**
-     * Una jornada pertenece a un centro de formación
+     * Una jornada pertenece a una empresa (Company)
      */
-    public function centroFormacion()
+    public function company()
     {
-        return $this->belongsTo(CentrosFormacion::class, 'idCentroFormacion');
-    }
-
-    /**
-     * Una jornada tiene muchos días asignados
-     */
-    public function dias()
-    {
-        return $this->belongsToMany(Dia::class, 'asignacionDiaJornada', 'idJornada', 'idDia');
+        return $this->belongsTo(Company::class, 'idEmpresa');
     }
 }

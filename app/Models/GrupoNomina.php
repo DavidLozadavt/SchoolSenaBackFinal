@@ -9,5 +9,5 @@ class GrupoNomina extends Model
 {
     use HasFactory;
 
-      protected $table = "gruponomina";
+      protected $table = "grupoNomina";
 }

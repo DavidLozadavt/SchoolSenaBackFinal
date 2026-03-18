@@ -33,9 +33,6 @@ class PermissionConst
 
     const GESTION_PUNTO_VENTAS = 'GESTION_PUNTO_VENTAS';
 
-    /** Aula Virtual - Instructor SENA */
-    const AULA_VIRTUAL_INSTRUCTOR = 'AULA_VIRTUAL_INSTRUCTOR';
+    
 
-    /** Aula Virtual - Aprendiz */
-    const AULA_VIRTUAL_APRENDIZ = 'AULA_VIRTUAL_APRENDIZ';
 }

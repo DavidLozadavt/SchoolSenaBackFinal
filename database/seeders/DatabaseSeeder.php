@@ -46,6 +46,5 @@ class DatabaseSeeder extends Seeder
         
     ]);
         $this->call(TipoInfraestructuraSeeder::class);
-        $this->call(TipoPreguntaSeeder::class);
     }
 }

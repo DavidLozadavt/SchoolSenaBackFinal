@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\Otps;
 use App\Models\PasswordReset;
+use App\Models\usuario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB; 
@@ -26,7 +27,7 @@ class ForgotPasswordController extends Controller
             
             \Log::info('Enviando OTP a:', ['email' => $email]);
 
-            $userExists = DB::table('persona')->where('email', $email)->exists();
+            $userExists = DB::table('usuario')->where('email', $email)->exists();
             
             $responseMessage = 'Si el correo existe en nuestro sistema, recibirás un código de verificación en tu correo electrónico.';
             
@@ -169,25 +170,14 @@ class ForgotPasswordController extends Controller
 {
     try {
         $request->validate([
-            'email' => 'required|email|exists:persona,email',
+            'email' => 'required|email|exists:usuario,email',
             'token' => 'required|string',
             'password' => 'required|min:8|confirmed'
         ]);
 
-
         $email = $request->email;
         $token = $request->token;
         $password = $request->password;
-
-        $findUser = DB::table('persona')
-                ->where('email', $email)
-                ->first();
-
-            if (!$findUser) {
-                return response()->json([
-                    'message' => 'Persona no encontrada'
-                ], 404);
-        }
 
         \Log::info('Reseteando contraseña para:', ['email' => $email]);
 
@@ -220,50 +210,44 @@ class ForgotPasswordController extends Controller
                 'error' => 'expired_token'
             ], 400);
         }
-        // Actualizar la contraseña usando el modelo User para consistencia
-        $user = \App\Models\User::where('idpersona', $findUser->id)->first();
 
-        if (!$user) {
-            \Log::warning('Usuario no encontrado en tabla usuario para idpersona:', ['id' => $findUser->id]);
+        $affected = DB::table('usuario')
+            ->where('email', $email)
+            ->update([
+                'contrasena' => Hash::make($password),
+                'updated_at' => now()
+            ]);
+
+        \Log::info('Contraseña actualizada:', ['affected_rows' => $affected]);
+
+        if ($affected === 0) {
+            \Log::warning('No se actualizó ninguna fila');
             return response()->json([
-                'message' => 'No se encontró un usuario asociado a esta persona'
-            ], 404);
+                'message' => 'No se pudo actualizar la contraseña',
+                'error' => 'update_failed'
+            ], 400);
         }
 
-        $user->contrasena = Hash::make($password);
-        $user->updated_at = now();
-        $user->save();
-
-        \Log::info('Contraseña actualizada para usuario ID:', ['user_id' => $user->id]);
-
+        // ===== NUEVO: Cambiar state_id de 18 a 1 =====
         try {
-            // Ya tenemos el objeto $user, podemos usarlo directamente
-            \Log::info('Verificando activación para:', ['user_id' => $user->id]);
-
-                // Buscar la activación que esté específicamente en estado 18
-                $activacion = \App\Models\ActivationCompanyUser::where('user_id', $user->id)
-                    ->where('state_id', 18)
-                    ->first();
-
-                if ($activacion) {
+            // Buscar el usuario en la tabla users
+            $user = \App\Models\User::where('email', $email)->first();
+            
+            if ($user) {
+                \Log::info('Usuario encontrado en tabla users:', ['user_id' => $user->id]);
+                
+                // Buscar la activación del usuario
+                $activacion = \App\Models\ActivationCompanyUser::where('user_id', $user->id)->first();
+                
+                if ($activacion && $activacion->state_id == 18) {
                     \Log::info('Cambiando state_id de 18 a 1 para usuario:', ['user_id' => $user->id]);
-
+                    
                     $activacion->state_id = 1;
                     $activacion->save();
-
+                    
                     \Log::info('State_id actualizado exitosamente');
-
-                    // Actualizar roles según el tipo de usuario
-                    if ($activacion->hasRole('ESTUDIANTEUP')) {
-                        $activacion->removeRole('ESTUDIANTEUP');
-                        $activacion->assignRole('APRENDIZ');
-                        \Log::info('Rol ESTUDIANTEUP revertido a APRENDIZ SENA');
-                    } elseif ($activacion->hasRole('DOCENTEUP')) {
-                        $activacion->removeRole('DOCENTEUP');
-                        $activacion->assignRole('INSTRUCTOR SENA');
-                        \Log::info('Rol DOCENTEUP revertido a INSTRUCTOR SENA');
-                    }
-
+                    
+                    // Devolver response indicando que el proceso se completó
                     DB::table('password_resets')->where('email', $email)->delete();
                     DB::table('otps')->where('identifier', $email)->delete();
 
@@ -272,12 +256,18 @@ class ForgotPasswordController extends Controller
                         'profile_completed' => true
                     ], 200);
                 } else {
-                    \Log::info('El usuario no tiene activación en estado 18.', ['user_id' => $user->id]);
+                    \Log::info('Usuario no necesita cambio de state_id:', [
+                        'activacion_exists' => $activacion ? 'yes' : 'no',
+                        'state_id' => $activacion ? $activacion->state_id : 'N/A'
+                    ]);
+                }
+            } else {
+                \Log::warning('Usuario no encontrado en tabla users con email:', ['email' => $email]);
             }
         } catch (\Exception $e) {
             \Log::error('Error actualizando state_id: ' . $e->getMessage());
         }
-        // ===== FIN =====
+        // ===== FIN NUEVO =====
 
         DB::table('password_resets')->where('email', $email)->delete();
         DB::table('otps')->where('identifier', $email)->delete();
@@ -289,8 +279,6 @@ class ForgotPasswordController extends Controller
             'profile_completed' => false
         ], 200);
 
-    } catch (\Illuminate\Validation\ValidationException $e) {
-        throw $e;
     } catch (\Exception $e) {
         \Log::error('Error en resetPassword: ' . $e->getMessage());
         return response()->json([

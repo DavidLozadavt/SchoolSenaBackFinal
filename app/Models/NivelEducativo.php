@@ -9,8 +9,6 @@ class NivelEducativo extends Model
 {
     protected $table = 'nivelEducativo';
     
-    protected $fillable = ['nombreNivel', 'activo'];
-    
     protected $hidden = ['created_at', 'updated_at', 'activo']; 
 
     public function areas()
