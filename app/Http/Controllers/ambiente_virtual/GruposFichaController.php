@@ -24,11 +24,14 @@ class GruposFichaController extends Controller
                 return response()->json(['data' => []], 200);
             }
 
+            $tieneIdFicha = \Illuminate\Support\Facades\Schema::hasColumn('matricula', 'idFicha');
+            $colFicha = $tieneIdFicha ? 'idFicha' : 'idAsignacionPeriodoProgramaJornada';
+
             $matriculas = \Illuminate\Support\Facades\DB::table('matricula as m')
                 ->where('m.idPersona', $user->idpersona)
                 ->whereIn('m.estado', ['ACTIVO', 'EN CURSO', 'CURSANDO', 'MATRICULADO', 'EN FORMACION'])
-                ->whereNotNull('m.idFicha')
-                ->select('m.id as idMatricula', 'm.idFicha')
+                ->whereNotNull('m.' . $colFicha)
+                ->selectRaw('m.id as idMatricula, m.' . $colFicha . ' as idFicha')
                 ->distinct()
                 ->get();
 
@@ -38,7 +41,11 @@ class GruposFichaController extends Controller
 
             $fichas = [];
             foreach ($matriculas->unique('idFicha') as $m) {
-                $grupos = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $m->idFicha)
+                $idFicha = $m->idFicha;
+                if ($idFicha === null) {
+                    continue;
+                }
+                $grupos = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)
                     ->with('tipoGrupo')
                     ->orderBy('id', 'desc')
                     ->get();
@@ -78,9 +85,9 @@ class GruposFichaController extends Controller
                     ];
                 }
 
-                $ficha = Ficha::find($m->idFicha);
+                $ficha = Ficha::find($idFicha);
                 $fichas[] = [
-                    'idFicha' => $m->idFicha,
+                    'idFicha' => $idFicha,
                     'idMatricula' => $m->idMatricula,
                     'codigoFicha' => $ficha?->codigo ?? null,
                     'grupos' => $gruposConEstado,

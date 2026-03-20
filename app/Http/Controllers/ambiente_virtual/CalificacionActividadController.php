@@ -95,13 +95,18 @@ class CalificacionActividadController extends Controller
                 ->get();
 
             if ($actividad && ($actividad->tipoActividad ?? '') === 'con evidencia') {
+                $alMenosUnoConEvidencia = false;
                 foreach ($registros as $r) {
                     $tieneEvidencia = !empty(trim($r->archivo ?? '')) || !empty(trim($r->ComentarioEstudiante ?? ''));
-                    if (!$tieneEvidencia) {
-                        return response()->json([
-                            'error' => 'Las actividades con evidencia requieren que todos los integrantes adjunten evidencia antes de calificar por grupo.',
-                        ], 422);
+                    if ($tieneEvidencia) {
+                        $alMenosUnoConEvidencia = true;
+                        break;
                     }
+                }
+                if (!$alMenosUnoConEvidencia) {
+                    return response()->json([
+                        'error' => 'Las actividades con evidencia requieren que al menos un integrante del grupo haya realizado la entrega antes de calificar.',
+                    ], 422);
                 }
             }
 
@@ -147,12 +152,14 @@ class CalificacionActividadController extends Controller
                 ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
                 ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
                 ->leftJoin('persona as p', 'm.idPersona', '=', 'p.id')
+                ->leftJoin('grupos as g', 'ca.idGrupo', '=', 'g.id')
                 ->where('ca.idActividad', $idActividad)
                 ->where('ma.' . $colFicha, $idFicha)
                 ->select([
                     'ca.id as idCalificacionActividad',
                     'ca.idAMartriculaAcademica',
                     'ca.idGrupo',
+                    'g.nombreGrupo',
                     'ca.calificacionNumerica',
                     'ca.calificacionEstandart',
                     'ca.ComentarioDocente',
@@ -185,6 +192,7 @@ class CalificacionActividadController extends Controller
                     'idAMartriculaAcademica' => $c->idAMartriculaAcademica,
                     'idMatricula' => $c->idMatricula,
                     'idGrupo' => $c->idGrupo,
+                    'nombreGrupo' => $c->nombreGrupo ?? null,
                     'nombreAprendiz' => trim($c->nombreAprendiz ?? '') ?: 'Sin nombre',
                     'identificacion' => $c->identificacion ?? '',
                     'rutaFoto' => $c->rutaFoto ?? null,

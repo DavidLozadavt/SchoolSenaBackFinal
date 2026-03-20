@@ -414,7 +414,7 @@ class ActividadController extends Controller
             }
 
             $validated = $request->validate([
-                'respuestas' => 'required|array|min:1',
+                'respuestas' => 'required|array',
                 'respuestas.*.idPregunta' => 'required|integer|exists:preguntas,id',
                 'respuestas.*.idRespuesta' => 'nullable|integer|exists:respuestas,id',
                 'respuestas.*.respuesta' => 'nullable|string|max:5000',
@@ -455,6 +455,9 @@ class ActividadController extends Controller
             DB::table('calificacionActividad')
                 ->where('id', $idCalificacionActividad)
                 ->update(['ComentarioEstudiante' => 'Cuestionario respondido', 'updated_at' => now()]);
+
+            // Calificación automática para preguntas de selección múltiple (Varias opciones)
+            $this->calificarCuestionarioAutomatico($idCalificacionActividad, $ca->idActividad, $tblRc);
 
             return response()->json(['message' => 'Cuestionario respondido correctamente']);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -1098,5 +1101,66 @@ class ActividadController extends Controller
         }
 
         return Storage::disk('public')->url($path);
+    }
+
+    /**
+     * Calificación automática para preguntas de selección múltiple (Varias opciones).
+     * Correctas = valor proporcional, incorrectas = 0.
+     * Ejemplo: 4 correctas de 5 preguntas → nota = (4/5)*5 = 4.0
+     */
+    private function calificarCuestionarioAutomatico(int $idCalificacionActividad, int $idActividad, string $tblRc): void
+    {
+        $preguntasVariasOpciones = DB::table('preguntas as p')
+            ->join('tipoPreguntas as tp', 'p.idTipoPregunta', '=', 'tp.id')
+            ->where('p.idActividad', $idActividad)
+            ->whereRaw("LOWER(TRIM(tp.tipoPregunta)) = 'varias opciones'")
+            ->pluck('p.id');
+
+        if ($preguntasVariasOpciones->isEmpty()) {
+            return;
+        }
+
+        $totalPreguntas = $preguntasVariasOpciones->count();
+        $respuestasAlumno = DB::table($tblRc)
+            ->where('idCalificacion', $idCalificacionActividad)
+            ->whereIn('idPregunta', $preguntasVariasOpciones->all())
+            ->get()
+            ->keyBy('idPregunta');
+
+        $correctas = 0;
+        $totalRespondidas = 0;
+
+        foreach ($preguntasVariasOpciones as $idPregunta) {
+            $resp = $respuestasAlumno->get($idPregunta);
+            if (!$resp || !$resp->idRespuesta) {
+                continue;
+            }
+
+            $respuestaCorrecta = DB::table('respuestas')
+                ->where('id', $resp->idRespuesta)
+                ->value('chkCorrecta');
+
+            $totalRespondidas++;
+            if ($respuestaCorrecta ?? false) {
+                $correctas++;
+            }
+        }
+
+        if ($totalRespondidas === 0) {
+            $notaFinal = 1;
+        } elseif ($correctas === 0) {
+            $notaFinal = 1;
+        } else {
+            $notaFinal = round(($correctas / $totalPreguntas) * 5, 1);
+            $notaFinal = min(5, max(0, $notaFinal));
+        }
+
+        DB::table('calificacionActividad')
+            ->where('id', $idCalificacionActividad)
+            ->update([
+                'calificacionNumerica' => (string) $notaFinal,
+                'fechaCalificacion' => now(),
+                'updated_at' => now(),
+            ]);
     }
 }
