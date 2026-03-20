@@ -41,8 +41,9 @@ class AsignacionActividadController extends Controller
                 ->get();
 
             $integrantesPorGrupo = [];
-            if (Schema::hasTable('asignacionparticipantes')) {
-                $counts = DB::table('asignacionparticipantes')
+            $tblPart = $this->tablaParticipantes();
+            if ($tblPart) {
+                $counts = DB::table($tblPart)
                     ->whereIn('idGrupo', $grupos->pluck('id'))
                     ->selectRaw('idGrupo, COUNT(*) as total')
                     ->groupBy('idGrupo')
@@ -259,10 +260,10 @@ class AsignacionActividadController extends Controller
                     ? GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)->where('estado', 'ACTIVO')->pluck('id')
                     : collect(is_array($validated['grupos']) ? $validated['grupos'] : [])->flatten()->map(fn ($v) => (int) $v)->filter()->values();
 
-                $tieneIdMatricula = Schema::hasTable('asignacionparticipantes')
-                    && Schema::hasColumn('asignacionparticipantes', 'idMatricula');
+                $tblPart = $this->tablaParticipantes();
+                $tieneIdMatricula = $tblPart && Schema::hasColumn($tblPart, 'idMatricula');
                 if ($tieneIdMatricula && $idsGrupo->isNotEmpty()) {
-                    $participantes = DB::table('asignacionparticipantes')
+                    $participantes = DB::table($tblPart)
                         ->whereIn('idGrupo', $idsGrupo->all())
                         ->whereNotNull('idMatricula')
                         ->get(['idMatricula', 'idGrupo']);
@@ -278,25 +279,8 @@ class AsignacionActividadController extends Controller
                         }
                     }
                 }
-                // Grupos vacíos: asignar a todos los aprendices de la ficha por materia (idMateria del grupo)
-                $gruposConParticipantes = $destinatariosGrupos->pluck('idGrupo')->unique()->filter()->values();
-                $gruposVacios = $idsGrupo->diff($gruposConParticipantes);
-                if ($gruposVacios->isNotEmpty()) {
-                    $aprendicesFicha = $this->aprendicesPorFichaParaAsignacion($idFicha);
-                    foreach ($gruposVacios as $idGrupo) {
-                        $grupo = GrupoFicha::find($idGrupo);
-                        $idMateriaGrupo = $grupo?->idGradoMateria ? (DB::table('gradoMateria')->where('id', $grupo->idGradoMateria)->value('idMateria')) : null;
-                        foreach ($aprendicesFicha as $a) {
-                            if ($idMateriaGrupo && ($a['idMateria'] ?? null) != $idMateriaGrupo) continue;
-                            $destinatariosGrupos->push([
-                                'idMatriculaAcademica' => $a['idMatriculaAcademica'],
-                                'idMatricula' => $a['id'],
-                                'idMateria' => $a['idMateria'] ?? null,
-                                'idGrupo' => $idGrupo,
-                            ]);
-                        }
-                    }
-                }
+                // Grupos vacíos: NO crear calificacionActividad. Solo se registra en asignacionActividadGrupo.
+                // Cuando un aprendiz se una al grupo (unirse), recibirá las actividades automáticamente.
             }
 
             $destinatarios = $destinatariosAprendices->merge($destinatariosGrupos)
@@ -307,34 +291,46 @@ class AsignacionActividadController extends Controller
                 return response()->json(['error' => 'Selecciona al menos un estudiante o un grupo.'], 422);
             }
 
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+
             foreach ($actividades as $idActividad) {
                 $actividad = Actividad::find($idActividad);
                 if (!$actividad) continue;
                 $idMateria = $actividad->idMateria;
-                $asignadosEstaActividad = [];
 
+                // Un solo destinatario por (idMatricula): preferir matriculaAcademica que coincida con idMateria de la actividad
+                $destPorMatricula = [];
                 foreach ($destinatarios as $dest) {
+                    $idMat = $dest['idMatricula'] ?? null;
+                    if ($idMat === null) continue;
+                    $materiaCoincide = !$idMateria || !($dest['idMateria'] ?? null) || $dest['idMateria'] == $idMateria;
+                    if (!isset($destPorMatricula[$idMat])) {
+                        $destPorMatricula[$idMat] = $dest;
+                    } else {
+                        $actualMateria = $destPorMatricula[$idMat]['idMateria'] ?? null;
+                        $actualCoincide = !$idMateria || $actualMateria == $idMateria;
+                        if ($materiaCoincide && !$actualCoincide) {
+                            $destPorMatricula[$idMat] = $dest;
+                        }
+                    }
+                }
+                foreach (array_values($destPorMatricula) as $dest) {
                     $idMa = is_array($dest['idMatriculaAcademica'] ?? null)
                         ? ($dest['idMatriculaAcademica'][0] ?? 0)
                         : ($dest['idMatriculaAcademica'] ?? 0);
                     $idMa = (int) $idMa;
                     if ($idMa <= 0) continue;
 
-                    $materiaCoincide = !$idMateria || !($dest['idMateria'] ?? null) || $dest['idMateria'] == $idMateria;
                     $idMat = $dest['idMatricula'] ?? null;
-                    if (!$materiaCoincide) {
-                        if (isset($asignadosEstaActividad[$idMat])) continue;
-                        // Fallback: el estudiante no tiene matrícula para esta materia, usar cualquiera
-                    }
 
-                    $yaExiste = DB::table('calificacionActividad')
-                        ->where('idActividad', $idActividad)
-                        ->where('idAMartriculaAcademica', $idMa)
+                    $yaExiste = DB::table('calificacionActividad as ca')
+                        ->join($tableMa . ' as _ma', 'ca.idAMartriculaAcademica', '=', '_ma.id')
+                        ->where('ca.idActividad', $idActividad)
+                        ->where('_ma.idMatricula', $idMat)
                         ->exists();
 
                     if ($yaExiste) {
                         $omitidas++;
-                        $idMat = $dest['idMatricula'] ?? '?';
                         $omitidosDetalle[] = "Actividad {$idActividad} - Aprendiz " . (is_scalar($idMat) ? $idMat : json_encode($idMat)) . " (ya asignada)";
                         continue;
                     }
@@ -354,7 +350,6 @@ class AsignacionActividadController extends Controller
                     );
                     if ($insertado) {
                         $exitosas++;
-                        $asignadosEstaActividad[$idMat] = true;
                     }
                 }
             }
@@ -574,5 +569,16 @@ class AsignacionActividadController extends Controller
             ]);
             return false;
         }
+    }
+
+    private function tablaParticipantes(): ?string
+    {
+        if (Schema::hasTable('asignacionParticipantes')) {
+            return 'asignacionParticipantes';
+        }
+        if (Schema::hasTable('asignacionparticipantes')) {
+            return 'asignacionparticipantes';
+        }
+        return null;
     }
 }
