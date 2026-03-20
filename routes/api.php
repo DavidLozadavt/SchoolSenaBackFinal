@@ -1246,6 +1246,7 @@ Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCo
 // Rutas Actividades (módulo académico)
 Route::middleware('auth:api')->group(function () {
     Route::get('actividades', [ActividadController::class, 'index']);
+    Route::get('actividades-por-evaluar', [ActividadController::class, 'porEvaluar']);
     Route::post('actividades', [ActividadController::class, 'store']);
     Route::post('cuestionarios', [ActividadController::class, 'storeCuestionario']);
     Route::match(['put', 'post'], 'cuestionarios/{id}', [ActividadController::class, 'updateCuestionario']);
