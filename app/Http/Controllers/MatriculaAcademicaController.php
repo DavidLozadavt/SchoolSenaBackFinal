@@ -15,6 +15,7 @@ class MatriculaAcademicaController extends Controller
         $this-> relations=[];
         $this-> columns=["*"];
     }
+    
 
  
     public function getStudentByIdMateria(Request $request): JsonResponse
@@ -128,7 +129,7 @@ class MatriculaAcademicaController extends Controller
                     
                     if ($conNota > 0) {
                         $sumaNotas = $actividadesEstudiante->sum(function($a) {
-                            return is_numeric($a->calificacionNumerica) ? (float)$a->calificacionNumerica : 1.0;
+                            return is_numeric($a->calificacionNumerica) ? (float)$a->calificacionNumerica : 0.0;
                         });
                         $matricula->notaParcial = round($sumaNotas / $totalAsignadas, 2);
                     } else {
@@ -170,11 +171,16 @@ class MatriculaAcademicaController extends Controller
                 'evaluador',
             ]);
 
+            // Filtrar por ficha (OBLIGATORIO para no traer estudiantes de otras fichas)
+            if ($idFicha > 0) {
+                $query->where('idFicha', $idFicha);
+            }
+
             if ($idMateria > 0) {
                 $query->where('idMateria', $idMateria);
             }
 
-            // Filtrar por instructor/evaluador cuando haya evaluador asignado
+            // Filtrar solo por el evaluador asignado (sin orWhereNull para no traer estudiantes de otras fichas)
             if ($idInstructor > 0) {
                 $query->where(function ($q) use ($idInstructor) {
                     $q->where('idEvaluador', $idInstructor)
@@ -219,7 +225,7 @@ class MatriculaAcademicaController extends Controller
                     
                     if ($conNota > 0) {
                         $sumaNotas = $actividadesEstudiante->sum(function($a) {
-                            return is_numeric($a->calificacionNumerica) ? (float)$a->calificacionNumerica : 1.0;
+                            return is_numeric($a->calificacionNumerica) ? (float)$a->calificacionNumerica : 0.0;
                         });
                         $matricula->notaParcial = round($sumaNotas / $totalAsignadas, 2);
                     } else {
@@ -229,6 +235,7 @@ class MatriculaAcademicaController extends Controller
                     $matricula->porcentaje_avance = null;
                     $matricula->notaParcial = null;
                 }
+
                 
                 return $matricula;
             });

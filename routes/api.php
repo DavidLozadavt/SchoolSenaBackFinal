@@ -1246,6 +1246,7 @@ Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCo
 // Rutas Actividades (módulo académico)
 Route::middleware('auth:api')->group(function () {
     Route::get('actividades', [ActividadController::class, 'index']);
+    Route::get('actividades-por-evaluar', [ActividadController::class, 'porEvaluar']);
     Route::post('actividades', [ActividadController::class, 'store']);
     Route::post('cuestionarios', [ActividadController::class, 'storeCuestionario']);
     Route::match(['put', 'post'], 'cuestionarios/{id}', [ActividadController::class, 'updateCuestionario']);
@@ -1376,8 +1377,6 @@ Route::middleware('auth:api')->group(function () {
     Route::get('materias-by-contrato', [HorarioMateriaController::class, 'getMateriasByContrato']);
 });
 
-//buscar estudiantes por idMateria
-Route::get('get_student_by_id_materia', [MatriculaAcademicaController::class, 'getStudentByIdMateria']);
 Route::get('estadisticas-asistencia', [AsistenciaController::class, 'getEstadisticasAsistencia']);
 Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
 Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
@@ -1405,7 +1404,7 @@ Route::post('sanciones',  [SancionesController::class, 'store']);
 //asistencia y inasistencia
 Route::apiResource('asistencia', AsistenciaController::class);
 Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
-Route::get('get_assistances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
+Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
 Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);
 
 //Intructores:
@@ -1425,3 +1424,18 @@ Route::middleware('auth:api')->group(function () {
     Route::get('notificacionSistema', [NotificacionesSistemaController::class, 'indexByUser']);
     Route::patch('notificacionSistema/{id}', [NotificacionesSistemaController::class, 'update']); // ✅
 });
+
+// RMI
+Route::middleware('auth:api')->group(function () {
+    Route::patch('set-estado-asociacion/{idGradoMateria}', [InstructoresController::class, 'setEstadoAsociacion']);
+});
+// Rutas del aprendiz autenticado (requieren auth)
+Route::middleware('auth:api')->group(function () {
+    Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
+    Route::get('mis-asistencias-generales', [AsistenciaController::class, 'misAsistenciasGenerales']);
+    Route::get('estudiante/mi-dashboard', [AsistenciaController::class, 'getDashboardEstudiante']);
+    Route::get('estudiante/dashboard/{idPersona}', [AsistenciaController::class, 'getDashboardEstudiantePorId']);
+});
+//dashboard para instructores
+Route::get('instructores/mi-dashboard', [InstructoresController::class, 'getDashboardInstructor']);
+Route::get('misAsistenciasEstudiante', [AsistenciaController::class, 'misAsistenciasEstudiante']);

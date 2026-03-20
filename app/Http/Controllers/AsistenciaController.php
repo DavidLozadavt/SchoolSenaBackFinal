@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 class AsistenciaController extends Controller
 {
+    
     public function store(Request $request): JsonResponse
 {
     try {
@@ -222,15 +223,27 @@ public function getAllAssistance(Request $request): JsonResponse
       'idMateria'         => 'nullable|integer',
       'idMatricula'       => 'required|integer',
       'idHorarioMateria'  => 'nullable|integer|exists:horarioMateria,id',
+      'idMatriculaAcademica' => 'nullable|integer'
     ]);
 
     $idMatricula      = $validatedData['idMatricula'];
-    $idMateria        = $validatedData['idMateria'];
+    $idMateria        = $validatedData['idMateria'] ?? null;
     $idHorarioMateria = $validatedData['idHorarioMateria'] ?? null;
+    $idMatriculaAcademica = $validatedData['idMatriculaAcademica'] ?? $request->input('idMatriculaAcademica');
 
-    $matriculaAcademica = MatriculaAcademica::with('ficha')->where('idMatricula', $idMatricula)
-      ->where('idMateria', $idMateria)
-      ->first();
+    $matriculaAcademica = null;
+    
+    // First safely look up the exact matriculaAcademica ID if the frontend provides it.
+    if ($idMatriculaAcademica) {
+        $matriculaAcademica = MatriculaAcademica::with('ficha')->find($idMatriculaAcademica);
+    }
+    
+    // Fallback: lookup by relations
+    if (!$matriculaAcademica) {
+        $matriculaAcademica = MatriculaAcademica::with('ficha')->where('idMatricula', $idMatricula)
+          ->where('idMateria', $idMateria)
+          ->first();
+    }
 
     if (!$matriculaAcademica) {
         return response()->json(['message' => 'Matrícula académica no encontrada'], 404);
@@ -675,6 +688,393 @@ public function getAllAssistance(Request $request): JsonResponse
               'message' => 'Error al obtener asistencias por área',
               'error' => $e->getMessage()
           ], 500);
+      }
+  }
+
+  /**
+   * Obtener asistencias generales del estudiante autenticado.
+   * Devuelve totales de asistencias, inasistencias, justificadas y porcentaje.
+   */
+  public function misAsistenciasGenerales(Request $request): JsonResponse
+  {
+      try {
+          $user = \App\Util\KeyUtil::user() ?? auth()->user();
+          $idPersona = $user?->idpersona ?? $user?->persona?->id;
+
+          if (!$idPersona) {
+              return response()->json([
+                  'message' => 'Usuario no autenticado o sin persona asociada',
+                  'data' => []
+              ], 401);
+          }
+
+          $idMatriculaAcademica = $request->input('idMatriculaAcademica');
+          $idMatricula = $request->input('idMatricula');
+          $idMateria = $request->input('idMateria');
+
+          // Filtrar las matrículas académicas que pertenecen exclusivamente al estudiante autenticado
+          $matriculasQuery = MatriculaAcademica::whereHas('matricula', function ($query) use ($idPersona) {
+              $query->where('idPersona', $idPersona);
+          });
+
+          if ($idMatriculaAcademica) {
+              $matriculasQuery->where('id', $idMatriculaAcademica);
+          }
+          if ($idMatricula) {
+              $matriculasQuery->where('idMatricula', $idMatricula);
+          }
+          if ($idMateria) {
+              $matriculasQuery->where('idMateria', $idMateria);
+          }
+
+          $idsMatriculaAcademica = $matriculasQuery->pluck('id')->toArray();
+
+          if (empty($idsMatriculaAcademica)) {
+              return response()->json([
+                  'message' => 'No se encontraron matrículas para el estudiante',
+                  'data' => []
+              ], 200);
+          }
+
+          // Obtenemos las asistencias con la estructura de relaciones que el frontend espera
+          // para poder agrupar por área y mostrar el detalle de la clase/materia.
+          $asistencias = Asistencia::with([
+              'sesionMateria.horarioMateria.gradoMateria.materia.areaConocimiento',
+              'justificacion'
+          ])
+          ->whereIn('idMatriculaAcademica', $idsMatriculaAcademica)
+          ->whereHas('sesionMateria', function ($query) {
+              // Solo sesiones que ya ocurrieron o son hoy
+              $query->whereDate('fechaSesion', '<=', today());
+          })
+          ->orderByDesc('id')
+          ->get();
+
+          return response()->json([
+              'message' => 'Asistencias obtenidas correctamente',
+              'data' => $asistencias
+          ], 200);
+
+      } catch (\Exception $e) {
+          return response()->json([
+              'message' => 'Error al obtener asistencias generales',
+              'error' => $e->getMessage()
+          ], 500);
+      }
+  }
+
+  /**
+   * Dashboard consolidado del aprendiz autenticado.
+   * Combina asistencias-por-area + actividades-aprendiz en un solo endpoint.
+   * No requiere parámetros.
+   */
+  public function getDashboardEstudiante(): JsonResponse
+  {
+      try {
+          $user = \App\Util\KeyUtil::user() ?? auth()->user();
+          $idPersona = $user?->idpersona ?? $user?->persona?->id;
+
+          \Illuminate\Support\Facades\Log::info("Dashboard Estudiante API llamada. User ID: " . ($user?->id ?? 'null') . " - Persona ID: " . ($idPersona ?? 'null'));
+
+          if (!$idPersona) {
+              \Illuminate\Support\Facades\Log::warning("Estudiante sin persona asociada abortado en dashboard");
+              return response()->json([
+                  'asistencia' => null,
+                  'actividades' => [],
+                  'message' => 'Usuario sin persona asociada'
+              ], 200);
+          }
+
+          // ── 1. Asistencias por área ─────────────────────────────────────────
+          $matriculas = \App\Models\MatriculaAcademica::with([
+              'materia.areaConocimiento',
+              'asistencias.sesionMateria'
+          ])
+          ->whereHas('matricula', function($query) use ($idPersona) {
+              $query->where('idPersona', $idPersona);
+          })
+          ->get();
+
+          $areasMap = [];
+          $totalAsistencias = 0;
+          $totalInasistencias = 0;
+
+          foreach ($matriculas as $matricula) {
+              $areaConocimiento = $matricula->materia->areaConocimiento ?? null;
+              
+              if (!$areaConocimiento) {
+                  continue;
+              }
+
+              $idArea = $areaConocimiento->id;
+              $nombreArea = $areaConocimiento->nombreAreaConocimiento;
+
+              if (!isset($areasMap[$idArea])) {
+                  $areasMap[$idArea] = [
+                      'idArea' => $idArea,
+                      'nombreArea' => $nombreArea,
+                      'asistencias' => 0,
+                      'inasistencias' => 0,
+                      'total' => 0,
+                      'porcentaje' => 0
+                  ];
+              }
+
+              foreach ($matricula->asistencias as $asistencia) {
+                  $sesionMateria = $asistencia->sesionMateria;
+                  if (!$sesionMateria) {
+                      continue;
+                  }
+
+                  if ($asistencia->asistio) {
+                      $areasMap[$idArea]['asistencias']++;
+                      $totalAsistencias++;
+                  } else {
+                      $areasMap[$idArea]['inasistencias']++;
+                      $totalInasistencias++;
+                  }
+                  $areasMap[$idArea]['total']++;
+              }
+
+              foreach ($areasMap as &$area) {
+                  $area['porcentaje'] = $area['total'] > 0
+                      ? round(($area['asistencias'] / $area['total']) * 100)
+                      : 0;
+              }
+          }
+
+          $totalRegistros   = $totalAsistencias + $totalInasistencias;
+          $asistenciaGeneral = $totalRegistros > 0
+              ? round(($totalAsistencias / $totalRegistros) * 100)
+              : 0;
+
+          $asistencia = [
+              'areas'   => array_values($areasMap),
+              'resumen' => [
+                  'asistenciaGeneral'   => $asistenciaGeneral,
+                  'totalAsistencias'    => $totalAsistencias,
+                  'totalInasistencias'  => $totalInasistencias,
+                  'totalRegistros'      => $totalRegistros,
+              ],
+          ];
+
+          // ── 2. Actividades del aprendiz ─────────────────────────────────────
+          $actividades = [];
+
+          if (\Illuminate\Support\Facades\Schema::hasTable('calificacionActividad')) {
+              $rows = \Illuminate\Support\Facades\DB::table('calificacionActividad as ca')
+                  ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                  ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                  ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                  ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+                  ->leftJoin('area_conocimiento as ac', 'mat.idAreaConocimiento', '=', 'ac.id')
+                  ->where('m.idPersona', $idPersona)
+                  ->select([
+                      'ca.id as idCalificacionActividad',
+                      'ca.calificacionNumerica',
+                      'ca.calificacionEstandart',
+                      'ca.archivo as archivoEntrega',
+                      'ca.ComentarioEstudiante',
+                      'ca.fechaFinal',
+                      'a.tituloActividad',
+                      'mat.nombreMateria',
+                      'ac.nombreAreaConocimiento as areaNombre',
+                  ])
+                  ->orderByDesc('ca.fechaFinal')
+                  ->get();
+
+              foreach ($rows as $row) {
+                  $calificacion = trim((string)($row->calificacionNumerica ?? ''));
+                  $archivo      = trim((string)($row->archivoEntrega ?? ''));
+                  $comentario   = trim((string)($row->ComentarioEstudiante ?? ''));
+                  $fechaFinal   = $row->fechaFinal ? \Carbon\Carbon::parse($row->fechaFinal) : null;
+
+                  if ($calificacion !== '') {
+                      $estadoVisual = 'CALIFICADO';
+                  } elseif ($archivo !== '' || $comentario !== '') {
+                      $estadoVisual = 'POR_EVALUAR';
+                  } elseif ($fechaFinal && now()->greaterThan($fechaFinal)) {
+                      $estadoVisual = 'SIN_ENTREGAR';
+                  } else {
+                      $estadoVisual = 'PENDIENTE';
+                  }
+
+                  $fechaVencida = $fechaFinal ? now()->greaterThan($fechaFinal) : false;
+
+                  $actividades[] = [
+                      'idCalificacionActividad' => $row->idCalificacionActividad,
+                      'tituloActividad'         => $row->tituloActividad,
+                      'estadoVisual'            => $estadoVisual,
+                      'fechaFinal'              => $row->fechaFinal,
+                      'fechaVencida'            => $fechaVencida,
+                      'calificacionNumerica'    => $row->calificacionNumerica,
+                      'calificacionEstandart'   => $row->calificacionEstandart ?? null,
+                      'materia'                 => ['nombreMateria' => $row->nombreMateria],
+                      'area'                    => ['nombre' => $row->areaNombre],
+                  ];
+              }
+          }
+
+          \Illuminate\Support\Facades\Log::info("Dashboard Estudiante finalizado. Actividades encontradas: " . count($actividades) . " | Asistencias encontradas en DB o calculadas: " . count($asistencia['areas']));
+
+          return response()->json([
+              'asistencia'  => $asistencia,
+              'actividades' => $actividades,
+          ], 200);
+
+      } catch (\Throwable $e) {
+          \Illuminate\Support\Facades\Log::error("Dashboard Estudiante Error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+          return response()->json(['error' => $e->getMessage()], 500);
+      }
+  }
+
+  public function getDashboardEstudiantePorId($idPersona, Request $request): JsonResponse
+  {
+      try {
+          \Illuminate\Support\Facades\Log::info("Dashboard Estudiante API llamada por parametro. Persona Solicitada ID: " . $idPersona);
+
+          // ── 1. Asistencias por área ─────────────────────────────────────────
+          $matriculas = \App\Models\MatriculaAcademica::with([
+              'materia.areaConocimiento',
+              'asistencias.sesionMateria'
+          ])
+          ->whereHas('matricula', function($query) use ($idPersona) {
+              $query->where('idPersona', $idPersona);
+          })
+          ->get();
+
+          $areasMap = [];
+          $totalAsistencias = 0;
+          $totalInasistencias = 0;
+
+          foreach ($matriculas as $matricula) {
+              $areaConocimiento = $matricula->materia->areaConocimiento ?? null;
+              
+              if (!$areaConocimiento) {
+                  continue;
+              }
+
+              $idArea = $areaConocimiento->id;
+              $nombreArea = $areaConocimiento->nombreAreaConocimiento;
+
+              if (!isset($areasMap[$idArea])) {
+                  $areasMap[$idArea] = [
+                      'idArea' => $idArea,
+                      'nombreArea' => $nombreArea,
+                      'asistencias' => 0,
+                      'inasistencias' => 0,
+                      'total' => 0,
+                      'porcentaje' => 0
+                  ];
+              }
+
+              foreach ($matricula->asistencias as $asistencia) {
+                  $sesionMateria = $asistencia->sesionMateria;
+                  if (!$sesionMateria) {
+                      continue;
+                  }
+
+                  if ($asistencia->asistio) {
+                      $areasMap[$idArea]['asistencias']++;
+                      $totalAsistencias++;
+                  } else {
+                      $areasMap[$idArea]['justificacioninasistencia']++;
+                      $totalInasistencias++;
+                  }
+                  $areasMap[$idArea]['total']++;
+              }
+
+              foreach ($areasMap as &$area) {
+                  $area['porcentaje'] = $area['total'] > 0
+                      ? round(($area['asistencias'] / $area['total']) * 100)
+                      : 0;
+              }
+          }
+
+          $totalRegistros   = $totalAsistencias + $totalInasistencias;
+          $asistenciaGeneral = $totalRegistros > 0
+              ? round(($totalAsistencias / $totalRegistros) * 100)
+              : 0;
+
+          $asistencia = [
+              'areas'   => array_values($areasMap),
+              'resumen' => [
+                  'asistenciaGeneral'   => $asistenciaGeneral,
+                  'totalAsistencias'    => $totalAsistencias,
+                  'totalInasistencias'  => $totalInasistencias,
+                  'totalRegistros'      => $totalRegistros,
+              ],
+          ];
+
+          // ── 2. Actividades del aprendiz ─────────────────────────────────────
+          $tableMa = \Illuminate\Support\Facades\Schema::hasTable('matriculaAcademica')
+              ? 'matriculaAcademica' : 'matriculaacademica';
+          $actividades = [];
+
+          if (\Illuminate\Support\Facades\Schema::hasTable('calificacionActividad')) {
+              $rows = \Illuminate\Support\Facades\DB::table('calificacionActividad as ca')
+                  ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                  ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                  ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                  ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+                  ->leftJoin('area_conocimiento as ac', 'mat.idAreaConocimiento', '=', 'ac.id')
+                  ->where('m.idPersona', $idPersona)
+                  ->select([
+                      'ca.id as idCalificacionActividad',
+                      'ca.calificacionNumerica',
+                      'ca.calificacionEstandart',
+                      'ca.archivo as archivoEntrega',
+                      'ca.ComentarioEstudiante',
+                      'ca.fechaFinal',
+                      'a.tituloActividad',
+                      'mat.nombreMateria',
+                      'ac.nombreAreaConocimiento as areaNombre',
+                  ])
+                  ->orderByDesc('ca.fechaFinal')
+                  ->get();
+
+              foreach ($rows as $row) {
+                  $calificacion = trim((string)($row->calificacionNumerica ?? ''));
+                  $archivo      = trim((string)($row->archivoEntrega ?? ''));
+                  $comentario   = trim((string)($row->ComentarioEstudiante ?? ''));
+                  $fechaFinal   = $row->fechaFinal ? \Carbon\Carbon::parse($row->fechaFinal) : null;
+
+                  if ($calificacion !== '') {
+                      $estadoVisual = 'CALIFICADO';
+                  } elseif ($archivo !== '' || $comentario !== '') {
+                      $estadoVisual = 'POR_EVALUAR';
+                  } elseif ($fechaFinal && now()->greaterThan($fechaFinal)) {
+                      $estadoVisual = 'SIN_ENTREGAR';
+                  } else {
+                      $estadoVisual = 'PENDIENTE';
+                  }
+
+                  $fechaVencida = $fechaFinal ? now()->greaterThan($fechaFinal) : false;
+
+                  $actividades[] = [
+                      'idCalificacionActividad' => $row->idCalificacionActividad,
+                      'tituloActividad'         => $row->tituloActividad,
+                      'estadoVisual'            => $estadoVisual,
+                      'fechaFinal'              => $row->fechaFinal,
+                      'fechaVencida'            => $fechaVencida,
+                      'calificacionNumerica'    => $row->calificacionNumerica,
+                      'calificacionEstandart'   => $row->calificacionEstandart ?? null,
+                      'materia'                 => ['nombreMateria' => $row->nombreMateria],
+                      'area'                    => ['nombre' => $row->areaNombre],
+                  ];
+              }
+          }
+
+          \Illuminate\Support\Facades\Log::info("Dashboard Estudiante Por Id finalizado. Actividades encontradas: " . count($actividades) . " | Asistencias calculadas: " . count($asistencia['areas']));
+
+          return response()->json([
+              'asistencia'  => $asistencia,
+              'actividades' => $actividades,
+          ], 200);
+
+      } catch (\Throwable $e) {
+          \Illuminate\Support\Facades\Log::error("Dashboard Estudiante Por Id Error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+          return response()->json(['error' => $e->getMessage()], 500);
       }
   }
 }
