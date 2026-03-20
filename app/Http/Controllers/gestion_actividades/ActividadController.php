@@ -199,6 +199,76 @@ class ActividadController extends Controller
         }
     }
 
+    public function porEvaluar(): JsonResponse
+    {
+        try {
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json(['data' => []]);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+
+            if (!$idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+
+            $calificaciones = DB::table('calificacionActividad as ca')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->join('persona as p_estudiante', 'm.idPersona', '=', 'p_estudiante.id')
+                ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+                ->where('ca.idPersona', $idPersona)
+                ->where(function ($q) {
+                    $q->whereNull('ca.calificacionNumerica')
+                      ->orWhere('ca.calificacionNumerica', '');
+                })
+                ->where(function ($q) {
+                    $q->where(function ($subQ) {
+                        $subQ->whereNotNull('ca.archivo')
+                             ->where('ca.archivo', '!=', '');
+                    })->orWhere(function ($subQ) {
+                        $subQ->whereNotNull('ca.ComentarioEstudiante')
+                             ->where('ca.ComentarioEstudiante', '!=', '');
+                    });
+                })
+                ->select([
+                    'ca.id',
+                    'ca.idActividad',
+                    'a.tituloActividad',
+                    'mat.nombreMateria',
+                    'p_estudiante.nombre1',
+                    'p_estudiante.apellido1',
+                    'ca.fechaInicial',
+                    'ca.fechaFinal',
+                    'ca.archivo',
+                    'ca.ComentarioEstudiante',
+                ])
+                ->orderByDesc('ca.updated_at')
+                ->get();
+
+            $result = [];
+            foreach ($calificaciones as $c) {
+                $nombreEstudiante = trim(($c->nombre1 ?? '') . ' ' . ($c->apellido1 ?? ''));
+                $result[] = [
+                    'id' => $c->id,
+                    'estado' => 'ENVIADO',
+                    'tituloActividad' => $c->tituloActividad ?? 'Sin título',
+                    'descripcionActividad' => 'Enviado por: ' . (!empty($nombreEstudiante) ? $nombreEstudiante : 'Estudiante'),
+                    'materia' => ['nombreMateria' => $c->nombreMateria],
+                    'fechaFin' => $c->fechaFinal,
+                ];
+            }
+
+            return response()->json(['data' => $result]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function responderActividadAprendiz(Request $request, int $idCalificacionActividad): JsonResponse
     {
         try {
