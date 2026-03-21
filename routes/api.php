@@ -1246,6 +1246,7 @@ Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCo
 // Rutas Actividades (módulo académico)
 Route::middleware('auth:api')->group(function () {
     Route::get('actividades', [ActividadController::class, 'index']);
+    Route::get('actividades-por-evaluar', [ActividadController::class, 'porEvaluar']);
     Route::post('actividades', [ActividadController::class, 'store']);
     Route::post('cuestionarios', [ActividadController::class, 'storeCuestionario']);
     Route::match(['put', 'post'], 'cuestionarios/{id}', [ActividadController::class, 'updateCuestionario']);
@@ -1256,6 +1257,7 @@ Route::middleware('auth:api')->group(function () {
     Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
     Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
+    Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta-cuestionario', [ActividadController::class, 'responderCuestionarioAprendiz']);
     Route::get('actividades/{id}', [ActividadController::class, 'show']);
     Route::put('actividades/{id}', [ActividadController::class, 'update']);
     Route::delete('actividades/{id}', [ActividadController::class, 'destroy']);
@@ -1277,6 +1279,9 @@ Route::middleware('auth:api')->group(function () {
     Route::put('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'update']);
     Route::delete('fichas/{idFicha}/grupos/{id}', [GruposFichaController::class, 'destroy']);
     Route::post('fichas/{idFicha}/grupos/{id}/unirse', [GruposFichaController::class, 'unirse']);
+    Route::post('fichas/{idFicha}/grupos/{id}/salir', [GruposFichaController::class, 'salir']);
+    Route::get('fichas/{idFicha}/grupos/{id}/integrantes', [GruposFichaController::class, 'integrantes']);
+    Route::delete('fichas/{idFicha}/grupos/{id}/integrantes/{idMatricula}', [GruposFichaController::class, 'quitarIntegrante']);
 
     // Actividades del aprendiz (vista estudiante) - RUTA DUPLICADA: se usa la de ActividadController (línea 1255)
     // Esta ruta está comentada porque ActividadController::actividadesAprendiz devuelve el formato correcto
@@ -1296,6 +1301,7 @@ Route::middleware('auth:api')->group(function () {
     // Calificaciones de actividades (ambiente virtual)
     Route::get('actividades/{idActividad}/fichas/{idFicha}/aprendices', [CalificacionActividadController::class, 'listarPorActividad']);
     Route::post('calificacion-actividad/calificar', [CalificacionActividadController::class, 'calificarIndividual']);
+    Route::post('calificacion-actividad/ampliar', [CalificacionActividadController::class, 'ampliar']);
     Route::post('calificaciones/individual', [CalificacionActividadController::class, 'calificarIndividual']);
     Route::post('calificaciones/por-grupo', [CalificacionActividadController::class, 'calificarPorGrupo']);
     Route::get('calificaciones_ficha_by_instructor/{idInstructor}', [MatriculaAcademicaController::class, 'calificacionesFichaByInstructor']);

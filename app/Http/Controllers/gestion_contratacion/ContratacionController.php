@@ -27,6 +27,7 @@ use App\Models\DocumentoContrato;
 use Illuminate\Http\JsonResponse;
 use App\Models\IdentificationType;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use App\Models\ContratoTransaccion;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Mail;
@@ -44,6 +45,7 @@ use App\Models\Programa;
 use App\Models\NivelEducativo;
 use App\Models\Company;
 use App\Models\CentrosFormacion;
+use App\Enums\TypePaymentMethodContract;
 
 class ContratacionController extends Controller
 {
@@ -334,7 +336,13 @@ class ContratacionController extends Controller
             return response()->json($persona, 201);
         } catch (\Throwable $th) {
             DB::rollBack();
-            return response()->json(['error' => $th->getMessage()], 501);
+            \Log::error('Error en storePersona (creación/actualización de persona)', [
+                'message' => $th->getMessage(),
+            ]);
+            // Mensaje genérico para el usuario (no exponer detalles SQL).
+            return response()->json([
+                'message' => 'No se pudo crear el contrato. Verifica que los datos de la persona estén completos.',
+            ], 400);
         }
     }
 
@@ -380,6 +388,24 @@ class ContratacionController extends Controller
             $contrato->valorTotalContrato = $request->input('valorTotalContrato');
             $contrato->salario_id = $request->input('salario_id');
             $contrato->periodoPago = $request->input('periodoPago');
+            if ($request->filled('formaPago')) {
+                // Normalizamos para que coincida con los valores del enum en BD.
+                $formaPago = mb_strtoupper(trim((string) $request->input('formaPago')), 'UTF-8');
+
+                // Tu BD históricamente puede tener la columna con distinto nombre (camelCase vs snake_case).
+                // Para evitar "Unknown column ...", asignamos al campo existente.
+                if (Schema::hasColumn('contrato', 'formaDePago')) {
+                    $contrato->formaDePago = $formaPago;
+                } elseif (Schema::hasColumn('contrato', 'formaPago')) {
+                    $contrato->formaPago = $formaPago;
+                } elseif (Schema::hasColumn('contrato', 'forma_pago')) {
+                    $contrato->forma_pago = $formaPago;
+                } else {
+                    // No asignamos nada para evitar "Unknown column ...".
+                }
+            }
+            $contrato->supervisorContrato = $request->input('supervisorContrato');
+            $contrato->cargoSupervisor = $request->input('cargoSupervisor');
             $contrato->objetoContrato = $request->input('objetoContrato');
             $contrato->observacion = $request->input('observacion');
             $contrato->perfilProfesional = $request->input('perfilProfesional') ?: 'N/A';
@@ -407,6 +433,9 @@ class ContratacionController extends Controller
             // idArea puede venir como idCaja desde el frontend
             $contrato->idArea = $request->input('idArea') ?: $request->input('idCaja');
             $contrato->idGrupoNomina = $request->input('idGrupoNomina');
+            if ($request->has('idCentroFormacion')) {
+                $contrato->idCentroFormacion = $request->input('idCentroFormacion') ?: null;
+            }
 
             // Horas contratadas al mes (puede ser opcional)
             if ($request->has('horasmes')) {
@@ -438,7 +467,13 @@ class ContratacionController extends Controller
 
             // Guardar áreas de conocimiento
             if ($request->has('areasConocimiento') && is_array($request->input('areasConocimiento'))) {
-                $contrato->areasConocimiento()->sync($request->input('areasConocimiento'));
+                // Asegura unicidad y tipo entero antes del sync para evitar violaciones de constraint unique en el pivot.
+                $areas = $request->input('areasConocimiento');
+                $areas = array_map(function ($value) {
+                    return (int)$value;
+                }, $areas);
+                $areas = array_values(array_unique($areas));
+                $contrato->areasConocimiento()->sync($areas);
             }
 
             // Guardar programas
@@ -482,7 +517,15 @@ class ContratacionController extends Controller
                 throw new \Exception("No se encontró la persona", 505);
             }
 
-            $correoSend = $this->sendCorreoContrato($persona);
+            try {
+                $correoSend = $this->sendCorreoContrato($persona);
+            } catch (\Throwable $mailException) {
+                // No bloqueamos la creación del contrato si el envío de correo falla.
+                \Log::error('Error enviando correo de contrato', [
+                    'message' => $mailException->getMessage(),
+                    'persona_id' => $persona_id
+                ]);
+            }
 
             $transaccion = $this->storeTransaccionAsignacion($contrato->valorTotalContrato, $contrato->id);
 
@@ -497,17 +540,17 @@ class ContratacionController extends Controller
                 }
             }
 
-            // if ($contrato->idtipoContrato == 6) {
-            //     // Si el contrato es del tipo indefinido, crea un pago en el mes actual
-            //     $this->pagoContratoIndefinido($request, $transaccion);
-            // } else {
-            //     // Si no, procede con los pagos mensuales o quincenales
-            //     if ($contrato->periodoPago == 30) {
-            //         $this->storePagosPeriodoMensual($contrato, $request, $transaccion);
-            //     } elseif ($contrato->periodoPago == 15) {
-            //         $this->storePagosPeriodoQuincenal($contrato, $request, $transaccion);
-            //     }
-            // }
+            if ($contrato->idtipoContrato == 6) {
+                // Si el contrato es del tipo indefinido, crea un pago en el mes actual
+                $this->pagoContratoIndefinido($request, $transaccion);
+            } else {
+                // Si no, procede con los pagos mensuales o quincenales
+                if ($contrato->periodoPago == 30) {
+                    $this->storePagosPeriodoMensual($contrato, $request, $transaccion);
+                } elseif ($contrato->periodoPago == 15) {
+                    $this->storePagosPeriodoQuincenal($contrato, $request, $transaccion);
+                }
+            }
 
 
             $activationUser = new ActivationCompanyUser();
@@ -527,15 +570,19 @@ class ContratacionController extends Controller
             DB::commit();
         } catch (\Throwable $th) {
             DB::rollBack();
-            \Log::error('Error al guardar contrato: ' . $th->getMessage(), [
+            // IMPORTANTE: no devolver errores crudos de MySQL al frontend (pueden incluir SQL/valores).
+            \Log::error('Error al guardar contrato', [
+                'exception' => $th->getMessage(),
                 'trace' => $th->getTraceAsString(),
                 'request' => $request->all()
             ]);
+
             return response()->json([
-                'error' => 'Error al guardar el contrato',
-                'message' => $th->getMessage(),
-                'file' => $th->getFile(),
-                'line' => $th->getLine()
+                'error' => $th,
+                // Importante: no mostrar mensajes técnicos de MySQL al usuario.
+                // El detalle completo queda registrado en `storage/logs/laravel.log`.
+                'message' => 'No se pudo crear el contrato. Por favor, intente nuevamente.',
+                'code' => $th->getCode()
             ], 500);
         }
 
@@ -1123,7 +1170,14 @@ public function getContratosFlujoVT(Request $request)
                                               ($contrato->persona->nombre2 ?? '') . ' ' . 
                                               ($contrato->persona->apellido1 ?? '') . ' ' . 
                                               ($contrato->persona->apellido2 ?? '')),
-                            'identificacion' => $contrato->persona->identificacion
+                            'identificacion' => $contrato->persona->identificacion,
+                            // Campos para que el frontend pueda mostrar nombre/apellido y foto correctamente.
+                            'nombre1' => $contrato->persona->nombre1 ?? '',
+                            'nombre2' => $contrato->persona->nombre2 ?? '',
+                            'apellido1' => $contrato->persona->apellido1 ?? '',
+                            'apellido2' => $contrato->persona->apellido2 ?? '',
+                            // Usa el accessor del modelo Person: rutaFotoUrl (url completa o default)
+                            'rutaFotoUrl' => $contrato->persona->rutaFotoUrl ?? null
                         ],
                         'salario' => [
                             'rol' => $contrato->salario?->rol?->name
@@ -1717,7 +1771,12 @@ public function getContratosFlujoVT(Request $request)
             DB::commit();
         } catch (\Throwable $th) {
             DB::rollBack();
-            return response()->json($th->getMessage(), 500);
+            \Log::error('Error en storeContrato (creación de contrato)', [
+                'message' => $th->getMessage(),
+            ]);
+            return response()->json([
+                'message' => 'No se pudo crear el contrato. Intenta nuevamente.',
+            ], 400);
         }
     }
 
@@ -2097,6 +2156,14 @@ public function getContratosFlujoVT(Request $request)
 
 
 
+    /**
+     * Lista de opciones de `formaPago` definidas en el enum existente (sin crear registros en BD).
+     */
+    public function formasPagoContrato()
+    {
+        return response()->json(TypePaymentMethodContract::getValues());
+    }
+
     public function udapteContrato(Request $request, $id)
     {
         try {
@@ -2136,6 +2203,28 @@ public function getContratosFlujoVT(Request $request)
 
             if ($request->has('periodoPago')) {
                 $contrato->periodoPago = $request->input('periodoPago');
+            }
+
+            // --- Datos de supervisión y forma de pago ---
+            if ($request->filled('formaPago')) {
+                $formaPago = mb_strtoupper(trim((string) $request->input('formaPago')), 'UTF-8');
+
+                // Compatibilidad histórica de columna (camelCase vs snake_case)
+                if (Schema::hasColumn('contrato', 'formaDePago')) {
+                    $contrato->formaDePago = $formaPago;
+                } elseif (Schema::hasColumn('contrato', 'formaPago')) {
+                    $contrato->formaPago = $formaPago;
+                } elseif (Schema::hasColumn('contrato', 'forma_pago')) {
+                    $contrato->forma_pago = $formaPago;
+                }
+            }
+
+            if ($request->has('supervisorContrato')) {
+                $contrato->supervisorContrato = $request->input('supervisorContrato');
+            }
+
+            if ($request->has('cargoSupervisor')) {
+                $contrato->cargoSupervisor = $request->input('cargoSupervisor');
             }
 
             if ($request->has('objetoContrato')) {
@@ -2222,6 +2311,10 @@ public function getContratosFlujoVT(Request $request)
                 $contrato->idGrupoNomina = $request->input('idGrupoNomina');
             }
 
+            if ($request->has('idCentroFormacion')) {
+                $contrato->idCentroFormacion = $request->input('idCentroFormacion') ?: null;
+            }
+
             if ($request->has('horasmes')) {
                 $contrato->horasmes = $request->input('horasmes');
             }
@@ -2232,7 +2325,13 @@ public function getContratosFlujoVT(Request $request)
 
             // Actualizar áreas de conocimiento
             if ($request->has('areasConocimiento') && is_array($request->input('areasConocimiento'))) {
-                $contrato->areasConocimiento()->sync($request->input('areasConocimiento'));
+                // Asegura unicidad y tipo entero antes del sync para evitar constraint unique en el pivot.
+                $areas = $request->input('areasConocimiento');
+                $areas = array_map(function ($value) {
+                    return (int) $value;
+                }, $areas);
+                $areas = array_values(array_unique($areas));
+                $contrato->areasConocimiento()->sync($areas);
             }
 
             // Actualizar programas

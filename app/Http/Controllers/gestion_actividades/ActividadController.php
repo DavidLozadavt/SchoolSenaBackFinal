@@ -23,11 +23,11 @@ use Illuminate\Support\Facades\Storage;
 
 class ActividadController extends Controller
 {
-    public function actividadesAprendiz(): JsonResponse
+    public function actividadesAprendiz(Request $request): JsonResponse
     {
         try {
             if (!Schema::hasTable('calificacionActividad')) {
-                return response()->json(['data' => []]);
+                return response()->json(['data' => [], 'total' => 0, 'meta' => ['current_page' => 1, 'per_page' => 15, 'total' => 0]]);
             }
 
             $user = KeyUtil::user();
@@ -37,16 +37,25 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
             }
 
+            $perPage = (int) $request->query('per_page', 15);
+            $perPage = min(max($perPage, 5), 50);
+            $page = max(1, (int) $request->query('page', 1));
+
             $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
 
-            $registros = DB::table('calificacionActividad as ca')
+            $query = DB::table('calificacionActividad as ca')
                 ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
                 ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
                 ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
                 ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
                 ->leftJoin('area_conocimiento as ac', 'mat.idAreaConocimiento', '=', 'ac.id')
                 ->leftJoin('persona as p', 'a.idPersona', '=', 'p.id')
-                ->where('m.idPersona', $idPersona)
+                ->where('m.idPersona', $idPersona);
+
+            $total = (clone $query)->count();
+
+            $registros = (clone $query)
+                ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
                 ->select([
                     'ca.id as idCalificacionActividad',
                     'ca.idActividad',
@@ -60,6 +69,8 @@ class ActividadController extends Controller
                     'ca.ComentarioEstudiante',
                     'ca.idGrupo',
                     'ca.idEstado as idEstadoCalificacion',
+                    'a.idEstado as idEstadoActividad',
+                    'e.estado as estadoActividad',
                     'a.tituloActividad',
                     'a.descripcionActividad',
                     'a.pathDocumentoActividad',
@@ -77,11 +88,51 @@ class ActividadController extends Controller
                     'p.apellido2 as autorApellido2',
                     'p.rutaFoto as autorRutaFoto',
                 ])
-                ->orderByDesc('ca.fechaFinal')
+                ->orderBy('ca.id')
+                ->offset(($page - 1) * $perPage)
+                ->limit($perPage)
                 ->get();
 
             $idsActividad = $registros->pluck('idActividad')->unique()->filter()->values();
             $materialesPorActividad = [];
+            $preguntasPorActividad = [];
+
+            if ($idsActividad->isNotEmpty()) {
+                $idsCuestionarios = $registros->where('tipoActividad', 'cuestionario')->pluck('idActividad')->unique()->filter()->values();
+                if ($idsCuestionarios->isNotEmpty()) {
+                    $preguntas = \App\Models\Pregunta::with(['tipoPregunta', 'respuestas'])
+                        ->whereIn('idActividad', $idsCuestionarios)
+                        ->orderBy('id')
+                        ->get()
+                        ->groupBy('idActividad');
+                    foreach ($preguntas as $idAct => $items) {
+                        $preguntasPorActividad[$idAct] = $items->map(fn ($p) => [
+                            'id' => $p->id,
+                            'descripcion' => $p->descripcion,
+                            'tipoPregunta' => $p->tipoPregunta ? ['tipoPregunta' => $p->tipoPregunta->tipoPregunta ?? null] : null,
+                            'urlDocumento' => $p->urlDocumento,
+                            'respuestas' => $p->respuestas ? $p->respuestas->map(fn ($r) => [
+                                'id' => $r->id,
+                                'descripcionRespuesta' => $r->descripcionRespuesta,
+                                'chkCorrecta' => $r->chkCorrecta,
+                            ])->values() : [],
+                        ])->values();
+                    }
+                }
+            }
+
+            $cuestionariosConRespuestas = collect();
+            $tblRc = Schema::hasTable('respuestaCuestionarios') ? 'respuestaCuestionarios' : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            if ($tblRc) {
+                $idsCalifCuestionarios = $registros->where('tipoActividad', 'cuestionario')->pluck('idCalificacionActividad')->unique()->filter()->values();
+                if ($idsCalifCuestionarios->isNotEmpty()) {
+                    $cuestionariosConRespuestas = DB::table($tblRc)
+                        ->whereIn('idCalificacion', $idsCalifCuestionarios->all())
+                        ->select('idCalificacion')
+                        ->distinct()
+                        ->pluck('idCalificacion');
+                }
+            }
 
             if ($idsActividad->isNotEmpty()) {
                 $materiales = DB::table('asignacionMaterialApoyoActividad as ama')
@@ -112,8 +163,10 @@ class ActividadController extends Controller
                 }
             }
 
-            $data = $registros->map(function ($row) use ($materialesPorActividad) {
-                $estadoVisual = $this->resolverEstadoActividadAprendiz($row);
+            $data = $registros->map(function ($row) use ($materialesPorActividad, $preguntasPorActividad, $cuestionariosConRespuestas) {
+                $tieneRespuestasCuestionario = ($row->tipoActividad ?? '') === 'cuestionario'
+                    && $cuestionariosConRespuestas->contains($row->idCalificacionActividad);
+                $estadoVisual = $this->resolverEstadoActividadAprendiz($row, $tieneRespuestasCuestionario);
                 $autor = trim(implode(' ', array_filter([
                     $row->autorNombre1,
                     $row->autorNombre2,
@@ -121,14 +174,24 @@ class ActividadController extends Controller
                     $row->autorApellido2,
                 ])));
 
-                // Calcular fechaVencida basándose en la fecha, no solo en el estado
+                // Estado calculado solo por: fecha inicio, fecha límite y hora actual
+                $now = now();
                 $fechaVencida = false;
+                $fechaInactiva = false;
                 if ($row->fechaFinal) {
                     try {
                         $fechaFinal = \Carbon\Carbon::parse($row->fechaFinal);
-                        $fechaVencida = now()->greaterThan($fechaFinal);
+                        $fechaVencida = $now->greaterThan($fechaFinal);
                     } catch (\Exception $e) {
                         $fechaVencida = false;
+                    }
+                }
+                if ($row->fechaInicial) {
+                    try {
+                        $fechaInicial = \Carbon\Carbon::parse($row->fechaInicial);
+                        $fechaInactiva = $now->lessThan($fechaInicial);
+                    } catch (\Exception $e) {
+                        $fechaInactiva = false;
                     }
                 }
 
@@ -167,11 +230,29 @@ class ActividadController extends Controller
                     'materialesApoyo' => $materialesPorActividad[$row->idActividad] ?? [],
                     'estadoVisual' => $estadoVisual,
                     'fechaVencida' => $fechaVencida,
-                    'puedeResponder' => in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true),
+                    'fechaInactiva' => $fechaInactiva,
+                    'puedeResponder' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO')
+                        && !$fechaVencida
+                        && !$fechaInactiva
+                        && in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true),
+                    'estadoActividad' => $row->estadoActividad ?? 'ACTIVO',
+                    'activa' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO') && !$fechaVencida && !$fechaInactiva,
+                    'esGrupal' => !empty($row->idGrupo),
+                    'idGrupo' => $row->idGrupo,
+                    'preguntas' => ($row->tipoActividad ?? '') === 'cuestionario' ? ($preguntasPorActividad[$row->idActividad] ?? []) : null,
                 ];
             })->values();
 
-            return response()->json(['data' => $data]);
+            return response()->json([
+                'data' => $data,
+                'total' => $total,
+                'meta' => [
+                    'current_page' => $page,
+                    'per_page' => $perPage,
+                    'total' => $total,
+                    'last_page' => (int) ceil($total / $perPage),
+                ],
+            ]);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -199,6 +280,76 @@ class ActividadController extends Controller
         }
     }
 
+    public function porEvaluar(): JsonResponse
+    {
+        try {
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json(['data' => []]);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+
+            if (!$idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+
+            $calificaciones = DB::table('calificacionActividad as ca')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->join('persona as p_estudiante', 'm.idPersona', '=', 'p_estudiante.id')
+                ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+                ->where('ca.idPersona', $idPersona)
+                ->where(function ($q) {
+                    $q->whereNull('ca.calificacionNumerica')
+                      ->orWhere('ca.calificacionNumerica', '');
+                })
+                ->where(function ($q) {
+                    $q->where(function ($subQ) {
+                        $subQ->whereNotNull('ca.archivo')
+                             ->where('ca.archivo', '!=', '');
+                    })->orWhere(function ($subQ) {
+                        $subQ->whereNotNull('ca.ComentarioEstudiante')
+                             ->where('ca.ComentarioEstudiante', '!=', '');
+                    });
+                })
+                ->select([
+                    'ca.id',
+                    'ca.idActividad',
+                    'a.tituloActividad',
+                    'mat.nombreMateria',
+                    'p_estudiante.nombre1',
+                    'p_estudiante.apellido1',
+                    'ca.fechaInicial',
+                    'ca.fechaFinal',
+                    'ca.archivo',
+                    'ca.ComentarioEstudiante',
+                ])
+                ->orderByDesc('ca.updated_at')
+                ->get();
+
+            $result = [];
+            foreach ($calificaciones as $c) {
+                $nombreEstudiante = trim(($c->nombre1 ?? '') . ' ' . ($c->apellido1 ?? ''));
+                $result[] = [
+                    'id' => $c->id,
+                    'estado' => 'ENVIADO',
+                    'tituloActividad' => $c->tituloActividad ?? 'Sin título',
+                    'descripcionActividad' => 'Enviado por: ' . (!empty($nombreEstudiante) ? $nombreEstudiante : 'Estudiante'),
+                    'materia' => ['nombreMateria' => $c->nombreMateria],
+                    'fechaFin' => $c->fechaFinal,
+                ];
+            }
+
+            return response()->json(['data' => $result]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function responderActividadAprendiz(Request $request, int $idCalificacionActividad): JsonResponse
     {
         try {
@@ -215,7 +366,7 @@ class ActividadController extends Controller
 
             $validated = $request->validate([
                 'comentarioEstudiante' => 'nullable|string|max:3000',
-                'archivo' => 'nullable|file|mimes:pdf,doc,docx,png,jpg,jpeg|max:10240',
+                'archivo' => 'nullable|file|mimes:pdf,doc,docx,png,jpg,jpeg,zip,rar|max:10240',
             ]);
 
             $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
@@ -223,16 +374,36 @@ class ActividadController extends Controller
             $registro = DB::table('calificacionActividad as ca')
                 ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
                 ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
                 ->where('ca.id', $idCalificacionActividad)
                 ->where('m.idPersona', $idPersona)
-                ->select('ca.id', 'ca.archivo')
+                ->select('ca.id', 'ca.archivo', 'ca.fechaFinal', 'a.tipoActividad', 'e.estado as estadoActividad')
                 ->first();
 
             if (!$registro) {
                 return response()->json(['error' => 'Actividad no encontrada para este aprendiz'], 404);
             }
 
+            if ($registro->fechaFinal && now()->greaterThan(\Carbon\Carbon::parse($registro->fechaFinal))) {
+                return response()->json(['error' => 'El tiempo de entrega ha finalizado. No puedes entregar esta actividad.'], 422);
+            }
+
+            if (strtoupper(trim($registro->estadoActividad ?? 'ACTIVO')) !== 'ACTIVO') {
+                return response()->json(['error' => 'Esta actividad no está activa. No puedes entregar hasta que el instructor la habilite.'], 422);
+            }
+
+            $esCuestionario = strtolower(trim($registro->tipoActividad ?? '')) === 'cuestionario';
+            if ($esCuestionario) {
+                return response()->json(['error' => 'Esta actividad es un cuestionario. Usa la opción de responder cuestionario.'], 422);
+            }
+
             $archivoPath = $registro->archivo;
+            $tieneArchivoActual = !empty(trim((string) $archivoPath)) && Storage::disk('public')->exists($archivoPath);
+
+            if (!$request->hasFile('archivo') && !$tieneArchivoActual) {
+                return response()->json(['error' => 'Debes adjuntar un archivo como evidencia para poder entregar la actividad.'], 422);
+            }
 
             if ($request->hasFile('archivo')) {
                 if ($archivoPath && Storage::disk('public')->exists($archivoPath)) {
@@ -261,6 +432,104 @@ class ActividadController extends Controller
                 'message' => 'Entrega registrada correctamente',
                 'archivoUrl' => $this->publicUrl($archivoPath),
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Responder cuestionario: el aprendiz envía sus respuestas a cada pregunta.
+     */
+    public function responderCuestionarioAprendiz(Request $request, int $idCalificacionActividad): JsonResponse
+    {
+        try {
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json(['error' => 'Tabla no disponible'], 500);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+            if (!$idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            $ca = DB::table('calificacionActividad as ca')
+                ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
+                ->where('ca.id', $idCalificacionActividad)
+                ->where('m.idPersona', $idPersona)
+                ->select('ca.id', 'ca.idActividad', 'ca.fechaFinal', 'e.estado as estadoActividad')
+                ->first();
+
+            if (!$ca) {
+                return response()->json(['error' => 'Actividad no encontrada para este aprendiz'], 404);
+            }
+
+            if ($ca->fechaFinal && now()->greaterThan(\Carbon\Carbon::parse($ca->fechaFinal))) {
+                return response()->json(['error' => 'El tiempo de entrega ha finalizado. No puedes responder este cuestionario.'], 422);
+            }
+
+            if (strtoupper(trim($ca->estadoActividad ?? 'ACTIVO')) !== 'ACTIVO') {
+                return response()->json(['error' => 'Este cuestionario no está activo. No puedes responder hasta que el instructor lo habilite.'], 422);
+            }
+
+            $actividad = Actividad::with(['preguntas.respuestas', 'preguntas.tipoPregunta'])->find($ca->idActividad);
+            if (!$actividad || ($actividad->tipoActividad ?? '') !== 'cuestionario') {
+                return response()->json(['error' => 'Esta actividad no es un cuestionario'], 422);
+            }
+
+            $validated = $request->validate([
+                'respuestas' => 'required|array',
+                'respuestas.*.idPregunta' => 'required|integer|exists:preguntas,id',
+                'respuestas.*.idRespuesta' => 'nullable|integer|exists:respuestas,id',
+                'respuestas.*.respuesta' => 'nullable|string|max:5000',
+            ]);
+
+            $tblRc = Schema::hasTable('respuestaCuestionarios') ? 'respuestaCuestionarios' : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            if (!$tblRc) {
+                return response()->json(['error' => 'Tabla de respuestas de cuestionario no disponible'], 500);
+            }
+
+            foreach ($validated['respuestas'] as $r) {
+                $idRespuesta = isset($r['idRespuesta']) && $r['idRespuesta'] ? (int) $r['idRespuesta'] : null;
+                $respuestaTexto = trim($r['respuesta'] ?? '');
+                if ($idRespuesta === null && $respuestaTexto === '') {
+                    continue;
+                }
+
+                $existe = DB::table($tblRc)
+                    ->where('idCalificacion', $idCalificacionActividad)
+                    ->where('idPregunta', $r['idPregunta'])
+                    ->exists();
+                if ($existe) {
+                    DB::table($tblRc)
+                        ->where('idCalificacion', $idCalificacionActividad)
+                        ->where('idPregunta', $r['idPregunta'])
+                        ->update(['idRespuesta' => $idRespuesta, 'respuesta' => $respuestaTexto ?: null]);
+                } else {
+                    DB::table($tblRc)->insert([
+                        'idCalificacion' => $idCalificacionActividad,
+                        'idPregunta' => $r['idPregunta'],
+                        'idRespuesta' => $idRespuesta,
+                        'respuesta' => $respuestaTexto ?: null,
+                        'calificado' => false,
+                    ]);
+                }
+            }
+
+            DB::table('calificacionActividad')
+                ->where('id', $idCalificacionActividad)
+                ->update(['ComentarioEstudiante' => 'Cuestionario respondido', 'updated_at' => now()]);
+
+            // Calificación automática para preguntas de selección múltiple (Varias opciones)
+            $this->calificarCuestionarioAutomatico($idCalificacionActividad, $ca->idActividad, $tblRc);
+
+            return response()->json(['message' => 'Cuestionario respondido correctamente']);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
@@ -346,7 +615,7 @@ class ActividadController extends Controller
             $actividad = Actividad::findOrFail($id);
             $tieneAsignacion = PlaneacionActividad::where('idActividad', $id)->exists();
             if ($tieneAsignacion) {
-                return response()->json(['error' => 'No se puede eliminar una actividad que está asignada a una clase. Quítela primero de la clase.'], 422);
+                return response()->json(['error' => 'No se puede eliminar una actividad que est? asignada a una clase. Qu?tela primero de la clase.'], 422);
             }
             $actividad->delete();
             return response()->json(['message' => 'Actividad eliminada']);
@@ -509,26 +778,58 @@ class ActividadController extends Controller
             // Fallback: actividades asignadas en calificacionActividad (sin planeación)
             if ($items->isEmpty() && \Illuminate\Support\Facades\Schema::hasTable('calificacionActividad')) {
                 $tableMa = \Illuminate\Support\Facades\Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
-                if (\Illuminate\Support\Facades\Schema::hasColumn($tableMa, 'idFicha')) {
-                    $idsActividad = \Illuminate\Support\Facades\DB::table('calificacionActividad as ca')
-                        ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
-                        ->where('ma.idFicha', $idFicha)
-                        ->distinct()
-                        ->pluck('ca.idActividad');
-                    if ($idsActividad->isNotEmpty()) {
-                        $actividades = Actividad::with(['persona', 'materia', 'estado'])
-                            ->whereIn('id', $idsActividad)
-                            ->orderBy('id', 'asc')
-                            ->get();
-                        foreach ($actividades as $act) {
-                            $items->push((object) [
-                                'id' => $act->id,
-                                'idActividad' => $act->id,
-                                'idMateria' => $act->idMateria,
-                                'actividad' => $act,
-                            ]);
-                        }
+                $colFicha = \Illuminate\Support\Facades\Schema::hasColumn($tableMa, 'idFicha') ? 'idFicha' : (\Illuminate\Support\Facades\Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : 'idFicha');
+                $idsActividad = \Illuminate\Support\Facades\DB::table('calificacionActividad as ca')
+                    ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                    ->where('ma.' . $colFicha, $idFicha)
+                    ->distinct()
+                    ->pluck('ca.idActividad');
+                if ($idsActividad->isNotEmpty()) {
+                    $actividades = Actividad::with(['persona', 'materia', 'estado'])
+                        ->whereIn('id', $idsActividad)
+                        ->orderBy('id', 'asc')
+                        ->get();
+                    foreach ($actividades as $act) {
+                        $items->push((object) [
+                            'id' => $act->id,
+                            'idActividad' => $act->id,
+                            'idMateria' => $act->idMateria,
+                            'actividad' => $act,
+                        ]);
                     }
+                }
+            }
+
+            // Enriquecer con fechaInicial/fechaFinal y fechaVencida desde calificacionActividad
+            // Usar MAX(fechaFinal) y MIN(fechaInicial) por actividad para respetar ampliaciones
+            // y evitar inconsistencias cuando hay múltiples calificaciones por actividad
+            if ($items->isNotEmpty() && \Illuminate\Support\Facades\Schema::hasTable('calificacionActividad')) {
+                $tableMa = \Illuminate\Support\Facades\Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+                $colFicha = \Illuminate\Support\Facades\Schema::hasColumn($tableMa, 'idFicha') ? 'idFicha' : (\Illuminate\Support\Facades\Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : 'idFicha');
+                $idsActividad = $items->pluck('idActividad')->filter()->unique()->values();
+                $fechasPorActividad = \Illuminate\Support\Facades\DB::table('calificacionActividad as ca')
+                    ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                    ->whereIn('ca.idActividad', $idsActividad)
+                    ->where('ma.' . $colFicha, $idFicha)
+                    ->select(
+                        'ca.idActividad',
+                        \Illuminate\Support\Facades\DB::raw('MIN(ca.fechaInicial) as fechaInicial'),
+                        \Illuminate\Support\Facades\DB::raw('MAX(ca.fechaFinal) as fechaFinal')
+                    )
+                    ->groupBy('ca.idActividad')
+                    ->get()
+                    ->keyBy('idActividad');
+                $now = now();
+                foreach ($items as $item) {
+                    $idAct = $item->idActividad ?? (isset($item->actividad) ? $item->actividad->id : null);
+                    $fechas = $idAct ? $fechasPorActividad->get($idAct) : null;
+                    $item->fechaInicial = $fechas ? ($fechas->fechaInicial ?? null) : null;
+                    $item->fechaFinal = $fechas ? ($fechas->fechaFinal ?? null) : null;
+                    $fechaInicial = $item->fechaInicial ? \Carbon\Carbon::parse($item->fechaInicial) : null;
+                    $fechaFinal = $item->fechaFinal ? \Carbon\Carbon::parse($item->fechaFinal) : null;
+                    // Estado: solo fecha límite y hora actual (ampliación no debe alterar otras actividades)
+                    $item->fechaVencida = $fechaFinal ? $now->greaterThan($fechaFinal) : false;
+                    $item->fechaInactiva = $fechaInicial ? $now->lessThan($fechaInicial) : false;
                 }
             }
 
@@ -566,7 +867,7 @@ class ActividadController extends Controller
         try {
             $item = PlaneacionActividad::findOrFail($id);
             $item->delete();
-            return response()->json(['message' => 'Actividad quitada de la planeación']);
+            return response()->json(['message' => 'Actividad quitada de la planeaci?n']);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -831,19 +1132,25 @@ class ActividadController extends Controller
         }
     }
 
-    private function resolverEstadoActividadAprendiz(object $row): string
+    private function resolverEstadoActividadAprendiz(object $row, bool $tieneRespuestasCuestionario = false): string
     {
         $calificacion = trim((string) ($row->calificacionNumerica ?? ''));
-        $comentarioEstudiante = trim((string) ($row->ComentarioEstudiante ?? ''));
         $archivo = trim((string) ($row->archivoEntrega ?? $row->archivo ?? ''));
         $fechaFinal = $row->fechaFinal ? \Carbon\Carbon::parse($row->fechaFinal) : null;
+        $esCuestionario = (strtolower(trim($row->tipoActividad ?? '')) === 'cuestionario');
 
         if ($calificacion !== '') {
             return 'CALIFICADO';
         }
 
-        if ($archivo !== '' || $comentarioEstudiante !== '') {
-            return 'POR_EVALUAR';
+        if ($esCuestionario) {
+            if ($tieneRespuestasCuestionario) {
+                return 'POR_EVALUAR';
+            }
+        } else {
+            if ($archivo !== '') {
+                return 'POR_EVALUAR';
+            }
         }
 
         if ($fechaFinal && now()->greaterThan($fechaFinal)) {
@@ -864,5 +1171,66 @@ class ActividadController extends Controller
         }
 
         return Storage::disk('public')->url($path);
+    }
+
+    /**
+     * Calificación automática para preguntas de selección múltiple (Varias opciones).
+     * Correctas = valor proporcional, incorrectas = 0.
+     * Ejemplo: 4 correctas de 5 preguntas → nota = (4/5)*5 = 4.0
+     */
+    private function calificarCuestionarioAutomatico(int $idCalificacionActividad, int $idActividad, string $tblRc): void
+    {
+        $preguntasVariasOpciones = DB::table('preguntas as p')
+            ->join('tipoPreguntas as tp', 'p.idTipoPregunta', '=', 'tp.id')
+            ->where('p.idActividad', $idActividad)
+            ->whereRaw("LOWER(TRIM(tp.tipoPregunta)) = 'varias opciones'")
+            ->pluck('p.id');
+
+        if ($preguntasVariasOpciones->isEmpty()) {
+            return;
+        }
+
+        $totalPreguntas = $preguntasVariasOpciones->count();
+        $respuestasAlumno = DB::table($tblRc)
+            ->where('idCalificacion', $idCalificacionActividad)
+            ->whereIn('idPregunta', $preguntasVariasOpciones->all())
+            ->get()
+            ->keyBy('idPregunta');
+
+        $correctas = 0;
+        $totalRespondidas = 0;
+
+        foreach ($preguntasVariasOpciones as $idPregunta) {
+            $resp = $respuestasAlumno->get($idPregunta);
+            if (!$resp || !$resp->idRespuesta) {
+                continue;
+            }
+
+            $respuestaCorrecta = DB::table('respuestas')
+                ->where('id', $resp->idRespuesta)
+                ->value('chkCorrecta');
+
+            $totalRespondidas++;
+            if ($respuestaCorrecta ?? false) {
+                $correctas++;
+            }
+        }
+
+        if ($totalRespondidas === 0) {
+            $notaFinal = 1;
+        } elseif ($correctas === 0) {
+            $notaFinal = 1;
+        } else {
+            $notaFinal = round(($correctas / $totalPreguntas) * 5, 1);
+            $notaFinal = min(5, max(0, $notaFinal));
+        }
+
+        DB::table('calificacionActividad')
+            ->where('id', $idCalificacionActividad)
+            ->update([
+                'calificacionNumerica' => (string) $notaFinal,
+                'fechaCalificacion' => now(),
+                'updated_at' => now(),
+            ]);
     }
 }
