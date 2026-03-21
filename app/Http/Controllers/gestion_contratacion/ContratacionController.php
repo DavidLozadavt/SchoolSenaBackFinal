@@ -28,6 +28,7 @@ use Illuminate\Http\JsonResponse;
 use App\Models\IdentificationType;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\QueryException;
 use App\Models\ContratoTransaccion;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Mail;
@@ -246,7 +247,7 @@ class ContratacionController extends Controller
             'empresa',
             'estado'
         )
-            ->where('idPersona', $idPersona)
+            ->where('idpersona', $idPersona)
             ->get();
 
         if ($contrato) {
@@ -272,21 +273,128 @@ class ContratacionController extends Controller
     public function storePersona(Request $request)
     {
         try {
+            $email = trim((string) $request->input('email', ''));
+            $identificacion = trim((string) $request->input('identificacion', ''));
+
+            if ($identificacion === '') {
+                return response()->json([
+                    'message' => 'La identificación es obligatoria para registrar o localizar la persona.',
+                ], 422);
+            }
+
             DB::beginTransaction();
-            $email = $request->input('email');
-            $identificacion = $request->input('identificacion');
             $company_id = KeyUtil::idCompany();
 
-
-            $personaExistente = Person::where('email', $email)
-                ->orWhere('identificacion', $identificacion)
-                ->first();
+            // IMPORTANTE: no usar (email = X OR identificacion = Y) en una sola consulta.
+            // Si el correo está vacío o repetido en pruebas, `where('email', '')` o el OR hacía que
+            // siempre se devolviera la misma persona (ej. id 858) aunque la cédula fuera otra.
+            // La persona natural se identifica por documento; el correo puede repetirse o quedar mal cargado.
+            $personaExistente = Person::where('identificacion', $identificacion)->first();
 
             if ($personaExistente) {
+                // La tabla `usuario` usa la columna `idpersona` (minúsculas). Debe existir usuario
+                // para poder crear el contrato; si la persona vino de otro flujo sin usuario, lo creamos.
+                $userExistente = User::where('idpersona', $personaExistente->id)->first();
+                if (!$userExistente) {
+                    if (User::where('id', $personaExistente->id)->exists()) {
+                        DB::rollBack();
+
+                        return response()->json([
+                            'message' => 'Hay un conflicto entre el usuario y la persona en el sistema. Contacte a soporte.',
+                        ], 409);
+                    }
+                    $correoPersona = trim((string) ($personaExistente->email ?? ''));
+                    if ($correoPersona === '') {
+                        DB::rollBack();
+
+                        return response()->json([
+                            'message' => 'La persona no tiene correo en el sistema. Actualiza los datos de la persona con un correo válido antes de contratar.',
+                        ], 422);
+                    }
+                    $correoEnUso = User::where('email', $correoPersona)
+                        ->where('idpersona', '!=', $personaExistente->id)
+                        ->exists();
+                    if ($correoEnUso) {
+                        DB::rollBack();
+
+                        return response()->json([
+                            'message' => 'El correo de esta persona ya está asignado a otro usuario. Cambia el correo en los datos de la persona o contacta a soporte.',
+                        ], 409);
+                    }
+                    $userExistente = new User();
+                    $userExistente->id = $personaExistente->id;
+                    $userExistente->email = $correoPersona;
+                    $userExistente->contrasena = bcrypt($personaExistente->identificacion);
+                    $userExistente->idpersona = $personaExistente->id;
+                    $userExistente->save();
+                }
+                DB::commit();
+
                 return response()->json($personaExistente, 200);
             }
 
-          
+            // --- Nueva persona: validar antes de insertar (evita error SQL genérico) ---
+            if ($email === '') {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'El correo electrónico es obligatorio.',
+                ], 422);
+            }
+
+            $nombre1 = trim((string) $request->input('nombre1', ''));
+            $apellido1 = trim((string) $request->input('apellido1', ''));
+            if ($nombre1 === '' || $apellido1 === '') {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'El primer nombre y el primer apellido son obligatorios.',
+                ], 422);
+            }
+
+            $fechaNacRaw = trim((string) $request->input('fechaNac', ''));
+            if ($fechaNacRaw === '' || in_array(strtolower($fechaNacRaw), ['undefined', 'null'], true)) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'La fecha de nacimiento es obligatoria.',
+                ], 422);
+            }
+
+            $idTipoIdentificacion = $this->normalizePositiveInt($request->input('idtipoIdentificacion'));
+            $idCiudadNac = $this->normalizePositiveInt($request->input('idciudadNac'));
+            $idCiudadUbicacion = $this->normalizePositiveInt($request->input('idciudadUbicacion'));
+
+            if ($idTipoIdentificacion === null) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'Selecciona un tipo de identificación válido.',
+                ], 422);
+            }
+            if ($idCiudadNac === null) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'Selecciona la ciudad de nacimiento.',
+                ], 422);
+            }
+            if ($idCiudadUbicacion === null) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'Selecciona la ciudad de ubicación o residencia.',
+                ], 422);
+            }
+
+            if (User::where('email', $email)->exists()) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'El correo electrónico ya está registrado con otro usuario. Usa un correo distinto o revisa si la persona ya existe con otra cédula.',
+                ], 409);
+            }
+
             $maxPersonId = Person::max('id') ?? 0;
             $maxUserId = User::max('id') ?? 0;
             $nextId = max($maxPersonId, $maxUserId) + 1;
@@ -297,18 +405,18 @@ class ContratacionController extends Controller
 
             $persona = new Person();
             $persona->id = $nextId;
-            $persona->fechaNac = $request->input('fechaNac');
-            $persona->idTipoIdentificacion = $request->input('idtipoIdentificacion');
+            $persona->fechaNac = $fechaNacRaw;
+            $persona->idTipoIdentificacion = $idTipoIdentificacion;
             $persona->identificacion = $identificacion;
-            $persona->nombre1 = $request->input('nombre1');
+            $persona->nombre1 = $nombre1;
             $persona->nombre2 = $request->input('nombre2');
             $persona->apellido2 = $request->input('apellido2');
-            $persona->apellido1 = $request->input('apellido1');
-            $persona->idCiudadNac = $request->input('idciudadNac');
+            $persona->apellido1 = $apellido1;
+            $persona->idCiudadNac = $idCiudadNac;
             $persona->celular = $request->input('celular');
             $persona->email = $email;
             $persona->direccion = $request->input('direccion');
-            $persona->idCiudadUbicacion = $request->input('idciudadUbicacion');
+            $persona->idCiudadUbicacion = $idCiudadUbicacion;
             $persona->telefonoFijo = $request->input('telefonoFijo');
             $persona->sexo = $request->input('sexo');
             $persona->rh = $request->input('rh');
@@ -334,15 +442,52 @@ class ContratacionController extends Controller
 
             DB::commit();
             return response()->json($persona, 201);
+        } catch (QueryException $e) {
+            DB::rollBack();
+            Log::error('Error SQL en storePersona', [
+                'message' => $e->getMessage(),
+                'sql_state' => $e->errorInfo[0] ?? null,
+            ]);
+            $raw = $e->getMessage();
+            $isDuplicate = str_contains($raw, 'Duplicate') || (($e->errorInfo[0] ?? '') === '23000');
+            if ($isDuplicate) {
+                if (stripos($raw, 'email') !== false || stripos($raw, 'usuario') !== false) {
+                    return response()->json([
+                        'message' => 'El correo electrónico ya está registrado. Usa otro correo o revisa si la persona ya existe.',
+                    ], 409);
+                }
+                if (stripos($raw, 'identificacion') !== false) {
+                    return response()->json([
+                        'message' => 'Ya existe una persona con esta identificación en el sistema.',
+                    ], 409);
+                }
+
+                return response()->json([
+                    'message' => 'Los datos chocan con un registro existente (duplicado). Revisa correo, cédula y vuelve a intentar.',
+                ], 409);
+            }
+            $payload = [
+                'message' => 'Error al guardar en la base de datos. Verifica ciudad, tipo de documento y que no falten datos obligatorios.',
+            ];
+            if (config('app.debug')) {
+                $payload['debug'] = $raw;
+            }
+
+            return response()->json($payload, 400);
         } catch (\Throwable $th) {
             DB::rollBack();
-            \Log::error('Error en storePersona (creación/actualización de persona)', [
+            Log::error('Error en storePersona (creación/actualización de persona)', [
                 'message' => $th->getMessage(),
+                'trace' => $th->getTraceAsString(),
             ]);
-            // Mensaje genérico para el usuario (no exponer detalles SQL).
-            return response()->json([
-                'message' => 'No se pudo crear el contrato. Verifica que los datos de la persona estén completos.',
-            ], 400);
+            $payload = [
+                'message' => 'No se pudo guardar la persona. Verifica los datos e intenta de nuevo. Si el problema continúa, revisa el registro en laravel.log.',
+            ];
+            if (config('app.debug')) {
+                $payload['debug'] = $th->getMessage();
+            }
+
+            return response()->json($payload, 400);
         }
     }
 
@@ -409,7 +554,9 @@ class ContratacionController extends Controller
             $contrato->objetoContrato = $request->input('objetoContrato');
             $contrato->observacion = $request->input('observacion');
             $contrato->perfilProfesional = $request->input('perfilProfesional') ?: 'N/A';
-            $contrato->otrosi = 'N';
+            $contrato->otrosi = $request->filled('otrosi')
+                ? trim((string) $request->input('otrosi'))
+                : 'N';
             $contrato->idEstado = Status::ID_ACTIVE;
 
             $contrato->idPension = $request->input('idPension');
@@ -499,10 +646,10 @@ class ContratacionController extends Controller
                 $vacion->save();
             }
 
-            $user = User::where('idPersona', $persona_id)->first();
+            $user = User::where('idpersona', $persona_id)->first();
 
             if (!$user) {
-                throw new \Exception("No se encontro la persona", 505);
+                throw new \Exception('No se encontró el usuario asociado a la persona (idpersona).', 505);
             }
 
             // Actualizar el centro de formación del usuario si se proporciona
@@ -574,16 +721,23 @@ class ContratacionController extends Controller
             \Log::error('Error al guardar contrato', [
                 'exception' => $th->getMessage(),
                 'trace' => $th->getTraceAsString(),
-                'request' => $request->all()
+                'payload' => $request->except([
+                    'rutaFile',
+                    'rutaFotoFile',
+                    'password',
+                    'contrasena',
+                    'rutaFoto',
+                ]),
             ]);
 
-            return response()->json([
-                'error' => $th,
-                // Importante: no mostrar mensajes técnicos de MySQL al usuario.
-                // El detalle completo queda registrado en `storage/logs/laravel.log`.
+            $payload = [
                 'message' => 'No se pudo crear el contrato. Por favor, intente nuevamente.',
-                'code' => $th->getCode()
-            ], 500);
+            ];
+            if (config('app.debug')) {
+                $payload['debug'] = $th->getMessage();
+            }
+
+            return response()->json($payload, 500);
         }
 
         return response()->json($contrato, 201);
@@ -873,6 +1027,34 @@ class ContratacionController extends Controller
 
 
     /**
+     * Convierte un valor de request en entero > 0 o null (rechaza "", "undefined", "null", no numérico).
+     */
+    private function normalizePositiveInt($value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_string($value)) {
+            $v = trim($value);
+            if ($v === '' || strtolower($v) === 'undefined' || strtolower($v) === 'null') {
+                return null;
+            }
+            if (! ctype_digit($v)) {
+                return null;
+            }
+            $n = (int) $v;
+
+            return $n > 0 ? $n : null;
+        }
+        if (! is_numeric($value)) {
+            return null;
+        }
+        $n = (int) $value;
+
+        return $n > 0 ? $n : null;
+    }
+
+    /**
      * Almacena la ruta de la imagen asociada a una persona.
      *
      * Esta función determina la ruta de la basándose en la solicitud.
@@ -909,7 +1091,7 @@ class ContratacionController extends Controller
      * Obtiene todos los contratos, incluyendo información de persona, salario, transacciones y estado.
      *
      * Esta función busca todos los contratos con relaciones cargadas para 'persona', 'salario.rol',
-     * 'transacciones.pago' y 'estado'. Ordena los resultados por estado activo y fecha de contratación.
+     * 'transacciones.pago' y 'estado'. Ordena por prioridad de estado y luego por código (id) ascendente.
      * Retorna un objeto JSON con la información de los contratos.
      *
      * @return \Illuminate\Http\JsonResponse
@@ -931,11 +1113,14 @@ public function getAllContratos(Request $request)
             $userRoles = $activationUser->roles->pluck('name')->toArray();
         }
         
-        Log::info('=== getAllContratos - INICIO ===');
-        Log::info('Usuario ID: ' . $user->id);
-        Log::info('Roles del usuario: ' . json_encode($userRoles));
-        Log::info('Parámetros recibidos: ' . json_encode($request->all()));
-        
+        if (config('app.debug')) {
+            Log::debug('getAllContratos', [
+                'user_id' => $user->id,
+                'roles' => $userRoles,
+                'params' => $request->all(),
+            ]);
+        }
+
         // Iniciar la consulta base
         $query = Contract::with(
             'persona',
@@ -946,113 +1131,57 @@ public function getAllContratos(Request $request)
         )
         ->where('idEstado', '!=', 14)
         ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
-        ->orderBy('fechaContratacion');
- 
-        // Verificar consulta base
-        Log::info('Consulta base creada');
- 
-        //Validar roles específicos o dar contratos por centro
+        ->orderBy('id');
+
+        // Validar roles específicos o dar contratos por centro
         if (in_array('ADMINISTRADOR VT', $userRoles)) {
-            Log::info('Es ADMINISTRADOR VT');
-            
-            // ADMINISTRADOR VT: puede filtrar por empresa y centro
             if ($request->has('idCompany') && $request->input('idCompany')) {
                 $idCompany = $request->input('idCompany');
-                
-                // Filtrar por AMBOS campos de empresa para compatibilidad
-                $query->where(function($q) use ($idCompany) {
+                $query->where(function ($q) use ($idCompany) {
                     $q->where('idCompany', $idCompany)
                       ->orWhere('idempresa', $idCompany);
                 });
-                
-                Log::info('Aplicando filtro por empresa (idCompany o idempresa): ' . $idCompany);
-            } else {
-                Log::info('No se recibió idCompany o está vacío');
             }
-            
+
             if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
                 $idCentroFormacion = $request->input('idCentroFormacion');
                 $query->where('idCentroFormacion', $idCentroFormacion);
-                Log::info('Aplicando filtro idCentroFormacion: ' . $idCentroFormacion);
-            } else {
-                Log::info('No se recibió idCentroFormacion o está vacío - mostrar todos los de la empresa');
             }
-        }
-        elseif (in_array('ADMIN REGIONAL', $userRoles)) {
-            Log::info('Es ADMIN REGIONAL');
-            
-            // ADMIN REGIONAL: puede filtrar por centro
+        } elseif (in_array('ADMIN REGIONAL', $userRoles)) {
             if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
                 $idCentroFormacion = $request->input('idCentroFormacion');
                 $query->where('idCentroFormacion', $idCentroFormacion);
-                Log::info('Aplicando filtro idCentroFormacion: ' . $idCentroFormacion);
-            } else {
-                Log::info('No se recibió idCentroFormacion - mostrar todos los centros');
             }
-        }
-        else {
-            //PARA TODOS LOS DEMÁS: Solo dar contratos por idCentroFormacion
-            Log::info('Usuario sin rol administrativo específico - filtrando por centro asignado');
-            
+        } else {
             if ($user->idCentroFormacion) {
                 $query->where('idCentroFormacion', $user->idCentroFormacion);
-                Log::info('Aplicando filtro por centro asignado: ' . $user->idCentroFormacion);
             } else {
-                Log::info('Usuario no tiene centro asignado - sin contratos');
                 return response()->json(['error' => 'No tienes centro asignado'], 403);
             }
         }
- 
-        // LOGGING: Obtener SQL y resultados
-        $sql = $query->toSql();
-        Log::info('SQL generado: ' . $sql);
-        Log::info('Bindings: ' . json_encode($query->getBindings()));
-        
+
         $contratos = $query->get();
-        Log::info('Contratos encontrados: ' . $contratos->count());
-        
-        // LOGGING: Mostrar detalles de los contratos
-        if ($contratos->count() > 0) {
-            Log::info('Primer contrato encontrado:');
-            $primerContrato = $contratos->first();
-            Log::info('ID: ' . $primerContrato->id);
-            Log::info('idCompany: ' . ($primerContrato->idCompany ?? 'NULL'));
-            Log::info('idempresa: ' . ($primerContrato->idempresa ?? 'NULL'));
-            Log::info('idCentroFormacion: ' . ($primerContrato->idCentroFormacion ?? 'NULL'));
-            Log::info('idEstado: ' . ($primerContrato->idEstado ?? 'NULL'));
-            
-            // Mostrar todos los contratos con sus filtros
-            Log::info('Todos los contratos encontrados:');
-            foreach ($contratos as $index => $contrato) {
-                Log::info("Contrato " . ($index + 1) . ": ID={$contrato->id}, idCompany={$contrato->idCompany}, idempresa={$contrato->idempresa}, idCentroFormacion={$contrato->idCentroFormacion}");
-            }
-        } else {
-            Log::info('No se encontraron contratos con los filtros aplicados');
-            
-            // DEBUG: Mostrar contratos sin filtros para comparar
-            Log::info('DEBUG: Verificando contratos sin filtros...');
-            $contratosSinFiltros = Contract::with('persona', 'salario.rol', 'estado', 'area')
-                ->where('idEstado', '!=', 14)
-                ->limit(5)
-                ->get();
-            
-            Log::info('Contratos sin filtros (primeros 5): ' . $contratosSinFiltros->count());
-            foreach ($contratosSinFiltros as $contrato) {
-                Log::info("DEBUG - Contrato: ID={$contrato->id}, idCompany={$contrato->idCompany}, idempresa={$contrato->idempresa}, idCentroFormacion={$contrato->idCentroFormacion}");
-            }
+
+        if (config('app.debug')) {
+            Log::debug('getAllContratos resultado', ['count' => $contratos->count()]);
         }
- 
-        Log::info('=== getAllContratos - FIN ===');
-        
+
         return response()->json($contratos);
         
     } catch (\Exception $e) {
-        Log::error('Error en getAllContratos: ' . $e->getMessage());
-        Log::error('Stack trace: ' . $e->getTraceAsString());
-        return response()->json([
+        Log::error('Error en getAllContratos', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+        ]);
+        $payload = [
             'error' => 'Error al obtener los contratos',
-            'message' => $e->getMessage()
-        ], 500);
+            'message' => 'No se pudieron cargar los contratos. Intente más tarde.',
+        ];
+        if (config('app.debug')) {
+            $payload['debug'] = $e->getMessage();
+        }
+
+        return response()->json($payload, 500);
     }
 }
  
@@ -1064,61 +1193,52 @@ public function getContratosFlujoVT(Request $request)
 {
     try {
         $user = auth()->user();
-        
-        Log::info('=== getContratosFlujoVT (ADMINISTRADOR VT) ===', ['method' => 'getContratosFlujoVT']);
-        Log::info('Usuario: ' . $user->id, ['user_id' => $user->id]);
-        Log::info('Parámetros recibidos:', $request->all());
-        
+
         if (!$user) {
             return response()->json(['error' => 'Usuario no autenticado'], 401);
         }
-        
-        // Verificar que sea ADMINISTRADOR VT
+
+        if (config('app.debug')) {
+            Log::debug('getContratosFlujoVT', [
+                'user_id' => $user->id,
+                'params' => $request->all(),
+            ]);
+        }
+
         $userRoles = [];
         $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
-        
+
         if ($activationUser) {
             $userRoles = $activationUser->roles->pluck('name')->toArray();
         }
-        
-        Log::info('Roles del usuario:', ['roles' => $userRoles]);
-        
-        // VALIDAR QUE SEA ADMINISTRADOR VT
+
         if (!in_array('ADMINISTRADOR VT', $userRoles)) {
-            Log::info('Usuario no es ADMINISTRADOR VT', ['roles' => $userRoles]);
             return response()->json(['error' => 'Este endpoint es solo para ADMINISTRADOR VT'], 403);
         }
 
-        // Validar parámetros
         $request->validate([
             'idCompany' => 'required|integer|exists:empresa,id',
-            'idCentroFormacion' => 'nullable|integer|exists:centroFormacion,id'
+            'idCentroFormacion' => 'nullable|integer|exists:centroFormacion,id',
         ]);
 
         $idCompany = $request->input('idCompany');
         $idCentroFormacion = $request->input('idCentroFormacion');
 
-        Log::info('Filtrando contratos', ['idCompany' => $idCompany, 'idCentroFormacion' => $idCentroFormacion]);
-
-        // 1. Obtener información de la empresa
         $empresa = Company::find($idCompany);
-        Log::info('Empresa encontrada:', ['empresa' => $empresa ? $empresa->razonSocial : 'No encontrada']);
+        if (!$empresa) {
+            return response()->json(['error' => 'Empresa no encontrada'], 404);
+        }
 
-        // 2. Obtener centros de formación de esa empresa
         $centrosQuery = CentrosFormacion::where('idEmpresa', $idCompany)
             ->with(['ciudad:id,descripcion', 'empresa:id,razonSocial'])
             ->orderBy('nombre', 'asc');
 
-        // Si se proporciona idCentroFormacion, filtrar también por centro
         if ($idCentroFormacion) {
             $centrosQuery->where('id', $idCentroFormacion);
-            Log::info('Aplicando filtro adicional por idCentroFormacion', ['idCentroFormacion' => $idCentroFormacion]);
         }
 
         $centros = $centrosQuery->get();
-        Log::info('Centros encontrados:', ['count' => $centros->count()]);
 
-        // 3. Obtener contratos filtrados
         $contratosQuery = Contract::with(
             'persona',
             'salario.rol',
@@ -1127,21 +1247,18 @@ public function getContratosFlujoVT(Request $request)
             'area'
         )
         ->where('idEstado', '!=', 14)
-        ->where(function($q) use ($idCompany) {
+        ->where(function ($q) use ($idCompany) {
             $q->where('idCompany', $idCompany)
               ->orWhere('idempresa', $idCompany);
-        }) //Filtrar por AMBOS campos
+        })
         ->orderByRaw('CASE WHEN idEstado = 13 THEN 2 WHEN idEstado = 2 THEN 1 ELSE 0 END')
-        ->orderBy('fechaContratacion');
+        ->orderBy('id');
 
-        // Si se proporciona idCentroFormacion, filtrar también por centro
         if ($idCentroFormacion) {
             $contratosQuery->where('idCentroFormacion', $idCentroFormacion);
-            Log::info('Aplicando filtro adicional por idCentroFormacion', ['idCentroFormacion' => $idCentroFormacion]);
         }
 
         $contratos = $contratosQuery->get();
-        Log::info('Contratos encontrados:', ['count' => $contratos->count()]);
 
         // 4. Preparar respuesta completa
         $response = [
@@ -1162,22 +1279,24 @@ public function getContratosFlujoVT(Request $request)
                         'empresa' => $centro->empresa?->razonSocial
                     ];
                 }),
-                'contratos' => $contratos->map(function($contrato) {
+                'contratos' => $contratos->map(function ($contrato) {
+                    $p = $contrato->persona;
+
                     return [
                         'id' => $contrato->id,
                         'persona' => [
-                            'nombreCompleto' => trim(($contrato->persona->nombre1 ?? '') . ' ' . 
-                                              ($contrato->persona->nombre2 ?? '') . ' ' . 
-                                              ($contrato->persona->apellido1 ?? '') . ' ' . 
-                                              ($contrato->persona->apellido2 ?? '')),
-                            'identificacion' => $contrato->persona->identificacion,
-                            // Campos para que el frontend pueda mostrar nombre/apellido y foto correctamente.
-                            'nombre1' => $contrato->persona->nombre1 ?? '',
-                            'nombre2' => $contrato->persona->nombre2 ?? '',
-                            'apellido1' => $contrato->persona->apellido1 ?? '',
-                            'apellido2' => $contrato->persona->apellido2 ?? '',
-                            // Usa el accessor del modelo Person: rutaFotoUrl (url completa o default)
-                            'rutaFotoUrl' => $contrato->persona->rutaFotoUrl ?? null
+                            'nombreCompleto' => $p
+                                ? trim(
+                                    ($p->nombre1 ?? '') . ' ' . ($p->nombre2 ?? '') . ' ' .
+                                    ($p->apellido1 ?? '') . ' ' . ($p->apellido2 ?? '')
+                                )
+                                : '',
+                            'identificacion' => $p->identificacion ?? null,
+                            'nombre1' => $p->nombre1 ?? '',
+                            'nombre2' => $p->nombre2 ?? '',
+                            'apellido1' => $p->apellido1 ?? '',
+                            'apellido2' => $p->apellido2 ?? '',
+                            'rutaFotoUrl' => $p->rutaFotoUrl ?? null,
                         ],
                         'salario' => [
                             'rol' => $contrato->salario?->rol?->name
@@ -1207,15 +1326,22 @@ public function getContratosFlujoVT(Request $request)
             ]
         ];
 
-        Log::info('Respuesta preparada con éxito', ['status' => 'success']);
         return response()->json($response);
 
     } catch (\Exception $e) {
-        Log::error('Error en getContratosFlujoVT: ' . $e->getMessage(), ['error' => $e->getMessage()]);
-        return response()->json([
+        Log::error('Error en getContratosFlujoVT', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+        ]);
+        $payload = [
             'error' => 'Error al obtener los datos',
-            'message' => $e->getMessage()
-        ], 500);
+            'message' => 'No se pudieron cargar los contratos. Intente más tarde.',
+        ];
+        if (config('app.debug')) {
+            $payload['debug'] = $e->getMessage();
+        }
+
+        return response()->json($payload, 500);
     }
 }
     
@@ -1707,10 +1833,10 @@ public function getContratosFlujoVT(Request $request)
             $contrato->idEstado = Status::ID_ACTIVE;
             $contrato->save();
 
-            $user = User::where('idPersona', $persona_id)->first();
+            $user = User::where('idpersona', $persona_id)->first();
 
             if (!$user) {
-                throw new \Exception("No se encontro la persona", 505);
+                throw new \Exception('No se encontró el usuario asociado a la persona (idpersona).', 505);
             }
 
             $persona = Person::find($persona_id);
@@ -2171,8 +2297,12 @@ public function getContratosFlujoVT(Request $request)
             $contrato = Contract::find($id);
 
             if (!$contrato) {
+                DB::rollBack();
                 return response()->json(['error' => 'Contrato no encontrado'], 404);
             }
+
+            $prevFechaIni = $contrato->fechaContratacion;
+            $prevFechaFin = $contrato->fechaFinalContrato;
 
             // Solo actualizar campos que vienen en el request
             if ($request->has('idtipoContrato')) {
@@ -2197,12 +2327,28 @@ public function getContratosFlujoVT(Request $request)
                 $contrato->valorTotalContrato = $request->input('valorTotalContrato');
             }
 
-            if ($request->has('salario_id')) {
+            // No pisar salario_id con null si el front envía la clave sin valor
+            if ($request->filled('salario_id')) {
                 $contrato->salario_id = $request->input('salario_id');
             }
 
             if ($request->has('periodoPago')) {
-                $contrato->periodoPago = $request->input('periodoPago');
+                $pp = $request->input('periodoPago');
+                // BD: entero (10=semanal, 15=quincenal, 30=mensual). Compat. con textos del front antiguo.
+                if (is_string($pp) && $pp !== '' && !is_numeric($pp)) {
+                    $map = [
+                        'MENSUAL' => 30,
+                        'QUINCENAL' => 15,
+                        'SEMANAL' => 10,
+                        'DIARIO' => 1,
+                    ];
+                    $key = strtoupper(trim($pp));
+                    if (isset($map[$key])) {
+                        $contrato->periodoPago = $map[$key];
+                    }
+                } elseif ($pp !== null && $pp !== '') {
+                    $contrato->periodoPago = (int) $pp;
+                }
             }
 
             // --- Datos de supervisión y forma de pago ---
@@ -2350,6 +2496,19 @@ public function getContratosFlujoVT(Request $request)
                 }
             }
 
+            $normFechaContrato = static function ($d) {
+                if ($d === null || $d === '') {
+                    return null;
+                }
+                try {
+                    return Carbon::parse($d)->format('Y-m-d');
+                } catch (\Throwable $e) {
+                    return null;
+                }
+            };
+            $datesChanged =
+                $normFechaContrato($prevFechaIni) !== $normFechaContrato($contrato->fechaContratacion)
+                || $normFechaContrato($prevFechaFin) !== $normFechaContrato($contrato->fechaFinalContrato);
 
             $contrato->save();
 
@@ -2357,8 +2516,9 @@ public function getContratosFlujoVT(Request $request)
 
 
 
-            // Solo crear vacación si se actualizó fechaContratacion y el tipo de contrato lo requiere
-            if ($request->has('fechaContratacion') && in_array($contrato->idtipoContrato, [6, 7])) {
+            // Solo crear vacación si cambió la fecha de inicio y el tipo de contrato lo requiere
+            $fechaInicioChanged = $normFechaContrato($prevFechaIni) !== $normFechaContrato($contrato->fechaContratacion);
+            if ($fechaInicioChanged && $request->has('fechaContratacion') && in_array($contrato->idtipoContrato, [6, 7])) {
                 $fechaInicio = Carbon::parse($request->input('fechaContratacion'));
                 $vacion = new Vacacion();
                 $vacion->idContrato = $contrato->id;
@@ -2367,74 +2527,94 @@ public function getContratosFlujoVT(Request $request)
                 $vacion->save();
             }
 
-            $user = User::where('idpersona', $contrato->idpersona)->first();
+            // Solo sincronizar usuario / activación / salario cuando cambian fechas, salario, rol o centro.
+            // El front suele reenviar las mismas fechas en cada guardado: sin comparar, siempre fallaría salario/activación.
+            $needsUserActivationSync =
+                $datesChanged
+                || $request->has('sueldo')
+                || $request->filled('rol')
+                || ($request->has('idCentroFormacion') && $request->filled('idCentroFormacion'));
 
-            if (!$user) {
-                throw new \Exception("No se encontro la persona", 505);
-            }
+            if ($needsUserActivationSync) {
+                $user = User::where('idpersona', $contrato->idpersona)->first();
 
-            $persona = Person::find($contrato->idpersona);
-
-            if (!$persona) {
-                throw new \Exception("No se encontró la persona", 505);
-            }
-
-
-
-            // $transaccion = $this->storeTransaccionAsignacion($contrato->valorTotalContrato, $contrato->id);
-
-
-            if ($contrato->idtipoContrato == 8) {
-                $salario = new Salario();
-                $salario->valor = $request->input('sueldo');
-            } else {
-                $salario = Salario::find($contrato->salario_id);
-                if (!$salario) {
-                    throw new \Exception("No se encontró el salario correspondiente al contrato", 505);
+                if (!$user) {
+                    throw new \Exception("No se encontro la persona", 505);
                 }
-            }
 
+                $persona = Person::find($contrato->idpersona);
 
+                if (!$persona) {
+                    throw new \Exception("No se encontró la persona", 505);
+                }
 
-            $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
-
-            if (!$activationUser) {
-                return response()->json(['error' => 'Activación del usuario no encontrada'], 404);
-            }
-
-            // Solo actualizar fechas de activación si se actualizó fechaContratacion
-            if ($request->has('fechaContratacion')) {
-                $fechaInicio = Carbon::parse($request->input('fechaContratacion'));
-                $activationUser->fechaInicio = $fechaInicio;
-
-                if ($contrato->idtipoContrato == 6) {
-                    $activationUser->fechaFin = date('Y-m-d', strtotime($fechaInicio . ' + 3 years'));
+                if ($contrato->idtipoContrato == 8) {
+                    $salario = new Salario();
+                    $salario->valor = $request->input('sueldo');
                 } else {
-                    if ($request->has('fechaFinalContrato')) {
-                        $fechaFinalContrato = Carbon::parse($request->input('fechaFinalContrato'))->format('Y-m-d');
-                        $activationUser->fechaFin = $fechaFinalContrato;
+                    $salario = Salario::find($contrato->salario_id);
+                    if (!$salario) {
+                        throw new \Exception("No se encontró el salario correspondiente al contrato", 505);
+                    }
+                    if ($request->has('sueldo')) {
+                        $salario->valor = $request->input('sueldo');
+                        $salario->save();
                     }
                 }
-            }
 
-            $activationUser->state_id = Status::ID_ACTIVE;
+                $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
 
-            if ($request->filled('rol')) {
-                $activationUser->assignRole($request->input('rol'));
-            }
+                if (!$activationUser) {
+                    DB::rollBack();
+                    return response()->json(['error' => 'Activación del usuario no encontrada'], 404);
+                }
 
-            $activationUser->saveWithCompany();
+                // Solo actualizar fechas de activación si se actualizó fechaContratacion
+                if ($request->has('fechaContratacion')) {
+                    $fechaInicio = Carbon::parse($request->input('fechaContratacion'));
+                    $activationUser->fechaInicio = $fechaInicio;
 
-            // Actualizar el centro de formación del usuario si se proporciona
-            if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
-                $user->idCentroFormacion = $request->input('idCentroFormacion');
-                $user->save();
+                    if ($contrato->idtipoContrato == 6) {
+                        $activationUser->fechaFin = date('Y-m-d', strtotime($fechaInicio . ' + 3 years'));
+                    } else {
+                        if ($request->has('fechaFinalContrato')) {
+                            $fechaFinalContrato = Carbon::parse($request->input('fechaFinalContrato'))->format('Y-m-d');
+                            $activationUser->fechaFin = $fechaFinalContrato;
+                        }
+                    }
+                }
+
+                $activationUser->state_id = Status::ID_ACTIVE;
+
+                if ($request->filled('rol')) {
+                    $activationUser->assignRole($request->input('rol'));
+                }
+
+                $activationUser->saveWithCompany();
+
+                // Actualizar el centro de formación del usuario si se proporciona
+                if ($request->has('idCentroFormacion') && $request->input('idCentroFormacion')) {
+                    $user->idCentroFormacion = $request->input('idCentroFormacion');
+                    $user->save();
+                }
             }
 
             DB::commit();
         } catch (\Throwable $th) {
             DB::rollBack();
-            return response()->json($th->getMessage(), 500);
+            Log::error('Error en udapteContrato', [
+                'contrato_id' => $id,
+                'message' => $th->getMessage(),
+                'trace' => $th->getTraceAsString(),
+            ]);
+            $payload = [
+                'message' => 'No se pudo actualizar el contrato. Intente nuevamente.',
+            ];
+            if (config('app.debug')) {
+                $payload['debug'] = $th->getMessage();
+            }
+
+            return response()->json($payload, 500);
         }
 
         return response()->json($contrato, 201);
@@ -2575,7 +2755,19 @@ public function getContratosFlujoVT(Request $request)
             return response()->json($persona, 200);
         } catch (\Throwable $th) {
             DB::rollBack();
-            return response()->json(['error' => $th->getMessage()], 501);
+            Log::error('Error en updatePersonaContrato', [
+                'persona_id' => $id,
+                'message' => $th->getMessage(),
+                'trace' => $th->getTraceAsString(),
+            ]);
+            $payload = [
+                'message' => 'No se pudo actualizar la información de la persona.',
+            ];
+            if (config('app.debug')) {
+                $payload['debug'] = $th->getMessage();
+            }
+
+            return response()->json($payload, 500);
         }
     }
 

@@ -4,8 +4,10 @@ namespace App\Http\Controllers\gestion_usuario;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivationCompanyUser;
+use App\Models\Contract;
 use App\Models\GrupoChat;
 use App\Models\Person;
+use App\Models\Status;
 use App\Models\User;
 use App\Util\KeyUtil;
 use Illuminate\Http\JsonResponse;
@@ -315,6 +317,21 @@ class UserController extends Controller
         $persona->idTipoIdentificacion = $request->input('idtipoIdentificacion');
 
         $persona->save();
+
+        // Perfil profesional vive en `contrato`; si el usuario tiene contrato activo, lo actualiza desde su perfil.
+        if ($request->has('perfilProfesional')) {
+            $contratoActivo = Contract::where('idpersona', $persona->id)
+                ->where('idEstado', Status::ID_ACTIVE)
+                ->orderByDesc('fechaContratacion')
+                ->first();
+
+            if ($contratoActivo) {
+                $val = $request->input('perfilProfesional');
+                $trimmed = is_string($val) ? trim($val) : '';
+                $contratoActivo->perfilProfesional = $trimmed !== '' ? $trimmed : 'N/A';
+                $contratoActivo->save();
+            }
+        }
 
         return response()->json($persona);
     }

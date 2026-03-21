@@ -257,6 +257,7 @@ Route::get('bancos', [ContratacionController::class, 'bancos']);
 Route::post('store_banco', [ContratacionController::class, 'storeBanco']);
 Route::get('tipos_terminacion_contrato', [ContratacionController::class, 'tiposTerminacionContrato']);
 Route::get('actividades_riesgo_profesional', [ContratacionController::class, 'getActividadesRiesgoProfesional']);
+Route::get('contrato-formas-pago', [ContratacionController::class, 'formasPagoContrato']);
 Route::post('store_actividades_riesgo_profesional', [ContratacionController::class, 'storeActividadeRiesgoProfesional']);
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
 Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
