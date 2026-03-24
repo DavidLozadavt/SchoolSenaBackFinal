@@ -1409,6 +1409,9 @@ Route::middleware('auth:api')->group(function () {
     Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
     Route::put('instructores/{idActivation}/rechazar-rmi', [InstructoresController::class, 'rechazarRmi']);
     Route::put('instructores/{idActivation}/revertir-rmi', [InstructoresController::class, 'revertirRmi']);
+    Route::get('instructores/contratoByInstructor', [InstructoresController::class, 'getContratoByInstructor']);
+    Route::put('instructores/{id}/supervisor', [InstructoresController::class, 'updateSupervisor']);
+    Route::get('get_years_contract_person', [InstructoresController::class, 'getYearsContractPerson']);
 });
 
 

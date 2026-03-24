@@ -4,15 +4,18 @@ namespace App\Http\Controllers;
 
 use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
+use App\Models\Contract;
 use App\Models\DetalleRmi;
 use App\Models\NotificacionSistema;
 use App\Models\Rmi;
 use App\Models\SesionMateria;
 use App\Util\KeyUtil;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Symfony\Component\HttpFoundation\JsonResponse;
 
 class InstructoresController extends Controller
 {
@@ -785,7 +788,7 @@ class InstructoresController extends Controller
         }
     }
 
-    
+
     // cambiar el estado de asociacion de un detalleRmi
     public function setEstadoAsociacion($idGradoMateria, Request $request)
     {
@@ -904,5 +907,61 @@ class InstructoresController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    //Dejo preparado para agregarlos endpoints del contrato para el instructor...
+    public function getContratoByInstructor(Request $request)
+    {
+        $user    = auth()->user();
+        $persona = $user?->persona;
+
+        $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->with('centroFormacion')->get();
+
+        return response()->json(['contrato' => $contrato]);
+    }
+    public function updateSupervisor(Request $request, int $id)
+    {
+        $request->validate([
+            'supervisorContrato' => 'nullable|string|max:255',
+            'cargoSupervisor'    => 'nullable|string|max:255',
+            'objetoContrato'     => 'nullable|string|max:1000',
+            'formaDePago'        => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
+        ]);
+
+        $contrato = Contract::findOrFail($id);
+        $contrato->update($request->only([
+            'supervisorContrato',
+            'cargoSupervisor',
+            'objetoContrato',
+            'formaDePago',
+        ]));
+
+        return response()->json(['message' => 'Contrato actualizado correctamente.']);
+    }
+    public function getYearsContractPerson(Request $request): JsonResponse
+    {
+        $idPerson = $request->idPerson ?? KeyUtil::user()->idPersona;
+
+        $contracts = Contract::where('idpersona', $idPerson)->get();
+
+        $years = [];
+
+        foreach ($contracts as $contract) {
+            $fechaInicio = Carbon::parse($contract->fechaContratacion);
+
+            // Si no tiene fecha fin, usar el año actual como límite
+            $fechaFin = $contract->fechaFinalContrato
+                ? Carbon::parse($contract->fechaFinalContrato)
+                : Carbon::now();
+
+            for ($year = $fechaInicio->year; $year <= $fechaFin->year; $year++) {
+                $years[] = $year;
+            }
+        }
+
+        $yearsUnicos = array_unique($years);
+        sort($yearsUnicos);
+
+        return response()->json(array_values($yearsUnicos));
     }
 }

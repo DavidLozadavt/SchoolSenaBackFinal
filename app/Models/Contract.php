@@ -22,6 +22,13 @@ class Contract extends Model
     protected $table = "contrato";
     public static $snakeAttributes = false;
 
+    protected $fillable = [
+        'supervisorContrato',
+        'cargoSupervisor',
+        'formaDePago',
+        'objetoContrato',
+    ];
+
     public function persona()
     {
         return $this->belongsTo(Person::class, 'idpersona');
@@ -84,7 +91,7 @@ class Contract extends Model
         return $this->belongsTo(EntidadesSeguridadSocial::class, 'idPension');
     }
 
-    public function pensionMovilidad() 
+    public function pensionMovilidad()
     {
         return $this->belongsTo(EntidadesSeguridadSocial::class, 'idPensionMovilidad');
     }
@@ -190,5 +197,9 @@ class Contract extends Model
     public function asignacionContratoAreaConocimiento()
     {
         return $this->hasMany(AsignacionContratoAreaConocimiento::class, 'idContrato', 'id');
+    }
+    public function centroFormacion()
+    {
+        return $this->belongsTo(CentrosFormacion::class, 'idCentroFormacion');
     }
 }
