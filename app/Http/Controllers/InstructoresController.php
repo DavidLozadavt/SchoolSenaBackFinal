@@ -907,6 +907,7 @@ class InstructoresController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+        
     }
 
     //Dejo preparado para agregarlos endpoints del contrato para el instructor...

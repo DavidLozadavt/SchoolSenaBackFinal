@@ -15,6 +15,7 @@ class MatriculaAcademicaController extends Controller
         $this-> relations=[];
         $this-> columns=["*"];
     }
+    
 
  
     public function getStudentByIdMateria(Request $request): JsonResponse
@@ -234,7 +235,7 @@ class MatriculaAcademicaController extends Controller
                     $matricula->porcentaje_avance = null;
                     $matricula->notaParcial = null;
                 }
-                
+
                 
                 return $matricula;
             });

@@ -24,11 +24,14 @@ class GruposFichaController extends Controller
                 return response()->json(['data' => []], 200);
             }
 
+            $tieneIdFicha = \Illuminate\Support\Facades\Schema::hasColumn('matricula', 'idFicha');
+            $colFicha = $tieneIdFicha ? 'idFicha' : 'idAsignacionPeriodoProgramaJornada';
+
             $matriculas = \Illuminate\Support\Facades\DB::table('matricula as m')
                 ->where('m.idPersona', $user->idpersona)
                 ->whereIn('m.estado', ['ACTIVO', 'EN CURSO', 'CURSANDO', 'MATRICULADO', 'EN FORMACION'])
-                ->whereNotNull('m.idFicha')
-                ->select('m.id as idMatricula', 'm.idFicha')
+                ->whereNotNull('m.' . $colFicha)
+                ->selectRaw('m.id as idMatricula, m.' . $colFicha . ' as idFicha')
                 ->distinct()
                 ->get();
 
@@ -38,7 +41,11 @@ class GruposFichaController extends Controller
 
             $fichas = [];
             foreach ($matriculas->unique('idFicha') as $m) {
-                $grupos = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $m->idFicha)
+                $idFicha = $m->idFicha;
+                if ($idFicha === null) {
+                    continue;
+                }
+                $grupos = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)
                     ->with('tipoGrupo')
                     ->orderBy('id', 'desc')
                     ->get();
@@ -78,9 +85,9 @@ class GruposFichaController extends Controller
                     ];
                 }
 
-                $ficha = Ficha::find($m->idFicha);
+                $ficha = Ficha::find($idFicha);
                 $fichas[] = [
-                    'idFicha' => $m->idFicha,
+                    'idFicha' => $idFicha,
                     'idMatricula' => $m->idMatricula,
                     'codigoFicha' => $ficha?->codigo ?? null,
                     'grupos' => $gruposConEstado,
@@ -340,16 +347,7 @@ class GruposFichaController extends Controller
                 return response()->json(['error' => 'El grupo está lleno'], 422);
             }
 
-            $yaEnOtroGrupoMismoRap = \Illuminate\Support\Facades\DB::table($tbl . ' as ap')
-                ->join('grupos as g', 'ap.idGrupo', '=', 'g.id')
-                ->where('ap.idMatricula', $idMatricula)
-                ->where('g.idAsignacionPeriodoProgramaJornada', $idFicha)
-                ->where('g.id', '!=', $id)
-                ->exists();
-            if ($yaEnOtroGrupoMismoRap) {
-                return response()->json(['error' => 'Ya perteneces a un grupo de este RAP'], 422);
-            }
-
+            // Permitir unirse a varios grupos del mismo RAP (ya no se restringe a uno solo)
             \Illuminate\Support\Facades\DB::table($tbl)->insert([
                 'idGrupo' => $id,
                 'idMatricula' => $idMatricula,
@@ -357,9 +355,216 @@ class GruposFichaController extends Controller
                 'updated_at' => now(),
             ]);
 
+            // Asignar automáticamente las actividades ya asignadas al grupo al nuevo integrante
+            $this->asignarActividadesGrupoANuevoIntegrante($idFicha, $id, $idMatricula);
+
             return response()->json(['message' => 'Te has unido al grupo correctamente'], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Asignar al nuevo integrante las actividades ya asignadas al grupo.
+     * Fuentes: 1) asignacionActividadGrupo (grupos vacíos al asignar),
+     *          2) calificacionActividad (actividades de otros integrantes del grupo).
+     */
+    private function asignarActividadesGrupoANuevoIntegrante(int $idFicha, int $idGrupo, int $idMatricula): void
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('calificacionActividad')) {
+            return;
+        }
+
+        $tableMa = \Illuminate\Support\Facades\Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+        $colFicha = \Illuminate\Support\Facades\Schema::hasColumn($tableMa, 'idFicha') ? 'idFicha' : (\Illuminate\Support\Facades\Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : 'idFicha');
+
+        $ma = \Illuminate\Support\Facades\DB::table($tableMa)
+            ->where('idMatricula', $idMatricula)
+            ->where($colFicha, $idFicha)
+            ->first();
+
+        if (!$ma) {
+            return;
+        }
+
+        $idPersona = \App\Util\KeyUtil::user()?->idpersona ?? 1;
+        $idCorte = 1;
+        if (\Illuminate\Support\Facades\Schema::hasTable('configuracionCortes')) {
+            $corte = \Illuminate\Support\Facades\DB::table('configuracionCortes')->first();
+            $idCorte = $corte ? (int) $corte->id : 1;
+        }
+
+        $actividadesAAsignar = collect();
+
+        // 1) Actividades en asignacionActividadGrupo (grupos vacíos al asignar)
+        if (\Illuminate\Support\Facades\Schema::hasTable('asignacionActividadGrupo')) {
+            $asignaciones = \Illuminate\Support\Facades\DB::table('asignacionActividadGrupo')
+                ->where('idGrupo', $idGrupo)
+                ->get();
+            foreach ($asignaciones as $a) {
+                $actividadesAAsignar->push((object) [
+                    'idActividad' => $a->idActividad,
+                    'fechaInicial' => $a->fechaInicial,
+                    'fechaFinal' => $a->fechaFinal,
+                    'idPersona' => $a->idPersona ?? $idPersona,
+                ]);
+            }
+        }
+
+        // 2) Si no hay en asignacionActividadGrupo, inferir de calificacionActividad (otros integrantes del grupo)
+        if ($actividadesAAsignar->isEmpty()) {
+            $porGrupo = \Illuminate\Support\Facades\DB::table('calificacionActividad')
+                ->where('idGrupo', $idGrupo)
+                ->select('idActividad', 'fechaInicial', 'fechaFinal', 'idPersona')
+                ->distinct()
+                ->get();
+            foreach ($porGrupo as $c) {
+                $actividadesAAsignar->push((object) [
+                    'idActividad' => $c->idActividad,
+                    'fechaInicial' => $c->fechaInicial,
+                    'fechaFinal' => $c->fechaFinal,
+                    'idPersona' => $c->idPersona ?? $idPersona,
+                ]);
+            }
+        }
+
+        // Evitar duplicados por idActividad
+        $actividadesAAsignar = $actividadesAAsignar->unique('idActividad')->values();
+
+        foreach ($actividadesAAsignar as $a) {
+            $yaExiste = \Illuminate\Support\Facades\DB::table('calificacionActividad as ca')
+                ->join($tableMa . ' as _ma', 'ca.idAMartriculaAcademica', '=', '_ma.id')
+                ->where('ca.idActividad', $a->idActividad)
+                ->where('_ma.idMatricula', $idMatricula)
+                ->where('ca.idGrupo', $idGrupo)
+                ->exists();
+
+            if ($yaExiste) {
+                continue;
+            }
+
+            $fechaIni = $a->fechaInicial ? \Carbon\Carbon::parse($a->fechaInicial) : now();
+            $fechaFin = $a->fechaFinal ? \Carbon\Carbon::parse($a->fechaFinal) : now()->addMonths(3);
+
+            \Illuminate\Support\Facades\DB::table('calificacionActividad')->insert([
+                'idActividad' => $a->idActividad,
+                'idAMartriculaAcademica' => $ma->id,
+                'idGrupo' => $idGrupo,
+                'idPersona' => $a->idPersona ?? $idPersona,
+                'idCorte' => $idCorte,
+                'fechaCreacion' => $fechaIni->format('Y-m-d'),
+                'fechaInicial' => $fechaIni->format('Y-m-d H:i:s'),
+                'fechaFinal' => $fechaFin->format('Y-m-d H:i:s'),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+    }
+
+    /**
+     * E2-HU5: Aprendiz sale de un grupo.
+     */
+    public function salir(Request $request, int $idFicha, int $id): JsonResponse
+    {
+        try {
+            $grupo = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)
+                ->where('id', $id)
+                ->firstOrFail();
+
+            $validated = $request->validate([
+                'idMatricula' => 'required|exists:matricula,id',
+            ]);
+            $idMatricula = $validated['idMatricula'];
+
+            $tbl = $this->tablaParticipantes();
+            if (!$tbl) {
+                return response()->json(['error' => 'Tabla asignacionParticipantes no disponible'], 500);
+            }
+
+            $eliminados = \Illuminate\Support\Facades\DB::table($tbl)
+                ->where('idGrupo', $id)
+                ->where('idMatricula', $idMatricula)
+                ->delete();
+
+            if ($eliminados === 0) {
+                return response()->json(['error' => 'No perteneces a este grupo'], 422);
+            }
+
+            return response()->json(['message' => 'Has salido del grupo correctamente']);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Listar integrantes de un grupo (foto, nombre).
+     */
+    public function integrantes(int $idFicha, int $id): JsonResponse
+    {
+        try {
+            $grupo = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)
+                ->findOrFail($id);
+
+            $tbl = $this->tablaParticipantes();
+            if (!$tbl) {
+                return response()->json(['data' => []]);
+            }
+
+            $integrantes = \Illuminate\Support\Facades\DB::table($tbl . ' as ap')
+                ->join('matricula as m', 'ap.idMatricula', '=', 'm.id')
+                ->leftJoin('persona as p', 'm.idPersona', '=', 'p.id')
+                ->where('ap.idGrupo', $id)
+                ->select([
+                    'm.id as idMatricula',
+                    'p.rutaFoto',
+                    'p.identificacion',
+                    \Illuminate\Support\Facades\DB::raw("CONCAT(COALESCE(p.nombre1,''), ' ', COALESCE(p.nombre2,''), ' ', COALESCE(p.apellido1,''), ' ', COALESCE(p.apellido2,'')) as nombreCompleto"),
+                ])
+                ->get();
+
+            $result = [];
+            foreach ($integrantes as $i) {
+                $result[] = [
+                    'idMatricula' => $i->idMatricula,
+                    'rutaFoto' => $i->rutaFoto,
+                    'identificacion' => $i->identificacion,
+                    'nombreCompleto' => trim($i->nombreCompleto ?? '') ?: 'Sin nombre',
+                ];
+            }
+
+            return response()->json(['data' => $result]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage(), 'data' => []], 500);
+        }
+    }
+
+    /**
+     * E1-HU: Instructor elimina un integrante del grupo.
+     */
+    public function quitarIntegrante(int $idFicha, int $id, int $idMatricula): JsonResponse
+    {
+        try {
+            $grupo = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)->findOrFail($id);
+
+            $tbl = $this->tablaParticipantes();
+            if (!$tbl) {
+                return response()->json(['error' => 'Tabla asignacionParticipantes no disponible'], 500);
+            }
+
+            $eliminados = \Illuminate\Support\Facades\DB::table($tbl)
+                ->where('idGrupo', $id)
+                ->where('idMatricula', $idMatricula)
+                ->delete();
+
+            if ($eliminados === 0) {
+                return response()->json(['error' => 'El integrante no pertenece a este grupo'], 422);
+            }
+
+            return response()->json(['message' => 'Integrante eliminado del grupo correctamente']);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }

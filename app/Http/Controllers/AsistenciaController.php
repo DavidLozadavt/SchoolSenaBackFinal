@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 class AsistenciaController extends Controller
 {
+    
     public function store(Request $request): JsonResponse
 {
     try {
@@ -222,15 +223,27 @@ public function getAllAssistance(Request $request): JsonResponse
       'idMateria'         => 'nullable|integer',
       'idMatricula'       => 'required|integer',
       'idHorarioMateria'  => 'nullable|integer|exists:horarioMateria,id',
+      'idMatriculaAcademica' => 'nullable|integer'
     ]);
 
     $idMatricula      = $validatedData['idMatricula'];
-    $idMateria        = $validatedData['idMateria'];
+    $idMateria        = $validatedData['idMateria'] ?? null;
     $idHorarioMateria = $validatedData['idHorarioMateria'] ?? null;
+    $idMatriculaAcademica = $validatedData['idMatriculaAcademica'] ?? $request->input('idMatriculaAcademica');
 
-    $matriculaAcademica = MatriculaAcademica::with('ficha')->where('idMatricula', $idMatricula)
-      ->where('idMateria', $idMateria)
-      ->first();
+    $matriculaAcademica = null;
+    
+    // First safely look up the exact matriculaAcademica ID if the frontend provides it.
+    if ($idMatriculaAcademica) {
+        $matriculaAcademica = MatriculaAcademica::with('ficha')->find($idMatriculaAcademica);
+    }
+    
+    // Fallback: lookup by relations
+    if (!$matriculaAcademica) {
+        $matriculaAcademica = MatriculaAcademica::with('ficha')->where('idMatricula', $idMatricula)
+          ->where('idMateria', $idMateria)
+          ->first();
+    }
 
     if (!$matriculaAcademica) {
         return response()->json(['message' => 'Matrícula académica no encontrada'], 404);
