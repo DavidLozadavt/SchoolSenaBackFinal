@@ -67,27 +67,32 @@ class MateriaController extends Controller
             $idsMateriasPadre = $materiasPrograma->pluck('id');
             $todosRaps = Materia::whereIn('idMateriaPadre', $idsMateriasPadre)->get()->groupBy('idMateriaPadre');
 
-            // Mapear cada materia del programa con su estado en la ficha
-            $resultado = $materiasPrograma->map(function ($materia) use ($registrosFicha, $todosRaps) {
-                // Una competencia está finalizada si:
-                // El registro de la competencia padre en la ficha ya está FINALIZADO o EVALUADO
-                $instanciasPadre = $registrosFicha->get($materia->id, collect());
-                $estaFinalizada = $instanciasPadre->contains(function($gm) {
-                    return in_array($gm->estado, ['FINALIZADO', 'EVALUADO']);
+            // Mapear y filtrar cada materia del programa
+            $resultado = $materiasPrograma->map(function ($materia) use ($registrosFicha, $todosRaps, $idFicha) {
+                $raps = $todosRaps->get($materia->id, collect());
+                $rapsIds = $raps->pluck('id');
+
+                // Tiene esta competencia algún RAP asignado a la ficha
+                $tieneRapsAsignados = $rapsIds->contains(function ($id) use ($registrosFicha) {
+                    return $registrosFicha->has($id);
                 });
 
-                // si tiene RAPs y todos los RAPs estan FINALIZADO en la ficha
-                $raps = $todosRaps->get($materia->id, collect());
-                if ($raps->isNotEmpty() && !$estaFinalizada) {
-                    $todosRapsTerminados = $raps->every(function($rap) use ($registrosFicha) {
-                        $instanciasRap = $registrosFicha->get($rap->id, collect());
-                        return $instanciasRap->contains(function($gm) {
-                            return in_array($gm->estado, ['FINALIZADO']);
-                        });
-                    });
-                    if ($todosRapsTerminados) {
-                        $estaFinalizada = true;
-                    }
+                if (!$tieneRapsAsignados) {
+                    return null;
+                }
+
+                // Cálculo de estado basado en MatriculaAcademica (la fuente de verdad)
+                $totalRaps = $rapsIds->count();
+                if ($totalRaps === 0) {
+                    $estaFinalizada = false;
+                } else {
+                    $rapsFinalizados = MatriculaAcademica::where('idFicha', $idFicha)
+                        ->whereIn('idMateria', $rapsIds)
+                        ->whereIn('estado', ['APROBADO', 'EVALUADO', 'POR EVALUAR'])
+                        ->distinct('idMateria')
+                        ->count();
+                    
+                    $estaFinalizada = ($rapsFinalizados >= $totalRaps);
                 }
 
                 return [
@@ -98,7 +103,7 @@ class MateriaController extends Controller
                     'descripcion' => $materia->descripcion,
                     'isCompleta' => $estaFinalizada
                 ];
-            });
+            })->filter()->values();
 
             return response()->json($resultado);
         } catch (\Throwable $error) {
@@ -589,6 +594,7 @@ class MateriaController extends Controller
         try {
             $idGradoMateria = $request->input('id');
             $eliminarTrimestre = $request->boolean('eliminarTrimestre');
+            $idFicha = $request->input('idFicha');
 
             DB::beginTransaction();
 
@@ -611,6 +617,9 @@ class MateriaController extends Controller
                 if ($gradoMateriaABorrar->materia && is_null($gradoMateriaABorrar->materia->idMateriaPadre)) {
                     $idMateriaPadre = $gradoMateriaABorrar->materia->id;
                     $hijosEnTrimestre = GradoMateria::where('idGradoPrograma', $idGradoPrograma)
+                        ->whereHas('horarioMateria', function ($query) use ($idFicha) {
+                            $query->where('idFicha', $idFicha);
+                        })
                         ->whereHas('materia', function ($query) use ($idMateriaPadre) {
                             $query->where('idMateriaPadre', $idMateriaPadre);
                         })->pluck('id')->toArray();

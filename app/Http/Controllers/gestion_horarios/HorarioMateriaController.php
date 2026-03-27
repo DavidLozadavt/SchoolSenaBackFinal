@@ -1371,7 +1371,7 @@ class HorarioMateriaController extends Controller
                             // Verificar y actualizar estado de la competencia (Padre)
                             $gradoMateriaParaEstado = $horariosPorMateriaPadre->first()->gradoMateria;
                             $todosRapsTerminados = $estadoRapsGlobal->isNotEmpty() && $estadoRapsGlobal->every(fn($f) => $f);
-                            if ($todosRapsTerminados || $horasData['horasActuales'] >= $materiaPadre->horas && !in_array($gradoMateriaParaEstado->estado, [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO])) {
+                            if ($todosRapsTerminados || $horasData['horasActuales'] >= $materiaPadre->horas && $horasData['horasActuales'] > 0) {
                                 $gradoMateriaParaEstado->update(['estado' => EstadoHorarioMateria::FINALIZADO]);
                             }
 
