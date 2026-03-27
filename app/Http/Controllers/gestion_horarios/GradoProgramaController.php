@@ -230,7 +230,7 @@ class GradoProgramaController extends Controller
                 ->pluck('idMateria')->toArray();
                 
                 $raps = MatriculaAcademica::where('idFicha', $datos['idFicha'])
-                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
+                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO', 'FINALIZADO'])
                         ->whereNotIn('idMateria', $rapsYaFinalizados)
                         ->whereHas('materia', function ($query) use ($materiaPadre) {
                             $query->where('idMateriaPadre', $materiaPadre->id);
