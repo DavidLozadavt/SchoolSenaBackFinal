@@ -29,6 +29,7 @@ class Person extends Model
         "perfil",
         "sexo",
         "rh",
+        "ciudadExpedicion",
     ];
     const RUTA_FOTO = "persona";
     const RUTA_FOTO_DEFAULT = "/default/user.svg";
