@@ -4,15 +4,18 @@ namespace App\Http\Controllers;
 
 use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
+use App\Models\Contract;
 use App\Models\DetalleRmi;
 use App\Models\NotificacionSistema;
 use App\Models\Rmi;
 use App\Models\SesionMateria;
 use App\Util\KeyUtil;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Symfony\Component\HttpFoundation\JsonResponse;
 
 class InstructoresController extends Controller
 {
@@ -785,7 +788,7 @@ class InstructoresController extends Controller
         }
     }
 
-    
+
     // cambiar el estado de asociacion de un detalleRmi
     public function setEstadoAsociacion($idGradoMateria, Request $request)
     {
@@ -904,6 +907,168 @@ class InstructoresController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
-        
+    }
+
+    //Dejo preparado para agregarlos endpoints del contrato para el instructor...
+    public function getContratoByInstructor(Request $request)
+    {
+        $user    = auth()->user();
+        $persona = $user?->persona;
+
+        $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->with('centroFormacion')->get();
+
+        return response()->json(['contrato' => $contrato]);
+    }
+    public function updateSupervisor(Request $request, int $id)
+    {
+        $request->validate([
+            'supervisorContrato' => 'nullable|string|max:255',
+            'cargoSupervisor'    => 'nullable|string|max:255',
+            'objetoContrato'     => 'nullable|string|max:1000',
+            'formaDePago'        => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
+        ]);
+
+        $contrato = Contract::findOrFail($id);
+        $contrato->update($request->only([
+            'supervisorContrato',
+            'cargoSupervisor',
+            'objetoContrato',
+            'formaDePago',
+        ]));
+
+        return response()->json(['message' => 'Contrato actualizado correctamente.']);
+    }
+    public function getYearsContractPerson(Request $request): JsonResponse
+    {
+        $idPerson = $request->idPerson ?? KeyUtil::user()->idPersona;
+
+        $contracts = Contract::where('idpersona', $idPerson)->get();
+
+        $years = [];
+
+        foreach ($contracts as $contract) {
+            $fechaInicio = Carbon::parse($contract->fechaContratacion);
+
+            // Si no tiene fecha fin, usar el año actual como límite
+            $fechaFin = $contract->fechaFinalContrato
+                ? Carbon::parse($contract->fechaFinalContrato)
+                : Carbon::now();
+
+            for ($year = $fechaInicio->year; $year <= $fechaFin->year; $year++) {
+                $years[] = $year;
+            }
+        }
+
+        $yearsUnicos = array_unique($years);
+        sort($yearsUnicos);
+
+        return response()->json(array_values($yearsUnicos));
+    }
+    public function getDataRmiConfiguracionByYear(Request $request)
+    {
+        $year     = $request->year;
+        $idPerson = $request->idPerson ?? KeyUtil::user()->idPersona;
+
+        if (!$year) {
+            return response()->json(['message' => 'El año es requerido.'], 400);
+        }
+
+        $contracts = Contract::where('idEstado', 1)
+            ->where('idpersona', $idPerson)
+            ->where(function ($query) use ($year) {
+                $query->whereYear('fechaContratacion', '<=', $year)
+                    ->whereYear('fechaFinalContrato', '>=', $year);
+            })
+            ->with(['horarioMateria.detallesRmi.rmi'])
+            ->get();
+
+        if ($contracts->isEmpty()) {
+            return response()->json(['message' => 'No hay contratos válidos para el año especificado.'], 404);
+        }
+
+        $data = $contracts->map(function ($contract) use ($year) {
+            $periodos = [];
+
+            foreach ($contract->horarioMateria as $horario) {
+                foreach ($horario->detallesRmi as $detalle) {
+                    $rmi    = $detalle->rmi;
+                    $period = $rmi->periodo;
+
+                    if (!str_starts_with($period, $year)) continue;
+
+                    if (!isset($periodos[$period])) {
+                        // Calcular horas asignadas en ese periodo (mismo cálculo que getFichasByContrato)
+                        $inicio = Carbon::createFromFormat('Y-m', $period)->startOfMonth();
+                        $fin    = Carbon::createFromFormat('Y-m', $period)->endOfMonth();
+
+                        $horasAsignadas = 0;
+
+                        foreach ($contract->horarioMateria as $h) {
+                            $desde = Carbon::parse($h->fechaInicial)->max($inicio);
+                            $hasta = Carbon::parse($h->fechaFinal ?? Carbon::now())->min($fin);
+
+                            if ($desde->gt($hasta)) continue;
+
+                            $duracionSesion  = (strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600;
+                            $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                            $cantSesiones    = 0;
+                            $cursor          = $desde->copy();
+
+                            while ($cursor->lte($hasta)) {
+                                if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantSesiones++;
+                                $cursor->addDay();
+                            }
+
+                            $horasAsignadas += round($duracionSesion * $cantSesiones, 2);
+                        }
+
+                        $detallesDelPeriodo = $contract->horarioMateria->flatMap(function ($h) use ($rmi) {
+                            return $h->detallesRmi->where('idRmi', $rmi->id);
+                        });
+
+                        $estadoConsolidado = 'PENDIENTE';
+                        if ($detallesDelPeriodo->isNotEmpty()) {
+                            if ($detallesDelPeriodo->contains('estado', 'RECHAZADO')) {
+                                $estadoConsolidado = 'RECHAZADO';
+                            } elseif ($detallesDelPeriodo->every(fn($d) => $d->estado === 'ACEPTADO')) {
+                                $estadoConsolidado = 'ACEPTADO';
+                            }
+                        }
+
+                        $periodos[$period] = [
+                            'periodo'        => $period,
+                            'idRmi'          => $rmi->id,
+                            'estadoRmi'      => $estadoConsolidado,
+                            'observacion'    => $rmi->observacion,
+                            'horasAsignadas' => round($horasAsignadas, 2),
+                            'detalles'       => [],
+                        ];
+                    }
+
+                    $periodos[$period]['detalles'][] = [
+                        'idDetalleRmi'     => $detalle->id,
+                        'estadoDetalle'    => $detalle->estado,
+                        'observacion'      => $detalle->observacion,
+                        'idHorarioMateria' => $horario->id,
+                        'horaInicial'      => $horario->horaInicial,
+                        'horaFinal'        => $horario->horaFinal,
+                        'fechaInicial'     => $horario->fechaInicial,
+                        'fechaFinal'       => $horario->fechaFinal,
+                        'estadoHorario'    => $horario->estado,
+                    ];
+                }
+            }
+
+            ksort($periodos);
+
+            return [
+                'idContrato'        => $contract->id,
+                'fechaContratacion' => $contract->fechaContratacion,
+                'fechaFinal'        => $contract->fechaFinalContrato,
+                'periodos'          => array_values($periodos),
+            ];
+        });
+
+        return response()->json($data);
     }
 }

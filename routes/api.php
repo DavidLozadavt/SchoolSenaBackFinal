@@ -137,6 +137,8 @@ use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
+use App\Http\Controllers\ComisionInstructorController;
+use App\Http\Controllers\ActividadInstructorController;
 use App\Http\Controllers\CompromisosController;
 use App\Http\Controllers\gestion_notificacion\NotificacionesSistemaController;
 use App\Http\Controllers\gestion_pensum\InasistenciaController;
@@ -1416,6 +1418,20 @@ Route::middleware('auth:api')->group(function () {
     Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
     Route::put('instructores/{idActivation}/rechazar-rmi', [InstructoresController::class, 'rechazarRmi']);
     Route::put('instructores/{idActivation}/revertir-rmi', [InstructoresController::class, 'revertirRmi']);
+    Route::get('instructores/contratoByInstructor', [InstructoresController::class, 'getContratoByInstructor']);
+    Route::put('instructores/{id}/supervisor', [InstructoresController::class, 'updateSupervisor']);
+    Route::get('get_years_contract_person', [InstructoresController::class, 'getYearsContractPerson']);
+    Route::get('get_data_rmi_configuration_by_year', [InstructoresController::class, 'getDataRmiConfiguracionByYear']);
+});
+
+//Intructores Comisiones:
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('comisiones-instructores', ComisionInstructorController::class);
+});
+
+//Intructores Actividades:
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('actividades-instructores', ActividadInstructorController::class);
 });
 
 
