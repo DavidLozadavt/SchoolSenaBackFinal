@@ -907,7 +907,6 @@ class InstructoresController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
-        
     }
 
     //Dejo preparado para agregarlos endpoints del contrato para el instructor...
@@ -964,5 +963,112 @@ class InstructoresController extends Controller
         sort($yearsUnicos);
 
         return response()->json(array_values($yearsUnicos));
+    }
+    public function getDataRmiConfiguracionByYear(Request $request)
+    {
+        $year     = $request->year;
+        $idPerson = $request->idPerson ?? KeyUtil::user()->idPersona;
+
+        if (!$year) {
+            return response()->json(['message' => 'El año es requerido.'], 400);
+        }
+
+        $contracts = Contract::where('idEstado', 1)
+            ->where('idpersona', $idPerson)
+            ->where(function ($query) use ($year) {
+                $query->whereYear('fechaContratacion', '<=', $year)
+                    ->whereYear('fechaFinalContrato', '>=', $year);
+            })
+            ->with(['horarioMateria.detallesRmi.rmi'])
+            ->get();
+
+        if ($contracts->isEmpty()) {
+            return response()->json(['message' => 'No hay contratos válidos para el año especificado.'], 404);
+        }
+
+        $data = $contracts->map(function ($contract) use ($year) {
+            $periodos = [];
+
+            foreach ($contract->horarioMateria as $horario) {
+                foreach ($horario->detallesRmi as $detalle) {
+                    $rmi    = $detalle->rmi;
+                    $period = $rmi->periodo;
+
+                    if (!str_starts_with($period, $year)) continue;
+
+                    if (!isset($periodos[$period])) {
+                        // Calcular horas asignadas en ese periodo (mismo cálculo que getFichasByContrato)
+                        $inicio = Carbon::createFromFormat('Y-m', $period)->startOfMonth();
+                        $fin    = Carbon::createFromFormat('Y-m', $period)->endOfMonth();
+
+                        $horasAsignadas = 0;
+
+                        foreach ($contract->horarioMateria as $h) {
+                            $desde = Carbon::parse($h->fechaInicial)->max($inicio);
+                            $hasta = Carbon::parse($h->fechaFinal ?? Carbon::now())->min($fin);
+
+                            if ($desde->gt($hasta)) continue;
+
+                            $duracionSesion  = (strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600;
+                            $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                            $cantSesiones    = 0;
+                            $cursor          = $desde->copy();
+
+                            while ($cursor->lte($hasta)) {
+                                if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantSesiones++;
+                                $cursor->addDay();
+                            }
+
+                            $horasAsignadas += round($duracionSesion * $cantSesiones, 2);
+                        }
+
+                        $detallesDelPeriodo = $contract->horarioMateria->flatMap(function ($h) use ($rmi) {
+                            return $h->detallesRmi->where('idRmi', $rmi->id);
+                        });
+
+                        $estadoConsolidado = 'PENDIENTE';
+                        if ($detallesDelPeriodo->isNotEmpty()) {
+                            if ($detallesDelPeriodo->contains('estado', 'RECHAZADO')) {
+                                $estadoConsolidado = 'RECHAZADO';
+                            } elseif ($detallesDelPeriodo->every(fn($d) => $d->estado === 'ACEPTADO')) {
+                                $estadoConsolidado = 'ACEPTADO';
+                            }
+                        }
+
+                        $periodos[$period] = [
+                            'periodo'        => $period,
+                            'idRmi'          => $rmi->id,
+                            'estadoRmi'      => $estadoConsolidado,
+                            'observacion'    => $rmi->observacion,
+                            'horasAsignadas' => round($horasAsignadas, 2),
+                            'detalles'       => [],
+                        ];
+                    }
+
+                    $periodos[$period]['detalles'][] = [
+                        'idDetalleRmi'     => $detalle->id,
+                        'estadoDetalle'    => $detalle->estado,
+                        'observacion'      => $detalle->observacion,
+                        'idHorarioMateria' => $horario->id,
+                        'horaInicial'      => $horario->horaInicial,
+                        'horaFinal'        => $horario->horaFinal,
+                        'fechaInicial'     => $horario->fechaInicial,
+                        'fechaFinal'       => $horario->fechaFinal,
+                        'estadoHorario'    => $horario->estado,
+                    ];
+                }
+            }
+
+            ksort($periodos);
+
+            return [
+                'idContrato'        => $contract->id,
+                'fechaContratacion' => $contract->fechaContratacion,
+                'fechaFinal'        => $contract->fechaFinalContrato,
+                'periodos'          => array_values($periodos),
+            ];
+        });
+
+        return response()->json($data);
     }
 }

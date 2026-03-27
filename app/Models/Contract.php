@@ -202,4 +202,8 @@ class Contract extends Model
     {
         return $this->belongsTo(CentrosFormacion::class, 'idCentroFormacion');
     }
+    public function comisiones()
+    {
+        return $this->hasMany(ComisionInstructor::class, 'idContrato');
+    }
 }
