@@ -127,4 +127,8 @@ class Person extends Model
     {
         return $this->hasMany(Contract::class, 'idpersona');
     }
+    public function ciudadExpedicion()
+    {
+        return $this->belongsTo(City::class, 'ciudadExpedicion');
+    }
 }
