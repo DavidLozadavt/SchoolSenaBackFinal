@@ -11,13 +11,19 @@ class CiudadController extends Controller
 
     public function byDepartamento($idDepartamento)
     {
-        $ciudades = City::with('departamento')->where('iddepartamento', '=',$idDepartamento)->get();
+        $ciudades = City::with('departamento')->where('iddepartamento', '=', $idDepartamento)->get();
         return response()->json($ciudades);
     }
 
     public function ciudades()
     {
         $ciudades = City::all();
+        return response()->json($ciudades);
+    }
+
+    public function ciudadesWithDepartamento()
+    {
+        $ciudades = City::with('departamento')->get();
         return response()->json($ciudades);
     }
 }
