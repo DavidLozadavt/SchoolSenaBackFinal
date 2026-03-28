@@ -15,9 +15,23 @@ class ActividadInstructor extends Model
         'descripcion',
         'fechaInicial',
         'fechaFinal',
+        'documento',
         'numeroHoras',
         'idRmi',
     ];
+
+    const RUTA_DOCUMENTO = "instructores/actividades";
+
+    protected $appends = ['rutaDocumentoUrl'];
+
+    public function getRutaDocumentoUrlAttribute()
+    {
+        if (!empty($this->attributes['documento'])) {
+            return url('storage/' . $this->attributes['documento']);
+        }
+        return null;
+    }
+
 
     protected $casts = [
         'fechaInicial' => 'date',
