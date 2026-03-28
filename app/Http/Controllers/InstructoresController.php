@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
+use App\Models\ActividadInstructor;
+use App\Models\ComisionInstructor;
 use App\Models\Contract;
 use App\Models\DetalleRmi;
 use App\Models\NotificacionSistema;
 use App\Models\Rmi;
 use App\Models\SesionMateria;
 use App\Util\KeyUtil;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -915,26 +918,36 @@ class InstructoresController extends Controller
         $user    = auth()->user();
         $persona = $user?->persona;
 
-        $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->with('centroFormacion')->get();
+        $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->with('centroFormacion', 'persona.ciudadExpedicionRel.departamento')->get();
 
         return response()->json(['contrato' => $contrato]);
     }
     public function updateSupervisor(Request $request, int $id)
     {
         $request->validate([
-            'supervisorContrato' => 'nullable|string|max:255',
-            'cargoSupervisor'    => 'nullable|string|max:255',
-            'objetoContrato'     => 'nullable|string|max:1000',
-            'formaDePago'        => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
+            'supervisorContrato'  => 'nullable|string|max:255',
+            'cargoSupervisor'     => 'nullable|string|max:255',
+            'objetoContrato'      => 'nullable|string|max:1000',
+            'formaDePago'         => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
+            'ciudadExpedicionId'  => 'nullable|integer|exists:ciudad,id',
         ]);
 
-        $contrato = Contract::findOrFail($id);
-        $contrato->update($request->only([
-            'supervisorContrato',
-            'cargoSupervisor',
-            'objetoContrato',
-            'formaDePago',
-        ]));
+        DB::transaction(function () use ($request, $id) {
+            $contrato = Contract::with('persona')->findOrFail($id);
+
+            $contrato->update($request->only([
+                'supervisorContrato',
+                'cargoSupervisor',
+                'objetoContrato',
+                'formaDePago',
+            ]));
+
+            if ($request->filled('ciudadExpedicionId')) {
+                $contrato->persona->update([
+                    'ciudadExpedicion' => $request->ciudadExpedicionId,
+                ]);
+            }
+        });
 
         return response()->json(['message' => 'Contrato actualizado correctamente.']);
     }
@@ -1070,5 +1083,34 @@ class InstructoresController extends Controller
         });
 
         return response()->json($data);
+    }
+    public function getInformeByInstructorRmi(Request $request)
+    {
+        $idContrato = $request->idContrato;
+        $idRmi = $request->idRmi;
+
+        $rmi = Rmi::findOrFail($idRmi);
+
+        $contrato = Contract::with([
+            'persona',
+            'persona.ciudadExpedicionRel',
+            'persona.ciudadExpedicionRel.departamento',
+            'centroFormacion'
+        ])->findOrFail($idContrato);
+
+        $actividades = ActividadInstructor::where('idRmi', $idRmi)->get();
+
+        $comisiones = ComisionInstructor::where('idRmi', $idRmi)
+            ->where('idContrato', $idContrato)
+            ->get();
+
+        $pdf = Pdf::loadView('pdf.informeinstructor', compact(
+            'rmi',
+            'contrato',
+            'actividades',
+            'comisiones'
+        ))->setPaper('letter');
+
+        return $pdf->stream("RMI_{$idContrato}_{$idRmi}.pdf");
     }
 }
