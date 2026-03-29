@@ -34,7 +34,7 @@ class Person extends Model
     const RUTA_FOTO = "persona";
     const RUTA_FOTO_DEFAULT = "/default/user.svg";
 
-    protected $appends = ['rutaFotoUrl'];
+    protected $appends = ['rutaFotoUrl', 'ciudadExpedicionInfo'];
 
     public function getRutaFotoUrlAttribute()
     {
@@ -45,6 +45,27 @@ class Person extends Model
             return url($this->attributes['rutaFoto']);
         }
         return url(self::RUTA_FOTO_DEFAULT);
+    }
+
+    /**
+     * Evita que el JSON mezcle la FK `ciudadExpedicion` con la relación homónima:
+     * el front usa esta clave (snake: ciudad_expedicion_info) para mostrar la ciudad.
+     */
+    public function getCiudadExpedicionInfoAttribute(): ?array
+    {
+        if (! $this->relationLoaded('ciudadExpedicion')) {
+            return null;
+        }
+        $city = $this->getRelation('ciudadExpedicion');
+        if (! $city) {
+            return null;
+        }
+
+        return [
+            'id' => $city->id,
+            'descripcion' => $city->descripcion ?? '',
+            'codigo' => $city->codigo ?? '',
+        ];
     }
 
     public function usuario()

@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 class InstructoresController extends Controller
@@ -929,12 +930,14 @@ class InstructoresController extends Controller
         ]);
 
         $contrato = Contract::findOrFail($id);
-        $contrato->update($request->only([
-            'supervisorContrato',
-            'cargoSupervisor',
-            'objetoContrato',
-            'formaDePago',
-        ]));
+        $fields = ['objetoContrato', 'formaDePago'];
+        if (Schema::hasColumn('contrato', 'supervisorContrato')) {
+            $fields[] = 'supervisorContrato';
+        }
+        if (Schema::hasColumn('contrato', 'cargoSupervisor')) {
+            $fields[] = 'cargoSupervisor';
+        }
+        $contrato->update($request->only($fields));
 
         return response()->json(['message' => 'Contrato actualizado correctamente.']);
     }
