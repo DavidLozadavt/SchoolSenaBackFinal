@@ -99,6 +99,7 @@ class ContratacionController extends Controller
             'ciudadNac.departamento',
             'ciudad.departamento',
             'ciudadUbicacion.departamento',
+            'ciudadExpedicion.departamento',
             'tipoIdentificacion'
         )
             ->where('identificacion', '=', $identificacion)->first();
@@ -417,6 +418,10 @@ class ContratacionController extends Controller
             $persona->email = $email;
             $persona->direccion = $request->input('direccion');
             $persona->idCiudadUbicacion = $idCiudadUbicacion;
+            $ciudadExpedicion = $this->normalizePositiveInt($request->input('ciudadExpedicion') ?? $request->input('idciudadExpedicion'));
+            if ($ciudadExpedicion !== null) {
+                $persona->ciudadExpedicion = $ciudadExpedicion;
+            }
             $persona->telefonoFijo = $request->input('telefonoFijo');
             $persona->sexo = $request->input('sexo');
             $persona->rh = $request->input('rh');
@@ -549,8 +554,12 @@ class ContratacionController extends Controller
                     // No asignamos nada para evitar "Unknown column ...".
                 }
             }
-            $contrato->supervisorContrato = $request->input('supervisorContrato');
-            $contrato->cargoSupervisor = $request->input('cargoSupervisor');
+            if (Schema::hasColumn('contrato', 'supervisorContrato')) {
+                $contrato->supervisorContrato = $request->input('supervisorContrato');
+            }
+            if (Schema::hasColumn('contrato', 'cargoSupervisor')) {
+                $contrato->cargoSupervisor = $request->input('cargoSupervisor');
+            }
             $contrato->objetoContrato = $request->input('objetoContrato');
             $contrato->observacion = $request->input('observacion');
             $contrato->perfilProfesional = $request->input('perfilProfesional') ?: 'N/A';
@@ -593,6 +602,16 @@ class ContratacionController extends Controller
                 $contrato->idNivelEducativo = $request->input('idNivelEducativo');
             }
 
+            if (Schema::hasColumn('contrato', 'numeroDocumentoContrato') && $request->has('numeroDocumentoContrato')) {
+                $v = $request->input('numeroDocumentoContrato');
+                $contrato->numeroDocumentoContrato = $v !== null && $v !== '' ? trim((string) $v) : null;
+            }
+
+            // Número de contrato (distinto de número de documento del contrato): si no viene, se usa el id al guardar.
+            if (Schema::hasColumn('contrato', 'numeroContrato') && $request->filled('numeroContrato')) {
+                $contrato->numeroContrato = trim((string) $request->input('numeroContrato'));
+            }
+
             // Tipo de comisiones - campo removido si no existe en la tabla
             // if ($request->has('tipoComisiones')) {
             //     $contrato->tipoComisiones = $request->input('tipoComisiones');
@@ -611,6 +630,12 @@ class ContratacionController extends Controller
 
 
             $contrato->save();
+
+            if (Schema::hasColumn('contrato', 'numeroContrato')
+                && ($contrato->numeroContrato === null || $contrato->numeroContrato === '')) {
+                $contrato->numeroContrato = (string) $contrato->id;
+                $contrato->save();
+            }
 
             // Guardar áreas de conocimiento
             if ($request->has('areasConocimiento') && is_array($request->input('areasConocimiento'))) {
@@ -1362,7 +1387,8 @@ public function getContratosFlujoVT(Request $request)
         $contract = Contract::with([
             'documentosContrato.AsignacionTipoDocumentoProceso.tipoDocumento',
             'persona.ciudadUbicacion',
-            'persona.CiudadNac',
+            'persona.ciudadNac',
+            'persona.ciudadExpedicion.departamento',
             'persona.tipoIdentificacion',
             'persona.observacionesPreocupacionales',
             'persona.usuario.centroFormacion',
@@ -1832,6 +1858,12 @@ public function getContratosFlujoVT(Request $request)
             $contrato->idContrato = $idContrato;
             $contrato->idEstado = Status::ID_ACTIVE;
             $contrato->save();
+
+            if (Schema::hasColumn('contrato', 'numeroContrato')
+                && ($contrato->numeroContrato === null || $contrato->numeroContrato === '')) {
+                $contrato->numeroContrato = (string) $contrato->id;
+                $contrato->save();
+            }
 
             $user = User::where('idpersona', $persona_id)->first();
 
@@ -2365,11 +2397,11 @@ public function getContratosFlujoVT(Request $request)
                 }
             }
 
-            if ($request->has('supervisorContrato')) {
+            if (Schema::hasColumn('contrato', 'supervisorContrato') && $request->has('supervisorContrato')) {
                 $contrato->supervisorContrato = $request->input('supervisorContrato');
             }
 
-            if ($request->has('cargoSupervisor')) {
+            if (Schema::hasColumn('contrato', 'cargoSupervisor') && $request->has('cargoSupervisor')) {
                 $contrato->cargoSupervisor = $request->input('cargoSupervisor');
             }
 
@@ -2387,6 +2419,16 @@ public function getContratosFlujoVT(Request $request)
 
             if ($request->has('otrosi')) {
                 $contrato->otrosi = $request->input('otrosi');
+            }
+
+            if (Schema::hasColumn('contrato', 'numeroDocumentoContrato') && $request->has('numeroDocumentoContrato')) {
+                $v = $request->input('numeroDocumentoContrato');
+                $contrato->numeroDocumentoContrato = $v !== null && $v !== '' ? trim((string) $v) : null;
+            }
+
+            if (Schema::hasColumn('contrato', 'numeroContrato') && $request->has('numeroContrato')) {
+                $v = $request->input('numeroContrato');
+                $contrato->numeroContrato = $v !== null && trim((string) $v) !== '' ? trim((string) $v) : null;
             }
 
             if ($request->has('idEstado')) {
@@ -2728,6 +2770,10 @@ public function getContratosFlujoVT(Request $request)
             }
             if ($request->has('idciudadUbicacion')) {
                 $persona->idCiudadUbicacion = $request->input('idciudadUbicacion');
+            }
+            if ($request->has('ciudadExpedicion') || $request->has('idciudadExpedicion')) {
+                $raw = $request->input('ciudadExpedicion') ?? $request->input('idciudadExpedicion');
+                $persona->ciudadExpedicion = $raw !== null && $raw !== '' ? (int) $raw : null;
             }
             if ($request->has('telefonoFijo')) {
                 $persona->telefonoFijo = $request->input('telefonoFijo');
