@@ -46,54 +46,54 @@ class MateriaController extends Controller
         $idPrograma = $request->input('idPrograma');
         $idFicha = $request->input('idFicha');
         try {
-            // Obtener todas las materias padre asignadas al programa
-            $materiasPrograma = AgregarMateriaPrograma::where('idPrograma', $idPrograma)
-                ->whereHas('materia', function($q) {
-                    $q->whereNull('idMateriaPadre');
-                })
-                ->get()
-                ->pluck('materia')
-                ->values();
-
-            // Obtener los estados de todas las materias asignadas a esta ficha (competencias y RAPs)
-            $registrosFicha = GradoMateria::whereHas('horarioMateria', function ($query) use ($idFicha) {
-                    $query->where('idFicha', $idFicha);
-                })
+            // Obtener todos los estados de matrícula de la ficha para determinar asignación y avance
+            // Esta es ahora nuestra única fuente de verdad para este reporte
+            $matriculasFicha = MatriculaAcademica::where('idFicha', $idFicha)
                 ->select('idMateria', 'estado')
-                ->get()
-                ->groupBy('idMateria');
+                ->with('materia')
+                ->get();
 
-            // Obtener todos los RAPs de las materias del programa para verificar
-            $idsMateriasPadre = $materiasPrograma->pluck('id');
-            $todosRaps = Materia::whereIn('idMateriaPadre', $idsMateriasPadre)->get()->groupBy('idMateriaPadre');
+            if ($matriculasFicha->isEmpty()) {
+                return response()->json([]);
+            }
 
-            // Mapear y filtrar cada materia del programa
-            $resultado = $materiasPrograma->map(function ($materia) use ($registrosFicha, $todosRaps, $idFicha) {
-                $raps = $todosRaps->get($materia->id, collect());
-                $rapsIds = $raps->pluck('id');
+            // Agrupamos por RAP para las validaciones de estado individuales
+            $matriculasAgrupadas = $matriculasFicha->groupBy('idMateria');
 
-                // Tiene esta competencia algún RAP asignado a la ficha
-                $tieneRapsAsignados = $rapsIds->contains(function ($id) use ($registrosFicha) {
-                    return $registrosFicha->has($id);
-                });
+            // Identificamos las competencias padre (competencias) asociadas a estos RAPs matriculados
+            // Obtenemos los padres de las materias encontradas en la matrícula
+            $padresIds = $matriculasFicha->map(fn($m) => $m->materia?->idMateriaPadre)->filter()->unique();
+            $materiasPrograma = Materia::whereIn('id', $padresIds)->get();
 
-                if (!$tieneRapsAsignados) {
+            // Obtenemos todos los RAPs posibles de estas competencias para cruzar con la matrícula
+            $todosRaps = Materia::whereIn('idMateriaPadre', $padresIds)->get()->groupBy('idMateriaPadre');
+
+            // Mapear cada competencia encontrada
+            $resultado = $materiasPrograma->map(function ($materia) use ($todosRaps, $matriculasAgrupadas) {
+                // RAPs de esta competencia particular
+                $rapsDeEstaCompetencia = $todosRaps->get($materia->id, collect());
+                $rapsIds = $rapsDeEstaCompetencia->pluck('id');
+
+                // Solo consideramos los RAPs que están realmente presentes en la matrícula de esta ficha
+                $rapsIdsEnMatricula = $rapsIds->filter(fn($id) => $matriculasAgrupadas->has($id));
+
+                if ($rapsIdsEnMatricula->isEmpty()) {
                     return null;
                 }
 
-                // Cálculo de estado basado en MatriculaAcademica (la fuente de verdad)
-                $totalRaps = $rapsIds->count();
-                if ($totalRaps === 0) {
-                    $estaFinalizada = false;
-                } else {
-                    $rapsFinalizados = MatriculaAcademica::where('idFicha', $idFicha)
-                        ->whereIn('idMateria', $rapsIds)
-                        ->whereIn('estado', ['APROBADO', 'EVALUADO', 'POR EVALUAR'])
-                        ->distinct('idMateria')
-                        ->count();
-                    
-                    $estaFinalizada = ($rapsFinalizados >= $totalRaps);
+                $totalRaps = $rapsIdsEnMatricula->count();
+                $rapsFinalizados = 0;
+
+                foreach ($rapsIdsEnMatricula as $rapId) {
+                    $estudiantes = $matriculasAgrupadas->get($rapId, collect());
+                    // Si al menos un estudiante aparece como EVALUADO, FINALIZADO o APROBADO, se cuenta el RAP como completado
+                    if ($estudiantes->contains(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']))) {
+                        $rapsFinalizados++;
+                    }
                 }
+                
+                $estaFinalizada = ($rapsFinalizados >= $totalRaps);
+                if ($totalRaps === 0) $estaFinalizada = false;
 
                 return [
                     'id' => $materia->id,
@@ -101,7 +101,8 @@ class MateriaController extends Controller
                     'codigo' => $materia->codigo,
                     'horas' => $materia->horas,
                     'descripcion' => $materia->descripcion,
-                    'isCompleta' => $estaFinalizada
+                    'isCompleta' => $estaFinalizada,
+                    'estado' => $estaFinalizada ? 'FINALIZADO' : 'PENDIENTE'
                 ];
             })->filter()->values();
 
@@ -381,6 +382,12 @@ class MateriaController extends Controller
             return '';
         })->values();
 
+        // Obtener todos los estados de matrícula para determinar la finalización
+        $matriculasFicha = MatriculaAcademica::where('idFicha', $idFicha)
+            ->select('idMateria', 'estado')
+            ->get()
+            ->groupBy('idMateria');
+
         // Cargamos todos los horarios de la ficha con sus conteos de sesiones (igual que getTrimestresFicha)
         $todosHorariosFicha = HorarioMateria::where('idFicha', $idFicha)
             ->with(['gradoMateria', 'dia', 'contrato.persona'])
@@ -390,7 +397,7 @@ class MateriaController extends Controller
             ->get();
 
         // Formatear la respuesta
-        $resultado = $raps->map(function ($gradoMateria) use ($todosHorariosFicha) {
+        $resultado = $raps->map(function ($gradoMateria) use ($todosHorariosFicha, $matriculasFicha) {
             $materiaId = $gradoMateria->idMateria;
             // Filtramos de todos los horarios de la ficha los que corresponden a esta materia
             $todosLosHorariosFicha = $todosHorariosFicha->filter(function ($h) use ($materiaId) {
@@ -415,6 +422,10 @@ class MateriaController extends Controller
                 }
             }
 
+            // Detección de estado basada en MatriculaAcademica
+            $estaFinalizado = $matriculasFicha->get($materiaId, collect())
+                ->contains(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']));
+
             return [
                 'id' => $gradoMateria->id,
                 'idGradoMateria' => $gradoMateria->id,
@@ -423,7 +434,7 @@ class MateriaController extends Controller
                 'nombre' => $gradoMateria->materia->nombreMateria ?? 'Sin nombre',
                 'descripcion' => $gradoMateria->materia->descripcion ?? '',
                 'codigo' => $gradoMateria->materia->codigo ?? '',
-                'estado' => $gradoMateria->estado,
+                'estado' => $estaFinalizado ? 'FINALIZADO' : 'PENDIENTE',
                 'fechaFinalRap' => $fechaFinalRap instanceof Carbon ? $fechaFinalRap->format('Y-m-d') : null,
                 'horas' => $gradoMateria->materia->horas ?? 0,
                 'horasActuales' => round($horasActuales, 2),
@@ -676,9 +687,8 @@ class MateriaController extends Controller
         $idMateriaPadre = $request->input('idMateriaPadre');
         $idFicha = $request->input('idFicha');
 
-        $rapsYaFinalizados = GradoMateria::whereHas('horarioMateria', function ($q) use ($idFicha) {
-                    $q->where('idFicha', $idFicha);
-                })->where('estado', EstadoHorarioMateria::FINALIZADO)
+        $rapsYaFinalizados = MatriculaAcademica::where('idFicha', $idFicha)
+                ->whereIn('estado', ['FINALIZADO', 'EVALUADO', 'APROBADO'])
                 ->pluck('idMateria')->toArray();
                 
                 $raps = MatriculaAcademica::where('idFicha', $idFicha)

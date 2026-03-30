@@ -1246,6 +1246,12 @@ class HorarioMateriaController extends Controller
             ], 200);
         }
 
+        // Obtener los datos de matricula académica para validar asignación y estados
+        $matriculasFicha = MatriculaAcademica::where('idFicha', $idFicha)
+            ->select('idMateria', 'estado')
+            ->get()
+            ->groupBy('idMateria');
+
         // Traemos los horarios con sus relaciones
         $horarios = HorarioMateria::where('idFicha', $idFicha)
             ->whereHas('gradoMateria.gradoPrograma', function ($q) use ($idPrograma) {
@@ -1278,7 +1284,7 @@ class HorarioMateriaController extends Controller
             })
 
             // Recorremos cada grado
-            ->map(function ($horariosPorGrado) use ($horarios) {
+            ->map(function ($horariosPorGrado) use ($horarios, $matriculasFicha) {
                 // Tomamos el grado una sola vez
                 $gradoPrograma = $horariosPorGrado->first()
                     ->gradoMateria
@@ -1336,7 +1342,7 @@ class HorarioMateriaController extends Controller
 
                             return is_null($materia->idMateriaPadre);
                         })
-                        ->map(function ($horariosPorMateriaPadre, $idMateriaPadre) use ($horariosPorGrado, $horarios) {
+                        ->map(function ($horariosPorMateriaPadre, $idMateriaPadre) use ($horariosPorGrado, $horarios, $matriculasFicha) {
                             $materiaPadre = $horariosPorMateriaPadre->first()
                                 ->gradoMateria
                                 ->materia;
@@ -1358,10 +1364,14 @@ class HorarioMateriaController extends Controller
                             // Horas acumuladas (globales de la ficha)
                             $horasData = $this->calcularHorasMateria($horarios->filter(fn($h) => $h->gradoMateria->idMateria == $idMateriaPadre || $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre));
 
-                            // Estado global de RAPs en la ficha (si alguno está finalizado o evaluado en cualquier trimestre)
-                            $estadoRapsGlobal = $horariosRapsFicha->groupBy('gradoMateria.idMateria')->map(fn($g) => $g->contains(fn($h) => in_array($h->gradoMateria->estado, [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO])));
+                            // Estado global de RAPs en la ficha basado en MatriculaAcademica
+                            // Si al menos un aprendiz está EVALUADO, FINALIZADO o APROBADO en MatriculaAcademica, se marca como terminado
+                            $estadoRapsGlobal = $horariosRapsFicha->groupBy('gradoMateria.idMateria')->map(function ($g, $idMateria) use ($matriculasFicha) {
+                                $matriculas = $matriculasFicha->get($idMateria, collect());
+                                return $matriculas->contains(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']));
+                            });
 
-                            // Sincronizar estados de RAPs en este trimestre si ya están finalizados globalmente
+                            // Sincronizar estados de RAPs en este trimestre si ya están finalizados en matricula
                             foreach ($horariosDeHijos as $_h) {
                                 if (($estadoRapsGlobal[$_h->gradoMateria->idMateria] ?? false) && !in_array($_h->gradoMateria->estado, [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO])) {
                                     $_h->gradoMateria->update(['estado' => EstadoHorarioMateria::FINALIZADO]);
@@ -1371,8 +1381,10 @@ class HorarioMateriaController extends Controller
                             // Verificar y actualizar estado de la competencia (Padre)
                             $gradoMateriaParaEstado = $horariosPorMateriaPadre->first()->gradoMateria;
                             $todosRapsTerminados = $estadoRapsGlobal->isNotEmpty() && $estadoRapsGlobal->every(fn($f) => $f);
-                            if ($todosRapsTerminados || $horasData['horasActuales'] >= $materiaPadre->horas && $horasData['horasActuales'] > 0) {
-                                $gradoMateriaParaEstado->update(['estado' => EstadoHorarioMateria::FINALIZADO]);
+                            if ($todosRapsTerminados || ($horasData['horasActuales'] >= $materiaPadre->horas && $horasData['horasActuales'] > 0)) {
+                                if ($gradoMateriaParaEstado->estado != EstadoHorarioMateria::FINALIZADO) {
+                                    $gradoMateriaParaEstado->update(['estado' => EstadoHorarioMateria::FINALIZADO]);
+                                }
                             }
 
                             return [
@@ -1595,6 +1607,11 @@ class HorarioMateriaController extends Controller
                 $gradoMateria = GradoMateria::find($horario->idGradoMateria);
                 $gradoMateria->estado = EstadoHorarioMateria::FINALIZADO;
                 $gradoMateria->save();
+
+                // Fuente de verdad: Actualizar MatriculaAcademica para todos los estudiantes en esta ficha y materia
+                MatriculaAcademica::where('idFicha', $horario->idFicha)
+                    ->where('idMateria', $gradoMateria->idMateria)
+                    ->update(['estado' => 'FINALIZADO']);
             }
 
             // INFORMACION PARA ENVIAR EN EL EMAIL Y LA NOTIFICACION
