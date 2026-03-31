@@ -8,16 +8,27 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('contrato', function (Blueprint $table) {
-            $table->string('supervisorContrato')->nullable()->default(null)->after('siif');
-            $table->string('cargoSupervisor')->nullable()->default(null)->after('supervisorContrato');
-        });
+        if (! Schema::hasColumn('contrato', 'supervisorContrato')) {
+            Schema::table('contrato', function (Blueprint $table) {
+                $table->string('supervisorContrato', 255)->nullable();
+            });
+        }
+        if (! Schema::hasColumn('contrato', 'cargoSupervisor')) {
+            Schema::table('contrato', function (Blueprint $table) {
+                $table->string('cargoSupervisor', 255)->nullable();
+            });
+        }
     }
 
     public function down(): void
     {
         Schema::table('contrato', function (Blueprint $table) {
-            $table->dropColumn(['supervisorContrato', 'cargoSupervisor']);
+            if (Schema::hasColumn('contrato', 'cargoSupervisor')) {
+                $table->dropColumn('cargoSupervisor');
+            }
+            if (Schema::hasColumn('contrato', 'supervisorContrato')) {
+                $table->dropColumn('supervisorContrato');
+            }
         });
     }
 };
