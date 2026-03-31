@@ -166,7 +166,8 @@ Route::group([
     Route::post('logout', [AuthController::class, 'logout']);
     Route::post('active_users', [AuthController::class, 'getActiveUsers']);
     Route::post('set_company', [AuthController::class, 'setCompany']);
-    Route::post('roles', [AuthController::class, 'getRoles']);
+    // No usar POST "roles" aquí: choca con Route::resource('roles') (creación de cargos / RolController@store).
+    Route::post('auth/roles', [AuthController::class, 'getRoles']);
     Route::post('permissions', [AuthController::class, 'getPermissions']);
     Route::get('user_mobile', [AuthController::class, 'getUserAppMobile']);
     Route::get('get_users_and_groups', [Gestion_usuarioUserController::class, 'getUsersAndGroups']);
