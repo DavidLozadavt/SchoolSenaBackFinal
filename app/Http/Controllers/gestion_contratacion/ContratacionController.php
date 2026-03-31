@@ -418,9 +418,12 @@ class ContratacionController extends Controller
             $persona->email = $email;
             $persona->direccion = $request->input('direccion');
             $persona->idCiudadUbicacion = $idCiudadUbicacion;
-            $ciudadExpedicionRel = $this->normalizePositiveInt($request->input('ciudadExpedicion') ?? $request->input('idciudadExpedicion'));
-            if ($ciudadExpedicionRel !== null) {
-                $persona->ciudadExpedicionRel = $ciudadExpedicionRel;
+            $ciudadExpedicionId = $this->normalizePositiveInt(
+                $request->input('ciudadExpedicion') ?? $request->input('idciudadExpedicion')
+            );
+            if ($ciudadExpedicionId !== null) {
+                // Guardar en la FK real (columna), no en el nombre de la relación.
+                $persona->ciudadExpedicion = $ciudadExpedicionId;
             }
             $persona->telefonoFijo = $request->input('telefonoFijo');
             $persona->sexo = $request->input('sexo');
