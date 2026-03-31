@@ -388,6 +388,10 @@ class MateriaController extends Controller
             ->get()
             ->groupBy('idMateria');
 
+        // Cargar la ficha para obtener el porcentaje de ejecución
+        $ficha = Ficha::find($idFicha);
+        $porcentajeEjecucion = $ficha ? ($ficha->porcentajeEjecucion ?? 100) : 100;
+
         // Cargamos todos los horarios de la ficha con sus conteos de sesiones (igual que getTrimestresFicha)
         $todosHorariosFicha = HorarioMateria::where('idFicha', $idFicha)
             ->with(['gradoMateria', 'dia', 'contrato.persona'])
@@ -397,7 +401,7 @@ class MateriaController extends Controller
             ->get();
 
         // Formatear la respuesta
-        $resultado = $raps->map(function ($gradoMateria) use ($todosHorariosFicha, $matriculasFicha) {
+        $resultado = $raps->map(function ($gradoMateria) use ($todosHorariosFicha, $matriculasFicha, $porcentajeEjecucion) {
             $materiaId = $gradoMateria->idMateria;
             // Filtramos de todos los horarios de la ficha los que corresponden a esta materia
             $todosLosHorariosFicha = $todosHorariosFicha->filter(function ($h) use ($materiaId) {
@@ -422,9 +426,19 @@ class MateriaController extends Controller
                 }
             }
 
-            // Detección de estado basada en MatriculaAcademica
-            $estaFinalizado = $matriculasFicha->get($materiaId, collect())
+            // Horas requeridas del RAP ajustadas por el % de ejecución de la ficha
+            $horasRap = $gradoMateria->materia->horas ?? 0;
+            $horasRequeridas = $horasRap * ($porcentajeEjecucion / 100);
+
+            // Detección de estado:
+            // Por matrícula (FINALIZADO / EVALUADO / APROBADO), o
+            // Por horas ejecutadas >= horas requeridas con el % de ejecución
+            $finalizadoPorMatricula = $matriculasFicha->get($materiaId, collect())
                 ->contains(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']));
+
+            $finalizadoPorHoras = $horasRequeridas > 0 && $horasActuales >= $horasRequeridas;
+
+            $estaFinalizado = $finalizadoPorMatricula || $finalizadoPorHoras;
 
             return [
                 'id' => $gradoMateria->id,

@@ -390,7 +390,7 @@ class HorarioMateriaController extends Controller
         try {
             $horarioMateria = HorarioMateria::findOrFail($id);
 
-            $sesionMaterias = $horarioMateria->sesionMaterias()->withCount('asistencia')->get();
+            $sesionMaterias = $horarioMateria->sesionMaterias()->withCount(['asistencia' => fn($q) => $q->where('asistio', true)])->get();
             $detallesRmi = DetalleRmi::where('idHorarioMateria', $horarioMateria->id)->get();
             $horarios = HorarioMateria::where('idGradoMateria', $horarioMateria->idGradoMateria)->get();
 
@@ -420,7 +420,7 @@ class HorarioMateriaController extends Controller
                 }
             } else {
                 return response()->json([
-                    'message' => 'No es posible eliminar este horario porque tiene sesiones con asistencias registradas.'
+                    'message' => 'No es posible eliminar este horario porque tiene asistencias registradas.'
                 ], 422);
             }
 
@@ -1713,11 +1713,38 @@ class HorarioMateriaController extends Controller
             }
 
             $contratoIds = collect($contratos)->pluck('id')->filter()->toArray();
-            $materias = Materia::whereHas('gradoMateria.horarioMateria', function ($query) use ($contratoIds) {
-                $query->whereIn('idContrato', $contratoIds)
-                    ->where('estado', EstadoHorarioMateria::FINALIZADO);
-            })
-                ->get();
+
+            // Obtener las fichas asociadas a esos contratos (via horarioMateria)
+            $fichaIds = HorarioMateria::whereIn('idContrato', $contratoIds)
+                ->whereNotNull('idFicha')
+                ->pluck('idFicha')
+                ->unique()
+                ->toArray();
+
+            // Obtener los idMateria que el contrato imparte (via gradoMateria)
+            $materiaIds = HorarioMateria::whereIn('idContrato', $contratoIds)
+                ->whereNotNull('idGradoMateria')
+                ->with('gradoMateria')
+                ->get()
+                ->pluck('gradoMateria.idMateria')
+                ->filter()
+                ->unique()
+                ->toArray();
+
+            if (empty($fichaIds) || empty($materiaIds)) {
+                return response()->json([], 200);
+            }
+
+            // RAPs cuyo estado en MatriculaAcademica sea FINALIZADO, EVALUADO o APROBADO
+            // para las fichas y materias que maneja el contrato
+            $materiasFinalizadasIds = MatriculaAcademica::whereIn('idFicha', $fichaIds)
+                ->whereIn('idMateria', $materiaIds)
+                ->whereIn('estado', ['FINALIZADO'])
+                ->pluck('idMateria')
+                ->unique()
+                ->toArray();
+
+            $materias = Materia::whereIn('id', $materiasFinalizadasIds)->get();
 
             return response()->json($materias, 200);
         } catch (\Throwable $th) {
