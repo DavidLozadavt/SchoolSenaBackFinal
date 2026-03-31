@@ -99,7 +99,7 @@ class ContratacionController extends Controller
             'ciudadNac.departamento',
             'ciudad.departamento',
             'ciudadUbicacion.departamento',
-            'ciudadExpedicion.departamento',
+            'ciudadExpedicionRel.departamento',
             'tipoIdentificacion'
         )
             ->where('identificacion', '=', $identificacion)->first();
@@ -418,9 +418,9 @@ class ContratacionController extends Controller
             $persona->email = $email;
             $persona->direccion = $request->input('direccion');
             $persona->idCiudadUbicacion = $idCiudadUbicacion;
-            $ciudadExpedicion = $this->normalizePositiveInt($request->input('ciudadExpedicion') ?? $request->input('idciudadExpedicion'));
-            if ($ciudadExpedicion !== null) {
-                $persona->ciudadExpedicion = $ciudadExpedicion;
+            $ciudadExpedicionRel = $this->normalizePositiveInt($request->input('ciudadExpedicion') ?? $request->input('idciudadExpedicion'));
+            if ($ciudadExpedicionRel !== null) {
+                $persona->ciudadExpedicionRel = $ciudadExpedicionRel;
             }
             $persona->telefonoFijo = $request->input('telefonoFijo');
             $persona->sexo = $request->input('sexo');
@@ -1388,7 +1388,7 @@ public function getContratosFlujoVT(Request $request)
             'documentosContrato.AsignacionTipoDocumentoProceso.tipoDocumento',
             'persona.ciudadUbicacion',
             'persona.ciudadNac',
-            'persona.ciudadExpedicion.departamento',
+            'persona.ciudadExpedicionRel.departamento',
             'persona.tipoIdentificacion',
             'persona.observacionesPreocupacionales',
             'persona.usuario.centroFormacion',
