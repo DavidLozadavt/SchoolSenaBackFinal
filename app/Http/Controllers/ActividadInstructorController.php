@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ActividadInstructor;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ActividadInstructorController extends Controller
 {
@@ -26,7 +27,13 @@ class ActividadInstructorController extends Controller
             'fechaFinal' => 'required|date|after_or_equal:fechaInicial',
             'numeroHoras' => 'required|integer|min:0',
             'idRmi' => 'required|exists:rmi,id',
+            'documento'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
         ]);
+
+        if ($request->hasFile('documento')) {
+            $validated['documento'] = $request->file('documento')
+                ->store(ActividadInstructor::RUTA_DOCUMENTO, 'public');
+        }
 
         $actividad = ActividadInstructor::create($validated);
 
@@ -41,6 +48,9 @@ class ActividadInstructorController extends Controller
     public function update(Request $request, $id)
     {
         $actividad = ActividadInstructor::findOrFail($id);
+        if ($request->isMethod('POST')) {
+            $request->merge(['_method' => 'PUT']);
+        }
 
         $validated = $request->validate([
             'descripcion' => 'required|string',
@@ -48,7 +58,17 @@ class ActividadInstructorController extends Controller
             'fechaFinal' => 'required|date|after_or_equal:fechaInicial',
             'numeroHoras' => 'required|integer|min:0',
             'idRmi' => 'required|exists:rmi,id',
+            'documento'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
         ]);
+
+        if ($request->hasFile('documento')) {
+            // Elimina el archivo anterior si existe
+            if ($actividad->documento) {
+                Storage::disk('public')->delete($actividad->documento);
+            }
+            $validated['documento'] = $request->file('documento')
+                ->store(ActividadInstructor::RUTA_DOCUMENTO, 'public');
+        }
 
         $actividad->update($validated);
 
@@ -58,8 +78,26 @@ class ActividadInstructorController extends Controller
     public function destroy($id)
     {
         $actividad = ActividadInstructor::findOrFail($id);
+
+        if ($actividad->documento) {
+            Storage::disk('public')->delete($actividad->documento);
+        }
+
         $actividad->delete();
 
         return response()->json(['message' => 'Eliminado correctamente']);
+    }
+
+    // Endpoint separado para eliminar solo el documento sin borrar la actividad
+    public function destroyDocumento($id)
+    {
+        $actividad = ActividadInstructor::findOrFail($id);
+
+        if ($actividad->documento) {
+            Storage::disk('public')->delete($actividad->documento);
+            $actividad->update(['documento' => null]);
+        }
+
+        return response()->json(['message' => 'Documento eliminado correctamente']);
     }
 }

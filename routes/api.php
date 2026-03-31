@@ -277,6 +277,7 @@ Route::apiResource('tipo_contrato', TipoContratoController::class);
 Route::get('departamentos', [DepartamentoController::class, 'index']);
 Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
 Route::get('ciudades', [CiudadController::class, 'ciudades']);
+Route::get('ciudades-departamento', [CiudadController::class, 'ciudadesWithDepartamento']);
 
 //Gestion de pagos
 Route::get('pagos_pendientes', [PagoController::class, 'getPagosPendientes']);
@@ -1422,6 +1423,7 @@ Route::middleware('auth:api')->group(function () {
     Route::put('instructores/{id}/supervisor', [InstructoresController::class, 'updateSupervisor']);
     Route::get('get_years_contract_person', [InstructoresController::class, 'getYearsContractPerson']);
     Route::get('get_data_rmi_configuration_by_year', [InstructoresController::class, 'getDataRmiConfiguracionByYear']);
+    Route::get('get_informe_by_instructor_rmi', [InstructoresController::class, 'getInformeByInstructorRmi']);
 });
 
 //Intructores Comisiones:
@@ -1432,6 +1434,7 @@ Route::middleware('auth:api')->group(function () {
 //Intructores Actividades:
 Route::middleware('auth:api')->group(function () {
     Route::apiResource('actividades-instructores', ActividadInstructorController::class);
+    Route::delete('actividades-instructores/{id}/documento', [ActividadInstructorController::class, 'destroyDocumento']);
 });
 
 

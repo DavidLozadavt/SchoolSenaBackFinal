@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
+use App\Models\ActividadInstructor;
+use App\Models\ComisionInstructor;
 use App\Models\Contract;
 use App\Models\DetalleRmi;
 use App\Models\NotificacionSistema;
 use App\Models\Rmi;
 use App\Models\SesionMateria;
 use App\Util\KeyUtil;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -916,28 +919,38 @@ class InstructoresController extends Controller
         $user    = auth()->user();
         $persona = $user?->persona;
 
-        $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->with('centroFormacion')->get();
+        $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->with('centroFormacion', 'persona.ciudadExpedicionRel.departamento')->get();
 
         return response()->json(['contrato' => $contrato]);
     }
     public function updateSupervisor(Request $request, int $id)
     {
         $request->validate([
-            'supervisorContrato' => 'nullable|string|max:255',
-            'cargoSupervisor'    => 'nullable|string|max:255',
-            'objetoContrato'     => 'nullable|string|max:1000',
-            'formaDePago'        => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
+            'supervisorContrato'  => 'nullable|string|max:255',
+            'cargoSupervisor'     => 'nullable|string|max:255',
+            'objetoContrato'      => 'nullable|string|max:1000',
+            'formaDePago'         => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
+            'ciudadExpedicionId'  => 'nullable|integer|exists:ciudad,id',
+            'siif' => 'nullable|numeric'
         ]);
 
-        $contrato = Contract::findOrFail($id);
-        $fields = ['objetoContrato', 'formaDePago'];
-        if (Schema::hasColumn('contrato', 'supervisorContrato')) {
-            $fields[] = 'supervisorContrato';
-        }
-        if (Schema::hasColumn('contrato', 'cargoSupervisor')) {
-            $fields[] = 'cargoSupervisor';
-        }
-        $contrato->update($request->only($fields));
+        DB::transaction(function () use ($request, $id) {
+            $contrato = Contract::with('persona')->findOrFail($id);
+
+            $contrato->update($request->only([
+                'supervisorContrato',
+                'cargoSupervisor',
+                'objetoContrato',
+                'formaDePago',
+                'siif'
+            ]));
+
+            if ($request->filled('ciudadExpedicionId')) {
+                $contrato->persona->update([
+                    'ciudadExpedicion' => $request->ciudadExpedicionId,
+                ]);
+            }
+        });
 
         return response()->json(['message' => 'Contrato actualizado correctamente.']);
     }
@@ -1073,5 +1086,98 @@ class InstructoresController extends Controller
         });
 
         return response()->json($data);
+    }
+    public function getInformeByInstructorRmi(Request $request)
+    {
+        $idContrato = $request->idContrato;
+        $idRmi      = $request->idRmi;
+        $plazo      = $request->plazo;
+        $nPlanilla  = $request->nPlanilla;
+
+        $rmi      = Rmi::findOrFail($idRmi);
+        $contrato = Contract::with([
+            'persona',
+            'persona.ciudadExpedicionRel',
+            'persona.ciudadExpedicionRel.departamento',
+            'centroFormacion'
+        ])->findOrFail($idContrato);
+
+        $actividades = ActividadInstructor::where('idRmi', $idRmi)->get();
+        $comisiones  = ComisionInstructor::where('idRmi', $idRmi)
+            ->where('idContrato', $idContrato)
+            ->get();
+
+        // ── HORARIOS DEL PERIODO ──────────────────────────────────────────────
+        $inicio = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->startOfMonth();
+        $fin    = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->endOfMonth();
+
+        $diasSemana = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miércoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sábado', 7 => 'Domingo'];
+
+        $horariosPorFicha = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+        ])
+            ->where('idContrato', $idContrato)
+            ->where('estado', 'ASIGNADO')
+            ->where(function ($q) use ($inicio, $fin) {
+                $q->whereBetween('fechaInicial', [$inicio, $fin])
+                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                    ->orWhere(function ($q2) use ($inicio, $fin) {
+                        $q2->where('fechaInicial', '<=', $inicio)
+                            ->where('fechaFinal', '>=', $fin);
+                    });
+            })
+            ->get()
+            ->groupBy('idFicha')
+            ->map(function ($horarios) use ($inicio, $fin, $diasSemana) {
+                $ficha    = $horarios->first()->ficha;
+                $programa = $ficha?->asignacion?->programa;
+
+                $filas = $horarios->map(function ($h) use ($inicio, $fin, $diasSemana) {
+                    $desde           = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta           = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                    $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                    $cantSesiones    = 0;
+                    $cursor          = $desde->copy();
+
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantSesiones++;
+                        $cursor->addDay();
+                    }
+
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                    return [
+                        'dia'            => $diasSemana[$h->idDia] ?? $h->idDia,
+                        'horaInicial'    => $h->horaInicial,
+                        'horaFinal'      => $h->horaFinal,
+                        'cantSesiones'   => $cantSesiones,
+                        'horasTotales'   => round($duracionSesion * $cantSesiones, 2),
+                    ];
+                })->values();
+
+                return [
+                    'codigoFicha'       => $ficha?->codigo,
+                    'programaFormacion' => $programa?->nombrePrograma,
+                    'filas'             => $filas,
+                    'totalHorasFicha'   => $filas->sum('horasTotales'),
+                ];
+            })->values();
+        // ─────────────────────────────────────────────────────────────────────
+
+        $pdf = Pdf::loadView('pdf.informeinstructor', compact(
+            'rmi',
+            'contrato',
+            'actividades',
+            'comisiones',
+            'plazo',
+            'nPlanilla',
+            'horariosPorFicha'
+        ))
+            ->setPaper('letter')
+            ->setOption('isPhpEnabled', true)
+            ->setOption('isHtml5ParserEnabled', true)
+            ->setOption('isFontSubsettingEnabled', true);
+
+        return $pdf->stream("RMI_{$idContrato}_{$idRmi}.pdf");
     }
 }
