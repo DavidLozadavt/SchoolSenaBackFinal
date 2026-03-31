@@ -20,6 +20,7 @@ use App\Models\Transaccion;
 use App\Models\ContractType;
 use App\Models\Notificacion;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use App\Models\TipoDocumento;
 use App\Models\ArchivoContrato;
 use App\Models\TipoTransaccion;
@@ -27,7 +28,6 @@ use App\Models\DocumentoContrato;
 use Illuminate\Http\JsonResponse;
 use App\Models\IdentificationType;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Database\QueryException;
 use App\Models\ContratoTransaccion;
 use App\Http\Controllers\Controller;
@@ -198,11 +198,15 @@ class ContratacionController extends Controller
      */
     public function getRoles()
     {
-        $roles = Rol::query()
+        $query = Rol::query()
             ->with('salario')
-            ->get();
+            ->orderBy('name');
 
-        return response()->json($roles);
+        if (Schema::hasColumn('roles', 'company_id')) {
+            $query->where('company_id', KeyUtil::idCompany());
+        }
+
+        return response()->json($query->get());
     }
 
 
