@@ -53,10 +53,10 @@ class Person extends Model
      */
     public function getCiudadExpedicionInfoAttribute(): ?array
     {
-        if (! $this->relationLoaded('ciudadExpedicion')) {
+        if (! $this->relationLoaded('ciudadExpedicionRel')) {
             return null;
         }
-        $city = $this->getRelation('ciudadExpedicion');
+        $city = $this->getRelation('ciudadExpedicionRel');
         if (! $city) {
             return null;
         }
