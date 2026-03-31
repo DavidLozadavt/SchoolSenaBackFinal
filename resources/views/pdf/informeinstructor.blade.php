@@ -462,7 +462,7 @@
         Para el trámite de la cuenta me permito adjuntar: (i) Documentos electrónicos enunciados como
         evidencias del cumplimiento de las obligaciones contractuales, (ii) los desplazamientos realizados y (iii) el
         pago de la planilla de seguridad social y parafiscal nro. {{ $nPlanilla }} de la planilla, aportes en línea
-        {{ \Carbon\Carbon::parse($rmi->periodo ?? now())->translatedFormat('F \\d\\e\\l Y') }}. (Decreto Ley 2106 de
+        {{ \Carbon\Carbon::parse($rmi->periodo ?? now())->subMonth()->translatedFormat('F') }}. (Decreto Ley 2106 de
         2019 – “Decreto Ley Anti trámites”)
     </div>
     <div class="spacer2"></div>
