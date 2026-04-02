@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
+use App\Models\ActividadContrato;
 use App\Models\ActividadInstructor;
 use App\Models\ComisionInstructor;
 use App\Models\Contract;
@@ -1107,6 +1108,9 @@ class InstructoresController extends Controller
             ->where('idContrato', $idContrato)
             ->get();
 
+
+        $actividadesContrato = ActividadContrato::where('idContrato', $idContrato)->orderBy('created_at', 'asc')->get();
+
         // ── HORARIOS DEL PERIODO ──────────────────────────────────────────────
         $inicio = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->startOfMonth();
         $fin    = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->endOfMonth();
@@ -1171,7 +1175,8 @@ class InstructoresController extends Controller
             'comisiones',
             'plazo',
             'nPlanilla',
-            'horariosPorFicha'
+            'horariosPorFicha',
+            'actividadesContrato'
         ))
             ->setPaper('letter')
             ->setOption('isPhpEnabled', true)

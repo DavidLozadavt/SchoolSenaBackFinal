@@ -32,6 +32,8 @@
         table {
             width: 100%;
             border-collapse: collapse;
+            word-wrap: break-word;
+            /* ← rompe texto largo */
         }
 
         .header-table td {
@@ -99,6 +101,34 @@
             padding: 5px;
             text-align: center;
             vertical-align: middle;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        .tabla-horarios {
+            table-layout: fixed;
+            width: 100%;
+            font-size: 10px;
+        }
+
+        .tabla-actividades {
+            table-layout: fixed;
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .tabla-actividades td,
+        .tabla-actividades th {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+            /* Evita que el texto se mantenga en una sola línea */
+        }
+
+        .tabla-actividades .tabla-horarios {
+            table-layout: fixed;
+            width: 100%;
+            font-size: 10px;
         }
     </style>
 </head>
@@ -270,157 +300,103 @@
 
     <h3>Ejecución mensual de actividades</h3>
 
-    <table>
-        <tr>
-            <th style="width: 40px;">No</th>
-            <th>Obligaciones</th>
-            <th>Acciones realizadas</th>
-            <th>Evidencias</th>
-        </tr>
-
-        <tr>
-            <td style="width: 40px; text-align:center;">
-                1
-            </td>
-
-            <td>
-                Impartir formación
-                profesional integral
-                que no solo abarque
-                los conocimientos
-                técnicos
-                y
-                académicos,
-                sino
-                también
-                las
-                habilidades
-                y
-                actitudes necesarias
-                para su desempeño
-                en
-                el
-                sector
-                productivo,
-                promoviendo
-                su
-                crecimiento personal
-                y profesional. Este
-                acompañamiento se
-                realizará conforme a
-                las directrices y
-                objetivos
-                del
-                programa
-                de
-                formación,
-                garantizando que se
-                desarrollen tanto las
-                competencias
-                específicas como las
-                habilidades blandas
-                requeridas para su
-                éxito en el ámbito
-                laboral.
-            </td>
-            <td>
-                Impartir formación profesional en los programas de formación
-                Titulada o Complementaria de acuerdo con la programación
-                asignada en las siguientes fichas de caracterización:
-                <table>
-                    <thead>
-                        <tr>
-                            <th>No. Ficha</th>
-                            <th>Nombre Programa</th>
-                            <th>Horario</th>
-                            <th>Horas Mes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @php $totalGeneral = 0; @endphp
-
-                        @foreach ($horariosPorFicha as $fichaData)
-                            @php $totalGeneral += $fichaData['totalHorasFicha']; @endphp
-                            <tr>
-                                <td>{{ $fichaData['codigoFicha'] }}</td>
-                                <td>{{ $fichaData['programaFormacion'] }}</td>
-                                <td style="text-align: left;">
-                                    @foreach ($fichaData['filas'] as $fila)
-                                        <div>
-                                            <strong>{{ $fila['dia'] }}:</strong>
-                                            {{ \Carbon\Carbon::parse($fila['horaInicial'])->format('h:i A') }} -
-                                            {{ \Carbon\Carbon::parse($fila['horaFinal'])->format('h:i A') }}
-                                        </div>
-                                    @endforeach
-                                </td>
-                                <td>{{ $fichaData['totalHorasFicha'] }}</td>
-                            </tr>
-                        @endforeach
-
-                        <tr>
-                            <td colspan="3" style="text-align: right;"><strong>TOTAL HORAS MES</strong></td>
-                            <td><strong>{{ $totalGeneral }}</strong></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </td>
-            <td>
-                Reporte Mensual de Instructor (RMI)
-            </td>
-        </tr>
-
-
-        @foreach ($actividades as $actividad)
-            <tr>
-                <td style="width: 40px; text-align:center;">
-                    {{ $loop->iteration + 1 }}
-                </td>
-                <td>{{ $actividad->descripcion }}</td>
-                <td>{{ $actividad->fechaInicial }}</td>
-                <td>{{ $actividad->fechaFinal }}</td>
-            </tr>
-        @endforeach
-    </table>
-
-    <div class="page-break"></div>
-    <h3>Horario mensual de ejecución</h3>
-
-    <table>
+    <table class="tabla-actividades">
+        <colgroup>
+            <col style="width: 5%;">
+            <col style="width: 20%;">
+            <col style="width: 50%;">
+            <col style="width: 20%;">
+        </colgroup>
         <thead>
             <tr>
-                <th>No. Ficha</th>
-                <th>Nombre Programa</th>
-                <th>Horario</th>
-                <th>Horas Mes</th>
+                <th style="width: 5%;">No</th>
+                <th style="width: 20%;">Obligaciones</th>
+                <th style="width: 55%;">Acciones realizadas</th>
+                <th style="width: 20%;">Evidencias</th>
             </tr>
         </thead>
         <tbody>
-            @php $totalGeneral = 0; @endphp
+            {{-- ── Fila 1: índice [0] ── --}}
+            <tr>
+                <td style="text-align:center;">1</td>
+                <td style="vertical-align: top;">{{ $actividadesContrato[0]->obligaciones }}</td>
+                <td style="vertical-align: top; padding: 5px;">
+                    <div style="margin-bottom: 8px;">{{ $actividadesContrato[0]->accionesRealizadas }}</div>
 
-            @foreach ($horariosPorFicha as $fichaData)
-                @php $totalGeneral += $fichaData['totalHorasFicha']; @endphp
+                    <table class="tabla-horarios" style="margin: 8px 0; border: 1px solid #000;">
+                        <colgroup>
+                            <col style="width: 12%;">
+                            <col style="width: 30%;">
+                            <col style="width: 40%;">
+                            <col style="width: 18%;">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th style="font-size: 9px; padding: 3px;">No. Ficha</th>
+                                <th style="font-size: 9px; padding: 3px;">Nombre Programa</th>
+                                <th style="font-size: 9px; padding: 3px;">Horario</th>
+                                <th style="font-size: 9px; padding: 3px;">Horas Mes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @php $totalGeneral = 0; @endphp
+
+                            @foreach ($horariosPorFicha as $fichaData)
+                                @php $totalGeneral += $fichaData['totalHorasFicha']; @endphp
+                                <tr>
+                                    <td style="font-size: 9px; padding: 3px;">{{ $fichaData['codigoFicha'] }}</td>
+                                    <td style="font-size: 9px; padding: 3px; text-align: left;">
+                                        {{ $fichaData['programaFormacion'] }}</td>
+                                    <td style="font-size: 9px; padding: 3px; text-align: left;">
+                                        @foreach ($fichaData['filas'] as $fila)
+                                            <div style="margin: 2px 0;">
+                                                <strong>{{ $fila['dia'] }}:</strong>
+                                                {{ \Carbon\Carbon::parse($fila['horaInicial'])->format('h:i A') }} -
+                                                {{ \Carbon\Carbon::parse($fila['horaFinal'])->format('h:i A') }}
+                                            </div>
+                                        @endforeach
+                                    </td>
+                                    <td style="font-size: 9px; padding: 3px;">{{ $fichaData['totalHorasFicha'] }}</td>
+                                </tr>
+                            @endforeach
+
+                            <tr>
+                                <td colspan="3" style="text-align: right; font-size: 9px; padding: 3px;">
+                                    <strong>TOTAL HORAS MES</strong>
+                                </td>
+                                <td style="font-size: 9px; padding: 3px;"><strong>{{ $totalGeneral }}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div style="margin-top: 8px; font-size: 10px;">
+                        Realizar y entregar los seguimientos de etapa productiva de las fichas,
+                        asignadas Revisión de bitácoras Evaluación de etapa productiva.
+                    </div>
+                </td>
+                <td style="vertical-align: top;">{{ $actividadesContrato[0]->evidencias }}</td>
+            </tr>
+
+            {{-- ── Fila 2: índice [1] ── --}}
+            <tr>
+                <td style="text-align:center;">2</td>
+                <td style="vertical-align: top;">{{ $actividadesContrato[1]->obligaciones }}</td>
+                <td style="vertical-align: top;">{{ $actividadesContrato[1]->accionesRealizadas }}</td>
+                <td style="vertical-align: top;">{{ $actividadesContrato[1]->evidencias }}</td>
+            </tr>
+
+            {{-- ── Filas dinámicas desde [2] en adelante ── --}}
+            @foreach ($actividadesContrato->slice(2) as $actividad)
                 <tr>
-                    <td>{{ $fichaData['codigoFicha'] }}</td>
-                    <td>{{ $fichaData['programaFormacion'] }}</td>
-                    <td style="text-align: left;">
-                        @foreach ($fichaData['filas'] as $fila)
-                            <div>
-                                <strong>{{ $fila['dia'] }}:</strong>
-                                {{ \Carbon\Carbon::parse($fila['horaInicial'])->format('h:i A') }} -
-                                {{ \Carbon\Carbon::parse($fila['horaFinal'])->format('h:i A') }}
-                            </div>
-                        @endforeach
-                    </td>
-                    <td>{{ $fichaData['totalHorasFicha'] }}</td>
+                    <td style="text-align:center;">{{ $loop->iteration + 2 }}</td>
+                    <td style="vertical-align: top;">{{ $actividad->obligaciones }}</td>
+                    <td style="vertical-align: top;">{{ $actividad->accionesRealizadas }}</td>
+                    <td style="vertical-align: top;">{{ $actividad->evidencias }}</td>
                 </tr>
             @endforeach
-
-            <tr>
-                <td colspan="3" style="text-align: right;"><strong>TOTAL HORAS MES</strong></td>
-                <td><strong>{{ $totalGeneral }}</strong></td>
-            </tr>
         </tbody>
     </table>
+
     <div class="page-break"></div>
 
     <div style="text-align: justify">
@@ -462,7 +438,8 @@
         Para el trámite de la cuenta me permito adjuntar: (i) Documentos electrónicos enunciados como
         evidencias del cumplimiento de las obligaciones contractuales, (ii) los desplazamientos realizados y (iii) el
         pago de la planilla de seguridad social y parafiscal nro. {{ $nPlanilla }} de la planilla, aportes en línea
-        {{ \Carbon\Carbon::parse($rmi->periodo ?? now())->subMonth()->translatedFormat('F') }}. (Decreto Ley 2106 de
+        {{ \Carbon\Carbon::parse($rmi->periodo ?? now())->subMonth()->translatedFormat('F') }} del
+        {{ \Carbon\Carbon::parse($rmi->periodo ?? now())->translatedFormat('Y') }}. (Decreto Ley 2106 de
         2019 – “Decreto Ley Anti trámites”)
     </div>
     <div class="spacer2"></div>
