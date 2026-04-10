@@ -58,7 +58,7 @@ class ActividadInstructorController extends Controller
             'fechaFinal' => 'required|date|after_or_equal:fechaInicial',
             'numeroHoras' => 'required|integer|min:0',
             'idRmi' => 'required|exists:rmi,id',
-            'documento'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
+            'documento' => 'nullable|file|max:5120',
         ]);
 
         if ($request->hasFile('documento')) {

@@ -1430,6 +1430,8 @@ Route::middleware('auth:api')->group(function () {
     Route::get('get_years_contract_person', [InstructoresController::class, 'getYearsContractPerson']);
     Route::get('get_data_rmi_configuration_by_year', [InstructoresController::class, 'getDataRmiConfiguracionByYear']);
     Route::get('get_informe_by_instructor_rmi', [InstructoresController::class, 'getInformeByInstructorRmi']);
+    Route::post('detalle_rmi/archivo_pago_periodo', [InstructoresController::class, 'uploadArchivoPagoPeriodo']);
+    Route::post('merge_pdfs', [InstructoresController::class, 'mergePdfs']);
 });
 
 //Intructores Comisiones:
