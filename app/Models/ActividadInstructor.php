@@ -18,6 +18,7 @@ class ActividadInstructor extends Model
         'documento',
         'numeroHoras',
         'idRmi',
+        'idContrato'
     ];
 
     const RUTA_DOCUMENTO = "instructores/actividades";
@@ -41,5 +42,9 @@ class ActividadInstructor extends Model
     public function rmi()
     {
         return $this->belongsTo(Rmi::class, 'idRmi');
+    }
+    public function contrato()
+    {
+        return $this->belongsTo(Contract::class, 'idContrato');
     }
 }
