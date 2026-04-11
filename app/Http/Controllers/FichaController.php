@@ -1966,6 +1966,13 @@ class FichaController extends Controller
                 $todasLasSesiones = [];
                 $todasLasFechasSesiones = [];
 
+                Log::info('clasesEstudiante: inicio grupo materia-profesor', [
+                    'clave_grupo' => $claveGrupo,
+                    'idMateria' => $primerHorario->idMateria ?? null,
+                    'materia' => $primerHorario->materia_nombre ?? null,
+                    'horarios_unicos' => $horariosUnicos->pluck('idHorarioMateria')->toArray(),
+                ]);
+
                 foreach ($horariosUnicos as $horario) {
                     // Sincronizar sesiones completadas para cada horario
                     $this->sincronizarSesionesCompletadas(
@@ -2000,6 +2007,18 @@ class FichaController extends Controller
                     $totalSesiones += $totalSesionesHorario;
                     $sesionesCompletadas += $sesionesDadasHorario;
 
+                    Log::info('clasesEstudiante: resumen horario', [
+                        'idHorarioMateria' => $horario->idHorarioMateria,
+                        'fechaInicial' => $horario->fechaInicial,
+                        'fechaFinal' => $horario->fechaFinal,
+                        'idDia' => $horario->idDia,
+                        'horaInicial' => $horario->horaInicial,
+                        'horaFinal' => $horario->horaFinal,
+                        'totalSesionesHorario' => $totalSesionesHorario,
+                        'sesionesDadasHorario' => $sesionesDadasHorario,
+                        'sesionesCompletadasHorario' => count($sesionesCompletadasHorario),
+                    ]);
+
                     // Agregar sesiones individuales completadas
                     foreach ($sesionesCompletadasHorario as $sesion) {
                         $todasLasSesiones[] = [
@@ -2026,7 +2045,8 @@ class FichaController extends Controller
 
                     $fechaInicio = Carbon::parse($horario->fechaInicial);
                     $fechaFin = Carbon::parse($horario->fechaFinal);
-                    $carbonDayOfWeek = $horario->idDia === 7 ? 0 : $horario->idDia;
+                    $idDiaInt = (int) $horario->idDia;
+                    $carbonDayOfWeek = $idDiaInt === 7 ? 0 : $idDiaInt;
 
                     // Calcular todas las fechas de clase desde fechaInicial hasta fechaFinal
                     $fechaTemporal = $fechaInicio->copy();
@@ -2045,9 +2065,34 @@ class FichaController extends Controller
                         // Generar todas las sesiones semanales
                         while ($fechaTemporal->lte($fechaFin)) {
                             if ($fechaTemporal->dayOfWeek === $carbonDayOfWeek) {
-                                $horaIni = $this->parseHora($horario->horaInicial);
-                                $horaFin = $this->parseHora($horario->horaFinal);
-                                
+                                $horaIni = $this->parseHora((string) $horario->horaInicial);
+                                $horaFin = $this->parseHora((string) $horario->horaFinal);
+
+                                // Fallback local para formatos de hora no estándar (ej: con microsegundos)
+                                if (!$horaIni || !$horaFin) {
+                                    $horaIniRaw = trim((string) $horario->horaInicial);
+                                    $horaFinRaw = trim((string) $horario->horaFinal);
+                                    $horaIniRaw = preg_replace('/\.\d+$/', '', $horaIniRaw);
+                                    $horaFinRaw = preg_replace('/\.\d+$/', '', $horaFinRaw);
+
+                                    try {
+                                        $horaIni = Carbon::parse($horaIniRaw);
+                                        $horaFin = Carbon::parse($horaFinRaw);
+                                    } catch (\Exception $e) {
+                                        $horaIni = null;
+                                        $horaFin = null;
+                                    }
+                                }
+
+                                if (!$horaIni || !$horaFin) {
+                                    Log::warning('clasesEstudiante: hora no parseable, sesion omitida', [
+                                        'idHorarioMateria' => $horario->idHorarioMateria,
+                                        'horaInicial_original' => $horario->horaInicial,
+                                        'horaFinal_original' => $horario->horaFinal,
+                                        'fecha' => $fechaTemporal->format('Y-m-d'),
+                                    ]);
+                                }
+
                                 if ($horaIni && $horaFin) {
                                     $fechaHoraInicio = $fechaTemporal->copy()->setTime($horaIni->hour, $horaIni->minute, $horaIni->second);
                                     $fechaHoraFin = $fechaTemporal->copy()->setTime($horaFin->hour, $horaFin->minute, $horaFin->second);
@@ -2114,6 +2159,15 @@ class FichaController extends Controller
                 $porcentajeCompletado = $totalSesiones > 0 
                     ? round(($sesionesCompletadas / $totalSesiones) * 100, 0)
                     : 0;
+
+                Log::info('clasesEstudiante: resumen grupo generado', [
+                    'clave_grupo' => $claveGrupo,
+                    'idMateria' => $primerHorario->idMateria ?? null,
+                    'total_sesiones' => $totalSesiones,
+                    'sesiones_completadas' => $sesionesCompletadas,
+                    'sesiones_en_respuesta' => count($todasLasFechasSesiones),
+                    'porcentaje_completado' => $porcentajeCompletado,
+                ]);
 
                 // Obtener profesor (del primer horario, todos deberían tener el mismo)
                 $profesorNombre = $primerHorario->profesor_nombre ?? 'Sin asignar';
