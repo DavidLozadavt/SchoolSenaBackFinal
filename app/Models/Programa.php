@@ -123,4 +123,8 @@ class Programa extends Model
     {
         return $this->belongsToMany(AreaConocimiento::class, 'asignacionAreaConocimientoPrograma', 'idPrograma', 'idAreaConocimiento');
     }
+    public function proyectosFormativos(): HasMany
+    {
+        return $this->hasMany(ProyectoFormativo::class, 'idPrograma');
+    }
 }

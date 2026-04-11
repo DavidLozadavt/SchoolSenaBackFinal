@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ActividadContratoController;
 use App\Http\Controllers\AgendaEscenarioController;
 use App\Http\Controllers\AperturarProgramaController;
 use App\Http\Controllers\EstadoViajeController;
@@ -139,10 +140,14 @@ use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
 use App\Http\Controllers\ComisionInstructorController;
 use App\Http\Controllers\ActividadInstructorController;
+use App\Http\Controllers\ActividadProyectoController;
 use App\Http\Controllers\CompromisosController;
+use App\Http\Controllers\FaseProyectoController;
+use App\Http\Controllers\FaseProyectoRapController;
 use App\Http\Controllers\gestion_notificacion\NotificacionesSistemaController;
 use App\Http\Controllers\gestion_pensum\InasistenciaController;
 use App\Http\Controllers\InstructoresController;
+use App\Http\Controllers\ProyectoFormativoController;
 use App\Http\Controllers\SancionesController;
 
 /*
@@ -1295,13 +1300,13 @@ Route::middleware('auth:api')->group(function () {
 
     // Grupos del estudiante (vista aprendiz)
     Route::get('grupos-estudiante', [GruposFichaController::class, 'gruposEstudiante']);
-     // Actividades asignadas a un estudiante específico (vista instructor)
+    // Actividades asignadas a un estudiante específico (vista instructor)
     Route::get('fichas/{idFicha}/actividades-estudiante', [AsignacionActividadController::class, 'actividadesEstudiante']);
- 
+
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
     Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);
     Route::post('fichas/{idFicha}/asignacion-actividades', [AsignacionActividadController::class, 'asignar']);
-    Route::get('get_student_by_id_materia',[MatriculaAcademicaController::class, 'getStudentByIdMateria']);
+    Route::get('get_student_by_id_materia', [MatriculaAcademicaController::class, 'getStudentByIdMateria']);
     //calificaciones por ficha, materia e instructor (evaluador)
     // Calificaciones de actividades (ambiente virtual)
     Route::get('actividades/{idActividad}/fichas/{idFicha}/aprendices', [CalificacionActividadController::class, 'listarPorActividad']);
@@ -1310,7 +1315,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('calificaciones/individual', [CalificacionActividadController::class, 'calificarIndividual']);
     Route::post('calificaciones/por-grupo', [CalificacionActividadController::class, 'calificarPorGrupo']);
     Route::get('calificaciones_ficha_by_instructor/{idInstructor}', [MatriculaAcademicaController::class, 'calificacionesFichaByInstructor']);
-    }); //Juicios evaluativos:
+}); //Juicios evaluativos:
 Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 
 //rutas de Jornadas
@@ -1387,7 +1392,7 @@ Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadist
 Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
 Route::post('registrar-asistencia', [AsistenciaController::class, 'store']);
 // Endpoint temporal para subir documento de excusa
-Route::post('excusas/{idExcusa}/documento',[AsistenciaController::class, 'subirDocumentoExcusa']);
+Route::post('excusas/{idExcusa}/documento', [AsistenciaController::class, 'subirDocumentoExcusa']);
 
 // Iniciar clase: crea SesionMateria + Asistencia automáticamente al comenzar la hora de clase
 Route::post('iniciar-clase', [AsistenciaController::class, 'iniciarClase']);
@@ -1425,6 +1430,8 @@ Route::middleware('auth:api')->group(function () {
     Route::get('get_years_contract_person', [InstructoresController::class, 'getYearsContractPerson']);
     Route::get('get_data_rmi_configuration_by_year', [InstructoresController::class, 'getDataRmiConfiguracionByYear']);
     Route::get('get_informe_by_instructor_rmi', [InstructoresController::class, 'getInformeByInstructorRmi']);
+    Route::post('detalle_rmi/archivo_pago_periodo', [InstructoresController::class, 'uploadArchivoPagoPeriodo']);
+    Route::post('merge_pdfs', [InstructoresController::class, 'mergePdfs']);
 });
 
 //Intructores Comisiones:
@@ -1460,3 +1467,36 @@ Route::middleware('auth:api')->group(function () {
 //dashboard para instructores
 Route::get('instructores/mi-dashboard', [InstructoresController::class, 'getDashboardInstructor']);
 Route::get('misAsistenciasEstudiante', [AsistenciaController::class, 'misAsistenciasEstudiante']);
+
+
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('proyectos-formativos', ProyectoFormativoController::class);
+    Route::post('proyectos-formativos/{proyectoFormativo}/update', 
+        [ProyectoFormativoController::class, 'update']
+    );
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('fases-proyecto', FaseProyectoController::class);
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('actividades-proyecto', ActividadProyectoController::class);
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::get('fase-proyecto-rap/materias', [FaseProyectoRapController::class, 'getMaterias']);
+    Route::get('fase-proyecto-rap', [FaseProyectoRapController::class, 'index']);
+    Route::post('fase-proyecto-rap', [FaseProyectoRapController::class, 'store']);
+    Route::delete('fase-proyecto-rap/{id}', [FaseProyectoRapController::class, 'destroy']);
+});
+
+Route::middleware('auth:api')->group(function () {
+    // Rutas para actividades del contrato
+    Route::prefix('actividades-contrato')->group(function () {
+        Route::get('/', [ActividadContratoController::class, 'index']);
+        Route::post('/', [ActividadContratoController::class, 'store']);
+        Route::put('/{id}', [ActividadContratoController::class, 'update']);
+        Route::delete('/{id}', [ActividadContratoController::class, 'destroy']);
+    });
+});

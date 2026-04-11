@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
+use App\Models\ActividadContrato;
 use App\Models\ActividadInstructor;
 use App\Models\ComisionInstructor;
 use App\Models\Contract;
@@ -1071,6 +1072,8 @@ class InstructoresController extends Controller
                         'fechaInicial'     => $horario->fechaInicial,
                         'fechaFinal'       => $horario->fechaFinal,
                         'estadoHorario'    => $horario->estado,
+                        'archivoPago'      => $detalle->archivoPago,
+                        'archivoPagoUrl'   => $detalle->archivoPagoUrl,
                     ];
                 }
             }
@@ -1086,6 +1089,49 @@ class InstructoresController extends Controller
         });
 
         return response()->json($data);
+    }
+    // Ruta: POST detalle_rmi/archivo_pago_periodo
+    public function uploadArchivoPagoPeriodo(Request $request)
+    {
+        $request->validate([
+            'archivoPago' => 'required|file|mimes:pdf,jpg,jpeg,png',
+            'idRmi' => 'required|integer',
+        ]);
+
+        $ruta = '/storage/' . $request->file('archivoPago')->store('pagos', 'public');
+
+        // Actualizar todos los detalleRmi del periodo (mismo idRmi)
+        DetalleRmi::where('idRmi', $request->idRmi)
+            ->update(['archivoPago' => $ruta]);
+
+        return response()->json(['archivoPago' => $ruta]);
+    }
+    // Ruta: POST merge_pdfs
+    public function mergePdfs(Request $request)
+    {
+        $request->validate([
+            'pdfs' => 'required|array',
+            'pdfs.*' => 'required|file|mimes:pdf',
+        ]);
+
+        $pdf = new \setasign\Fpdi\Fpdi();
+
+        foreach ($request->file('pdfs') as $file) {
+            $path = $file->getPathname();
+            $pageCount = $pdf->setSourceFile($path);
+            for ($i = 1; $i <= $pageCount; $i++) {
+                $tpl = $pdf->importPage($i);
+                $size = $pdf->getTemplateSize($tpl);
+                $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+                $pdf->useTemplate($tpl);
+            }
+        }
+
+        $output = $pdf->Output('S');
+        return response($output, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="documento_unido.pdf"',
+        ]);
     }
     public function getInformeByInstructorRmi(Request $request)
     {
@@ -1106,6 +1152,9 @@ class InstructoresController extends Controller
         $comisiones  = ComisionInstructor::where('idRmi', $idRmi)
             ->where('idContrato', $idContrato)
             ->get();
+
+
+        $actividadesContrato = ActividadContrato::where('idContrato', $idContrato)->orderBy('created_at', 'asc')->get();
 
         // ── HORARIOS DEL PERIODO ──────────────────────────────────────────────
         $inicio = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->startOfMonth();
@@ -1131,6 +1180,7 @@ class InstructoresController extends Controller
             ->map(function ($horarios) use ($inicio, $fin, $diasSemana) {
                 $ficha    = $horarios->first()->ficha;
                 $programa = $ficha?->asignacion?->programa;
+                $idFicha  = $horarios->first()->idFicha;
 
                 $filas = $horarios->map(function ($h) use ($inicio, $fin, $diasSemana) {
                     $desde           = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
@@ -1156,6 +1206,7 @@ class InstructoresController extends Controller
                 })->values();
 
                 return [
+                    'idFicha'           => $idFicha,
                     'codigoFicha'       => $ficha?->codigo,
                     'programaFormacion' => $programa?->nombrePrograma,
                     'filas'             => $filas,
@@ -1164,6 +1215,116 @@ class InstructoresController extends Controller
             })->values();
         // ─────────────────────────────────────────────────────────────────────
 
+        // ── MATERIAS / RAPs POR FICHA CON FASE DE PROYECTO ───────────────────────────
+
+        $horariosMaterias = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+            'gradoMateria.materia.padre',
+        ])
+            ->where('idContrato', $idContrato)
+            ->where('estado', 'ASIGNADO')
+            ->where(function ($q) use ($inicio, $fin) {
+                $q->whereBetween('fechaInicial', [$inicio, $fin])
+                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                    ->orWhere(function ($q2) use ($inicio, $fin) {
+                        $q2->where('fechaInicial', '<=', $inicio)
+                            ->where('fechaFinal', '>=', $fin);
+                    });
+            })
+            ->get();
+
+        // IDs únicos de los RAPs que se están impartiendo en el periodo
+        $idMaterias = $horariosMaterias
+            ->pluck('gradoMateria.materia.id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        // Usar la relación belongsToMany de FaseProyecto para traer
+        // las fases que tienen esos RAPs, con proyecto y actividades
+        $fasesPorMateria = \App\Models\FaseProyectoRap::with([
+            'fase.proyectoFormativo',
+            'fase.actividades',
+        ])
+            ->whereIn('idMateria', $idMaterias)
+            ->get()
+            ->keyBy('idMateria'); // clave: idMateria → fácil lookup
+
+        // Agrupar por ficha
+        $fichasConProyecto = $horariosMaterias
+            ->groupBy('idFicha')
+            ->map(function ($horariosGrupo) use ($fasesPorMateria) {
+                $ficha    = $horariosGrupo->first()->ficha;
+                $programa = $ficha?->asignacion?->programa;
+
+                $materias = $horariosGrupo
+                    ->map(function ($h) use ($fasesPorMateria) {
+                        $rap         = $h->gradoMateria?->materia;
+                        $competencia = $rap?->padre;
+                        $idMateria   = $rap?->id;
+
+                        if (!$idMateria) return null;
+
+                        // Buscar la fase asociada a este RAP
+                        $fprRap = $fasesPorMateria->get($idMateria);
+                        $fase   = $fprRap?->fase;
+
+                        return [
+                            'idMateria'            => $idMateria,
+                            'resultadoAprendizaje' => $rap?->nombreMateria,
+                            'competencia'          => $competencia?->nombreMateria,
+                            'faseProyecto'         => $fase?->descripcionFase,
+                            'proyectoFormativo'    => $fase?->proyectoFormativo?->nombreProyecto,
+                            'actividades'          => $fase?->actividades
+                                ?->map(fn($a) => [
+                                    'id'                   => $a->id,
+                                    'descripcionActividad' => $a->descripcionActividad,
+                                ])->values()->toArray() ?? [],
+                        ];
+                    })
+                    ->filter()
+                    ->unique('idMateria')
+                    ->values();
+
+                return [
+                    'idFicha'           => $ficha?->id,
+                    'codigoFicha'       => $ficha?->codigo,
+                    'programaFormacion' => $programa?->nombrePrograma,
+                    'materias'          => $materias,
+                ];
+            })->values();
+
+        // ─────────────────────────────────────────────────────────────────────────────
+
+        // ── APRENDICES CON RETIRO VOLUNTARIO O TRASLADADO POR FICHA ──────────────────
+
+        $idFichas = $horariosMaterias->pluck('idFicha')->filter()->unique()->values();
+
+        $aprendicesPorFicha = \App\Models\Matricula::with(['person'])
+            ->whereIn('idFicha', $idFichas)
+            ->whereIn('estado', ['RETIRO VOLUNTARIO', 'TRASLADADO'])
+            ->get()
+            ->groupBy('idFicha')
+            ->map(function ($matriculas) {
+                return $matriculas->map(function ($matricula) {
+                    $person = $matricula->person;
+                    return [
+                        'idMatricula'    => $matricula->id,
+                        'identificacion' => $person?->identificacion,
+                        'nombreCompleto' => trim(implode(' ', array_filter([
+                            $person?->nombre1,
+                            $person?->nombre2,
+                            $person?->apellido1,
+                            $person?->apellido2,
+                        ]))),
+                        'estado'         => $matricula->estado,
+                        'observacion'    => $matricula->observacion,
+                    ];
+                })->values();
+            });
+
+        // ─────────────────────────────────────────────────────────────────────────────
+
         $pdf = Pdf::loadView('pdf.informeinstructor', compact(
             'rmi',
             'contrato',
@@ -1171,7 +1332,10 @@ class InstructoresController extends Controller
             'comisiones',
             'plazo',
             'nPlanilla',
-            'horariosPorFicha'
+            'horariosPorFicha',
+            'actividadesContrato',
+            'fichasConProyecto',
+            'aprendicesPorFicha'
         ))
             ->setPaper('letter')
             ->setOption('isPhpEnabled', true)

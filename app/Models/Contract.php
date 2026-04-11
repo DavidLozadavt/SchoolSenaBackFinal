@@ -207,4 +207,11 @@ class Contract extends Model
     {
         return $this->hasMany(ComisionInstructor::class, 'idContrato');
     }
+    /**
+     * Relación con Actividades del Contrato
+     */
+    public function actividades()
+    {
+        return $this->hasMany(ActividadContrato::class, 'idContrato', 'id');
+    }
 }

@@ -30,11 +30,12 @@ class Person extends Model
         "sexo",
         "rh",
         "ciudadExpedicion",
+        "firmaDigital",
     ];
     const RUTA_FOTO = "persona";
     const RUTA_FOTO_DEFAULT = "/default/user.svg";
 
-    protected $appends = ['rutaFotoUrl', 'ciudadExpedicionInfo'];
+    protected $appends = ['rutaFotoUrl', 'ciudadExpedicionInfo', 'firmaDigitalUrl'];
 
     public function getRutaFotoUrlAttribute()
     {
@@ -45,6 +46,17 @@ class Person extends Model
             return url($this->attributes['rutaFoto']);
         }
         return url(self::RUTA_FOTO_DEFAULT);
+    }
+
+    public function getFirmaDigitalUrlAttribute()
+    {
+        if (
+            isset($this->attributes['firmaDigital']) &&
+            isset($this->attributes['firmaDigital'][0])
+        ) {
+            return url($this->attributes['firmaDigital']);
+        }
+        return null;
     }
 
     /**

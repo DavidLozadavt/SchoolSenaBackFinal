@@ -208,6 +208,18 @@ class UserController extends Controller
         return $rutaActual;
     }
 
+    private function storeFirmaDigital(Request $request, $firmaActual = null)
+    {
+        if ($request->hasFile('firmaDigitalFile')) {
+
+            return '/storage/' .
+                $request->file('firmaDigitalFile')
+                    ->store('firmas', ['disk' => 'public']);
+        }
+
+        return $firmaActual;
+    }
+
 
 
 
@@ -305,6 +317,7 @@ class UserController extends Controller
 
 
         $persona->rutaFoto = $this->storeLogoPersona($request, $persona->rutaFoto);
+        $persona->firmaDigital = $this->storeFirmaDigital($request, $persona->firmaDigital);
 
 
         $persona->email = $request->input('email');
