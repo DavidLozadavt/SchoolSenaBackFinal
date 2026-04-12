@@ -285,7 +285,8 @@
     <div class="spacer"></div>
 
     <div style="text-align: justify">
-        <strong>Valor y forma de Pago: </strong> {{ $plazo }}
+        <strong>Valor y forma de Pago: </strong>
+        {{ $contrato->descripcionFormaPago ?? 'Falta agregarla en el paso 1 contrato' }}
     </div>
 
     <div class="spacer"></div>
@@ -530,6 +531,59 @@
                     <td style="vertical-align: middle; text-align: justify;">{{ $actividad->evidencias }}</td>
                 </tr>
             @endforeach
+            {{-- ── Fila extra: Actividades del instructor ── --}}
+            @if (isset($actividades) && $actividades->count() > 0)
+                <tr>
+                    <td style="text-align:center;">{{ $actividadesContrato->count() + 1 }}</td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        LAS DEMÁS QUE SE REQUIERAN PARA EL CUMPLIMIENTO DEL OBJETO CONTRACTUAL ESPECIFICO Y QUE EL CENTRO DE FORMACIÓN DEMANDE.
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        REPORTAR DETALLE DE ACCIONES REALIZADAS
+                        <table style="width: 100%; border-collapse: collapse; border: 1px solid #000;">
+                            <thead>
+                                <tr>
+                                    <th
+                                        style="font-size: 9px; padding: 3px; border: 1px solid #000; text-align: justify; width: 55%;">
+                                        ACTIVIDAD REALIZADA
+                                    </th>
+                                    <th
+                                        style="font-size: 9px; padding: 3px; border: 1px solid #000; text-align: center; width: 20%;">
+                                        HORAS EJECUTADAS
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @php $totalHoras = 0; @endphp
+                                @foreach ($actividades as $act)
+                                    @php $totalHoras += $act->numeroHoras; @endphp
+                                    <tr>
+                                        <td
+                                            style="font-size: 9px; padding: 3px; border: 1px solid #000; text-align: justify;">
+                                            {{ $act->descripcion }}
+                                        </td>
+                                        <td
+                                            style="font-size: 9px; padding: 3px; border: 1px solid #000; text-align: center;">
+                                            {{ $act->numeroHoras }}
+                                        </td>
+                                    </tr>
+                                @endforeach
+                                <tr>
+                                    <td colspan="1"
+                                        style="font-size: 9px; padding: 3px; border: 1px solid #000; text-align: right;">
+                                        <strong>TOTAL HORAS EJECUTADAS</strong>
+                                    </td>
+                                    <td
+                                        style="font-size: 9px; padding: 3px; border: 1px solid #000; text-align: center;">
+                                        <strong>{{ $totalHoras }}</strong>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;"></td>
+                </tr>
+            @endif
         </tbody>
     </table>
 
