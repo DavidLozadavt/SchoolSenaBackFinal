@@ -932,7 +932,8 @@ class InstructoresController extends Controller
             'objetoContrato'      => 'nullable|string|max:1000',
             'formaDePago'         => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
             'ciudadExpedicionId'  => 'nullable|integer|exists:ciudad,id',
-            'siif' => 'nullable|numeric'
+            'siif' => 'nullable|numeric',
+            'descripcionFormaPago' => 'nullable|string|max:1000',
         ]);
 
         DB::transaction(function () use ($request, $id) {
@@ -943,7 +944,8 @@ class InstructoresController extends Controller
                 'cargoSupervisor',
                 'objetoContrato',
                 'formaDePago',
-                'siif'
+                'siif',
+                'descripcionFormaPago'
             ]));
 
             if ($request->filled('ciudadExpedicionId')) {
@@ -1082,6 +1084,8 @@ class InstructoresController extends Controller
 
             return [
                 'idContrato'        => $contract->id,
+                'siif'             => $contract->siif,
+                'identificacion'   => $contract->persona->identificacion,
                 'fechaContratacion' => $contract->fechaContratacion,
                 'fechaFinal'        => $contract->fechaFinalContrato,
                 'periodos'          => array_values($periodos),
@@ -1116,18 +1120,40 @@ class InstructoresController extends Controller
 
         $pdf = new \setasign\Fpdi\Fpdi();
 
-        foreach ($request->file('pdfs') as $file) {
-            $path = $file->getPathname();
-            $pageCount = $pdf->setSourceFile($path);
-            for ($i = 1; $i <= $pageCount; $i++) {
-                $tpl = $pdf->importPage($i);
-                $size = $pdf->getTemplateSize($tpl);
-                $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
-                $pdf->useTemplate($tpl);
+        try {
+
+            foreach ($request->file('pdfs') as $file) {
+                $path = $file->getPathname();
+
+                $pageCount = $pdf->setSourceFile($path);
+
+                for ($i = 1; $i <= $pageCount; $i++) {
+                    $tpl = $pdf->importPage($i);
+                    $size = $pdf->getTemplateSize($tpl);
+
+                    $pdf->AddPage(
+                        $size['orientation'],
+                        [$size['width'], $size['height']]
+                    );
+
+                    $pdf->useTemplate($tpl);
+                }
             }
+        } catch (\setasign\Fpdi\PdfParser\CrossReference\CrossReferenceException $e) {
+
+            return response()->json([
+                'message' => 'Uno de los PDFs está protegido. Debe imprimirlo como PDF nuevamente antes de subirlo.',
+                'type' => 'PDF_ENCRYPTED'
+            ], 422);
+        } catch (\Exception $e) {
+
+            return response()->json([
+                'message' => 'Error procesando los PDFs',
+            ], 500);
         }
 
         $output = $pdf->Output('S');
+
         return response($output, 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="documento_unido.pdf"',
@@ -1137,7 +1163,6 @@ class InstructoresController extends Controller
     {
         $idContrato = $request->idContrato;
         $idRmi      = $request->idRmi;
-        $plazo      = $request->plazo;
         $nPlanilla  = $request->nPlanilla;
 
         $rmi      = Rmi::findOrFail($idRmi);
@@ -1148,7 +1173,7 @@ class InstructoresController extends Controller
             'centroFormacion'
         ])->findOrFail($idContrato);
 
-        $actividades = ActividadInstructor::where('idRmi', $idRmi)->get();
+        $actividades = ActividadInstructor::where('idRmi', $idRmi)->where('idContrato', $idContrato)->get();
         $comisiones  = ComisionInstructor::where('idRmi', $idRmi)
             ->where('idContrato', $idContrato)
             ->get();
@@ -1330,7 +1355,6 @@ class InstructoresController extends Controller
             'contrato',
             'actividades',
             'comisiones',
-            'plazo',
             'nPlanilla',
             'horariosPorFicha',
             'actividadesContrato',

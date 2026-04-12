@@ -27,7 +27,8 @@ class Contract extends Model
         'cargoSupervisor',
         'formaDePago',
         'objetoContrato',
-        'siif'
+        'siif',
+        'descripcionFormaPago'
     ];
 
     public function persona()

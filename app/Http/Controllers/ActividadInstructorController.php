@@ -16,17 +16,23 @@ class ActividadInstructorController extends Controller
             $query->where('idRmi', $request->idRmi);
         }
 
+        // Filtro adicional por contrato para aislar al instructor
+        if ($request->has('idContrato')) {
+            $query->where('idContrato', $request->idContrato);
+        }
+
         return $query->get();
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'descripcion' => 'required|string',
+            'descripcion'  => 'required|string',
             'fechaInicial' => 'required|date',
-            'fechaFinal' => 'required|date|after_or_equal:fechaInicial',
-            'numeroHoras' => 'required|integer|min:0',
-            'idRmi' => 'required|exists:rmi,id',
+            'fechaFinal'   => 'required|date|after_or_equal:fechaInicial',
+            'numeroHoras'  => 'required|integer|min:0',
+            'idRmi'        => 'required|exists:rmi,id',
+            'idContrato'   => 'required|exists:contrato,id',
             'documento'    => 'nullable|file|mimes:pdf,doc,docx|max:5120',
         ]);
 
@@ -35,9 +41,7 @@ class ActividadInstructorController extends Controller
                 ->store(ActividadInstructor::RUTA_DOCUMENTO, 'public');
         }
 
-        $actividad = ActividadInstructor::create($validated);
-
-        return response()->json($actividad, 201);
+        return response()->json(ActividadInstructor::create($validated), 201);
     }
 
     public function show($id)
@@ -58,6 +62,7 @@ class ActividadInstructorController extends Controller
             'fechaFinal' => 'required|date|after_or_equal:fechaInicial',
             'numeroHoras' => 'required|integer|min:0',
             'idRmi' => 'required|exists:rmi,id',
+            'idContrato'   => 'required|exists:contrato,id',
             'documento' => 'nullable|file|max:5120',
         ]);
 
