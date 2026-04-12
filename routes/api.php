@@ -274,6 +274,7 @@ Route::post('areas-conocimiento/programas', [ContratacionController::class, 'get
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
 Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
+Route::get('programas_docente/{idContrato}', [ContratacionController::class, 'getProgramasDocente']);
 
 
 //GestionTipoContrato
