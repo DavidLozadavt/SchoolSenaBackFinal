@@ -41,7 +41,7 @@ class InstructoresController extends Controller
 
         $instructors = ActivationCompanyUser::with([
             'user.persona.contracts' => function ($q) use ($inicio, $fin) {
-                $q->latest()->with([
+                $q->with([
                     'horarioMateria' => function ($h) use ($inicio, $fin) {
                         $h->select(
                             'id',
@@ -86,7 +86,9 @@ class InstructoresController extends Controller
 
                 $user     = $acu->user;
                 $persona  = $user->persona;
-                $contrato = $persona->contracts->first();
+                // Buscar el contrato que tiene horarios en este periodo
+                $contrato = $persona->contracts->first(fn($c) => $c->horarioMateria->isNotEmpty())
+                    ?? $persona->contracts->first();
 
                 if (!$contrato) return [];
 
@@ -113,7 +115,8 @@ class InstructoresController extends Controller
                         $duracionSesion   = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
                         $desde            = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
                         $hasta            = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-                        $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
+                        $idDiaInt         = (int)$h->idDia;
+                        $diaSemanaCarbon  = $idDiaInt === 7 ? 0 : $idDiaInt;
                         $cantidadSesiones = 0;
                         $cursor           = $desde->copy();
                         while ($cursor->lte($hasta)) {
@@ -206,7 +209,7 @@ class InstructoresController extends Controller
 
         $instructors = ActivationCompanyUser::with([
             'user.persona.contracts' => function ($q) use ($inicio, $fin) {
-                $q->latest()->with([
+                $q->with([
                     'horarioMateria' => function ($h) use ($inicio, $fin) {
                         $h->select(
                             'id',
@@ -253,7 +256,9 @@ class InstructoresController extends Controller
 
                 $user     = $acu->user;
                 $persona  = $user->persona;
-                $contrato = $persona->contracts->first();
+                // Buscar el contrato que tiene horarios en este periodo
+                $contrato = $persona->contracts->first(fn($c) => $c->horarioMateria->isNotEmpty())
+                    ?? $persona->contracts->first();
 
                 $horarios = $contrato?->horarioMateria->map(function ($h) use ($inicio, $fin) {
                     $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
@@ -261,7 +266,8 @@ class InstructoresController extends Controller
                     $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
                     $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
 
-                    $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
+                    $idDiaInt         = (int)$h->idDia;
+                    $diaSemanaCarbon  = $idDiaInt === 7 ? 0 : $idDiaInt;
                     $cantidadSesiones = 0;
                     $cursor           = $desde->copy();
 
@@ -423,7 +429,8 @@ class InstructoresController extends Controller
                 }
 
                 // idDia: 1=Lunes...6=Sabado, 7=Domingo → Carbon: 0=Domingo, 1=Lunes...6=Sabado
-                $diaSemanaCarbon  = $h->idDia === 7 ? 0 : $h->idDia;
+                $idDiaInt         = (int)$h->idDia;
+                $diaSemanaCarbon  = $idDiaInt === 7 ? 0 : $idDiaInt;
                 $cantidadSesiones = 0;
                 $cursor           = $desde->copy();
 
