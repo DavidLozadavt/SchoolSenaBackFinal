@@ -147,6 +147,9 @@
 
 
 <body>
+    @php 
+        $actividadesContrato = $actividadesContrato ?? collect(); 
+    @endphp
     <div class="header">
         <img src="{{ public_path('media/images/sena/logo-sena.png') }}">
     </div>
@@ -328,6 +331,7 @@
         </thead>
         <tbody>
             {{-- ── Fila 1: índice [0] ── --}}
+            @if ($actividadesContrato->has(0))
             <tr>
                 <td style="text-align:center;">1</td>
                 <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[0]->obligaciones }}
@@ -392,8 +396,10 @@
                 </td>
                 <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[0]->evidencias }}</td>
             </tr>
+            @endif
 
             {{-- ── Fila 2: índice [1] ── --}}
+            @if ($actividadesContrato->has(1))
             <tr>
                 <td style="text-align:center;">2</td>
                 <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[1]->obligaciones }}
@@ -434,8 +440,9 @@
                 </td>
                 <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[1]->evidencias }}</td>
             </tr>
-
+            @endif
             {{-- ── Fila 3: índice [2] ── --}}
+            @if ($actividadesContrato->has(2))
             <tr>
                 <td style="text-align:center;">3</td>
                 <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[2]->obligaciones }}
@@ -482,8 +489,9 @@
                 <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[2]->evidencias }}
                 </td>
             </tr>
-
+            @endif
             {{-- ── Fila 4: índice [3] ── --}}
+            @if ($actividadesContrato->has(3))
             <tr>
                 <td style="text-align:center;">4</td>
                 <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[3]->obligaciones }}
@@ -518,10 +526,10 @@
                     </table>
 
                 </td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[2]->evidencias }}
+                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[3]->evidencias }}
                 </td>
             </tr>
-
+            @endif
             {{-- ── Filas dinámicas desde [3] en adelante ── --}}
             @foreach ($actividadesContrato->slice(4) as $actividad)
                 <tr>
