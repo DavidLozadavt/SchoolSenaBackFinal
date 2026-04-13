@@ -1943,6 +1943,13 @@ class FichaController extends Controller
                 $sesionesCompletadas = 0;
                 $todasLasSesiones   = [];
 
+                Log::info('clasesEstudiante: inicio grupo materia-profesor', [
+                    'clave_grupo' => $claveGrupo,
+                    'idMateria' => $primerHorario->idMateria ?? null,
+                    'materia' => $primerHorario->materia_nombre ?? null,
+                    'horarios_unicos' => $horariosUnicos->pluck('idHorarioMateria')->toArray(),
+                ]);
+
                 foreach ($horariosUnicos as $horario) {
                     // Validar fechas del horario actual
                     $hFechaIniValida = !empty($horario->fechaInicial) && strtotime($horario->fechaInicial) !== false;
