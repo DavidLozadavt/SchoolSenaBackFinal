@@ -27,13 +27,14 @@ class InstructoresController extends Controller
     public function getInstructors(Request $request)
     {
         $validated = $request->validate([
-            'idCentroFormacion' => 'required|integer|exists:centroFormacion,id'
+            'idCentroFormacion' => 'required|integer|exists:centroFormacion,id',
+            'periodo'           => 'nullable|date_format:Y-m',
         ]);
 
-        // Periodo calculado automáticamente: mes actual
-        $inicio     = \Carbon\Carbon::now()->startOfMonth();
-        $fin        = \Carbon\Carbon::now()->endOfMonth();
-        $periodoReq = \Carbon\Carbon::now()->format('Y-m');
+        // Determinar periodo
+        $periodoReq = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
+        $inicio     = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->startOfMonth();
+        $fin        = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->endOfMonth();
 
         // Cargar el RMI del periodo actual una sola vez
         $rmi = Rmi::where('periodo', $periodoReq)->first();
@@ -136,9 +137,9 @@ class InstructoresController extends Controller
 
                 // Horas ejecutadas en el mes actual (sesiones registradas)
                 $horasEjecutadas = round(
-                    SesionMateria::where('sesionMateria.idContrato', $contrato->id)
+                    SesionMateria::join('horarioMateria', 'sesionMateria.idHorarioMateria', '=', 'horarioMateria.id')
+                        ->where('horarioMateria.idContrato', $contrato->id)
                         ->whereBetween('fechaSesion', [$inicio, $fin])
-                        ->join('horarioMateria', 'sesionMateria.idHorarioMateria', '=', 'horarioMateria.id')
                         ->selectRaw('SUM((TIME_TO_SEC(horarioMateria.horaFinal) - TIME_TO_SEC(horarioMateria.horaInicial)) / 3600) as totalHoras')
                         ->value('totalHoras') ?? 0
                 );
@@ -286,6 +287,18 @@ class InstructoresController extends Controller
                     ];
                 });
 
+                // Horas ejecutadas en el periodo (sesiones registradas)
+                $horasEjecutadas = 0;
+                if ($contrato) {
+                    $horasEjecutadas = round(
+                        SesionMateria::join('horarioMateria', 'sesionMateria.idHorarioMateria', '=', 'horarioMateria.id')
+                            ->where('horarioMateria.idContrato', $contrato->id)
+                            ->whereBetween('fechaSesion', [$inicio, $fin])
+                            ->selectRaw('SUM((TIME_TO_SEC(horarioMateria.horaFinal) - TIME_TO_SEC(horarioMateria.horaInicial)) / 3600) as totalHoras')
+                            ->value('totalHoras') ?? 0
+                    );
+                }
+
                 // Obtener estado del RMI para el periodo
                 $estadoRmi = 'PENDIENTE';
                 $motivoRechazo = null;
@@ -325,6 +338,8 @@ class InstructoresController extends Controller
                     'roles'        => $acu->getRoleNames(),
                     'horarios'     => $horarios,
                     'estado'       => $estadoRmi,
+                    'totalHoras'        => $contrato?->horasmes ?? 0,
+                    'totalHorasFormato' => $horasEjecutadas,
                     'motivoRechazo' => $motivoRechazo,
                     'persona'      => [
                         'identificacion' => $persona->identificacion,
