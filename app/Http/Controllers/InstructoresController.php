@@ -163,7 +163,7 @@ class InstructoresController extends Controller
                 // Agrupar por estado → una entrada por cada estado distinto
                 return $detallesRmi
                     ->groupBy('estado')
-                    ->map(function ($grupo, $estado) use ($acu, $user, $contrato, $personaData, $horariosBase, $horasEjecutadas) {
+                    ->map(function ($grupo, $estado) use ($acu, $user, $contrato, $personaData, $horariosBase, $horasEjecutadas, $rmi) {
                         $idsGrupo = $grupo->pluck('idHorarioMateria')->toArray();
 
                         $motivoRechazo = $estado === 'RECHAZADO'
@@ -174,6 +174,7 @@ class InstructoresController extends Controller
                             'idActivation'      => $acu->id,
                             'emailUsuario'      => $user->email,
                             'idContrato'        => $contrato->id,
+                            'idRmi'             => $rmi?->id,
                             'roles'             => $acu->getRoleNames(),
                             'estado'            => $estado,
                             'totalHoras'        => $contrato->horasmes ?? 0,
@@ -288,9 +289,11 @@ class InstructoresController extends Controller
                 // Obtener estado del RMI para el periodo
                 $estadoRmi = 'PENDIENTE';
                 $motivoRechazo = null;
+                $idRmi = null;
 
                 if ($contrato) {
                     $rmi = Rmi::where('periodo', $periodoReq)->first();
+                    $idRmi = $rmi?->id;
                     if ($rmi) {
                         $detallesRmi = DetalleRmi::where('idRmi', $rmi->id)
                             ->whereHas('horarioMateria', function ($q) use ($contrato) {
@@ -318,6 +321,7 @@ class InstructoresController extends Controller
                     'idActivation' => $acu->id,
                     'emailUsuario' => $user->email,
                     'idContrato'   => $contrato?->id,
+                    'idRmi'         => $idRmi,
                     'roles'        => $acu->getRoleNames(),
                     'horarios'     => $horarios,
                     'estado'       => $estadoRmi,

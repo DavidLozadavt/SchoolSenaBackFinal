@@ -28,8 +28,8 @@ class ActividadInstructorController extends Controller
     {
         $validated = $request->validate([
             'descripcion'  => 'required|string',
-            'fechaInicial' => 'required|date',
-            'fechaFinal'   => 'required|date|after_or_equal:fechaInicial',
+            'fechaInicial' => 'nullable|date',
+            'fechaFinal'   => 'nullable|date|after_or_equal:fechaInicial',
             'numeroHoras'  => 'required|integer|min:0',
             'idRmi'        => 'required|exists:rmi,id',
             'idContrato'   => 'required|exists:contrato,id',
@@ -58,8 +58,8 @@ class ActividadInstructorController extends Controller
 
         $validated = $request->validate([
             'descripcion' => 'required|string',
-            'fechaInicial' => 'required|date',
-            'fechaFinal' => 'required|date|after_or_equal:fechaInicial',
+            'fechaInicial' => 'nullable|date',
+            'fechaFinal' => 'nullable|date|after_or_equal:fechaInicial',
             'numeroHoras' => 'required|integer|min:0',
             'idRmi' => 'required|exists:rmi,id',
             'idContrato'   => 'required|exists:contrato,id',
