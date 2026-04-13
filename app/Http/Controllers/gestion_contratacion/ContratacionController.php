@@ -3097,4 +3097,35 @@ public function getContratosFlujoVT(Request $request)
 
         return response()->json($instructores);
     }
+
+public function getProgramasDocente($idContrato)
+{
+    try {
+        $contrato = Contract::with([
+            'programas.nivel',
+            'programas.tipoFormacion',
+            'programas.estado'
+        ])->findOrFail($idContrato);
+
+        $programas = $contrato->programas;
+
+        // 🔥 contar fichas
+        $programas->each(function ($programa) {
+            $programa->fichas_activas_count = \App\Models\Ficha::whereHas('asignacion', function ($query) use ($programa) {
+                $query->where('idPrograma', $programa->id);
+            })->count();
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $programas
+        ]);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Error al obtener programas del docente',
+            'message' => $e->getMessage()
+        ], 500);
+    }
+}
 }
