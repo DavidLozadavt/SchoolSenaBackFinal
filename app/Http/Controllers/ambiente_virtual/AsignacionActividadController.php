@@ -34,27 +34,31 @@ class AsignacionActividadController extends Controller
 
             $aprendices = $this->aprendicesPorFicha($idFicha);
 
-            $grupos = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)
-                ->where('estado', 'ACTIVO')
-                ->with('tipoGrupo')
-                ->orderBy('id', 'desc')
-                ->get();
+            // Producción puede no tener migrada la tabla `grupos`; sin esto el 500 impide devolver aprendices al modal.
+            $grupos = collect();
+            if (Schema::hasTable('grupos')) {
+                $grupos = GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)
+                    ->where('estado', 'ACTIVO')
+                    ->with('tipoGrupo')
+                    ->orderBy('id', 'desc')
+                    ->get();
 
-            $integrantesPorGrupo = [];
-            $tblPart = $this->tablaParticipantes();
-            if ($tblPart) {
-                $counts = DB::table($tblPart)
-                    ->whereIn('idGrupo', $grupos->pluck('id'))
-                    ->selectRaw('idGrupo, COUNT(*) as total')
-                    ->groupBy('idGrupo')
-                    ->pluck('total', 'idGrupo');
-                foreach ($grupos as $g) {
-                    $integrantesPorGrupo[$g->id] = (int) ($counts[$g->id] ?? 0);
+                $integrantesPorGrupo = [];
+                $tblPart = $this->tablaParticipantes();
+                if ($tblPart) {
+                    $counts = DB::table($tblPart)
+                        ->whereIn('idGrupo', $grupos->pluck('id'))
+                        ->selectRaw('idGrupo, COUNT(*) as total')
+                        ->groupBy('idGrupo')
+                        ->pluck('total', 'idGrupo');
+                    foreach ($grupos as $g) {
+                        $integrantesPorGrupo[$g->id] = (int) ($counts[$g->id] ?? 0);
+                    }
                 }
+                $grupos->each(function ($g) use ($integrantesPorGrupo) {
+                    $g->integrantesActuales = $integrantesPorGrupo[$g->id] ?? 0;
+                });
             }
-            $grupos->each(function ($g) use ($integrantesPorGrupo) {
-                $g->integrantesActuales = $integrantesPorGrupo[$g->id] ?? 0;
-            });
 
             return response()->json([
                 'actividades' => $actividades,
@@ -256,9 +260,11 @@ class AsignacionActividadController extends Controller
             $destinatariosGrupos = collect();
             $idsGrupo = collect();
             if (!empty($validated['grupos'])) {
-                $idsGrupo = ($validated['grupos'] === 'todos' || (is_array($validated['grupos']) && in_array('todos', $validated['grupos'])))
-                    ? GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)->where('estado', 'ACTIVO')->pluck('id')
-                    : collect(is_array($validated['grupos']) ? $validated['grupos'] : [])->flatten()->map(fn ($v) => (int) $v)->filter()->values();
+                if (Schema::hasTable('grupos')) {
+                    $idsGrupo = ($validated['grupos'] === 'todos' || (is_array($validated['grupos']) && in_array('todos', $validated['grupos'])))
+                        ? GrupoFicha::where('idAsignacionPeriodoProgramaJornada', $idFicha)->where('estado', 'ACTIVO')->pluck('id')
+                        : collect(is_array($validated['grupos']) ? $validated['grupos'] : [])->flatten()->map(fn ($v) => (int) $v)->filter()->values();
+                }
 
                 $tblPart = $this->tablaParticipantes();
                 $tieneIdMatricula = $tblPart && Schema::hasColumn($tblPart, 'idMatricula');
