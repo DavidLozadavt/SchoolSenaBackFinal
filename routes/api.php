@@ -221,8 +221,9 @@ Route::get('lista_usuarios_paginado', [Gestion_usuarioUserController::class, 'ge
 Route::resource('usuarios', Gestion_usuarioUserController::class);
 Route::post('update_user/{id}', [Gestion_usuarioUserController::class, 'updateUser']);
 
-//actuliza los datos de la persona autenticada
-Route::post('update_person', [Gestion_usuarioUserController::class, 'updatePersona']);
+// Actualiza los datos de la persona autenticada (perfil). Alias útil si el cliente usa otra convención de URL.
+Route::post('update_person', [Gestion_usuarioUserController::class, 'updatePersona'])->middleware('auth:api');
+Route::post('usuario/update-person', [Gestion_usuarioUserController::class, 'updatePersona'])->middleware('auth:api');
 Route::post('update_status_user/{id}', [Gestion_usuarioUserController::class, 'updateStatusUser']);
 
 
