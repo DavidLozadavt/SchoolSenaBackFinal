@@ -14,6 +14,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Session as FacadesSession;
 
 class UserController extends Controller
@@ -220,6 +222,22 @@ class UserController extends Controller
         return $firmaActual;
     }
 
+    /**
+     * El front envía FormData: los campos numéricos opcionales llegan como '' y en MySQL estricto eso provoca error 500.
+     */
+    private function nullableIntFromRequest($value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        return null;
+    }
+
+
 
 
 
@@ -313,37 +331,63 @@ class UserController extends Controller
 
     public function updatePersona(Request $request)
     {
-        $persona = Person::findOrFail($request->user()->idpersona);
+        $user = auth('api')->user() ?? $request->user();
+        if (!$user || $user->idpersona === null || $user->idpersona === '') {
+            return response()->json([
+                'message' => 'No autenticado o usuario sin persona asociada'
+            ], 401);
+        }
 
+        $persona = Person::find($user->idpersona);
+        if (!$persona) {
+            return response()->json([
+                'message' => 'Persona no encontrada'
+            ], 404);
+        }
 
-        $persona->rutaFoto = $this->storeLogoPersona($request, $persona->rutaFoto);
-        $persona->firmaDigital = $this->storeFirmaDigital($request, $persona->firmaDigital);
-
-
-        $persona->email = $request->input('email');
-        $persona->telefonoFijo = $request->input('telefonoFijo');
-        $persona->celular = $request->input('celular');
-        $persona->idCiudadUbicacion = $request->input('idCiudadUbicacion');
-        $persona->direccion = $request->input('direccion');
-        $persona->rh = $request->input('rh');
-        $persona->sexo = $request->input('sexo');
-        $persona->idTipoIdentificacion = $request->input('idtipoIdentificacion');
-
-        $persona->save();
-
-        // Perfil profesional vive en `contrato`; si el usuario tiene contrato activo, lo actualiza desde su perfil.
-        if ($request->has('perfilProfesional')) {
-            $contratoActivo = Contract::where('idpersona', $persona->id)
-                ->where('idEstado', Status::ID_ACTIVE)
-                ->orderByDesc('fechaContratacion')
-                ->first();
-
-            if ($contratoActivo) {
-                $val = $request->input('perfilProfesional');
-                $trimmed = is_string($val) ? trim($val) : '';
-                $contratoActivo->perfilProfesional = $trimmed !== '' ? $trimmed : 'N/A';
-                $contratoActivo->save();
+        try {
+            $persona->rutaFoto = $this->storeLogoPersona($request, $persona->rutaFoto);
+            // Firma digital es opcional; la migración puede no estar aplicada en todas las BDs.
+            if (Schema::hasColumn($persona->getTable(), 'firmaDigital')) {
+                $persona->firmaDigital = $this->storeFirmaDigital($request, $persona->firmaDigital);
             }
+
+            $persona->email = $request->input('email');
+            $persona->telefonoFijo = $request->input('telefonoFijo');
+            $persona->celular = $request->input('celular');
+            $persona->idCiudadUbicacion = $this->nullableIntFromRequest($request->input('idCiudadUbicacion'));
+            $persona->direccion = $request->input('direccion');
+            $persona->rh = $request->input('rh');
+            $persona->sexo = $request->input('sexo');
+            $persona->idTipoIdentificacion = $this->nullableIntFromRequest($request->input('idtipoIdentificacion'));
+
+            $persona->save();
+
+            // Perfil profesional vive en `contrato`; si el usuario tiene contrato activo, lo actualiza desde su perfil.
+            if ($request->has('perfilProfesional')) {
+                $contratoActivo = Contract::where('idpersona', $persona->id)
+                    ->where('idEstado', Status::ID_ACTIVE)
+                    ->orderByDesc('fechaContratacion')
+                    ->first();
+
+                if ($contratoActivo) {
+                    $val = $request->input('perfilProfesional');
+                    $trimmed = is_string($val) ? trim($val) : '';
+                    $contratoActivo->perfilProfesional = $trimmed !== '' ? $trimmed : 'N/A';
+                    $contratoActivo->save();
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::error('updatePersona', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'message' => 'Error al actualizar los datos de la persona.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
         }
 
         return response()->json($persona);
