@@ -132,9 +132,9 @@ class InstructoresController extends Controller
                             'idDia'            => $h->idDia,
                             'fechaInicial'     => $h->fechaInicial,
                             'fechaFinal'       => $h->fechaFinal,
-                            'duracionSesion'   => $duracionSesion,
-                            'cantidadSesiones' => $cantidadSesiones,
-                            'duracionHoras'    => round($duracionSesion * $cantidadSesiones, 2),
+                            'duracionSesion'   => (float)$duracionSesion,
+                            'cantidadSesiones' => (int)$cantidadSesiones,
+                            'duracionHoras'    => (float)round($duracionSesion * $cantidadSesiones, 2),
                         ];
                     })->keyBy('id');
 
@@ -287,9 +287,9 @@ class InstructoresController extends Controller
                         'idDia'            => $h->idDia,
                         'fechaInicial'     => $h->fechaInicial,
                         'fechaFinal'       => $h->fechaFinal,
-                        'duracionSesion'   => $duracionSesion,
-                        'cantidadSesiones' => $cantidadSesiones,
-                        'duracionHoras'    => round($duracionSesion * $cantidadSesiones, 2),
+                        'duracionSesion'   => (float)$duracionSesion,
+                        'cantidadSesiones' => (int)$cantidadSesiones,
+                        'duracionHoras'    => (float)round($duracionSesion * $cantidadSesiones, 2),
                     ];
                 });
 
@@ -602,7 +602,7 @@ class InstructoresController extends Controller
             return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             DB::rollBack();
-            \Log::error('Error al aceptar RMI: ' . $e->getMessage(), [
+            Log::error('Error al aceptar RMI: ' . $e->getMessage(), [
                 'idActivation' => $idActivation,
                 'periodo' => $request->input('periodo'),
                 'trace' => $e->getTraceAsString()
@@ -711,7 +711,7 @@ class InstructoresController extends Controller
             return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             DB::rollBack();
-            \Log::error('Error al rechazar RMI: ' . $e->getMessage(), [
+            Log::error('Error al rechazar RMI: ' . $e->getMessage(), [
                 'idActivation' => $idActivation,
                 'periodo' => $request->input('periodo'),
                 'trace' => $e->getTraceAsString()
@@ -810,7 +810,7 @@ class InstructoresController extends Controller
             return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             DB::rollBack();
-            \Log::error('Error al revertir RMI: ' . $e->getMessage(), [
+            Log::error('Error al revertir RMI: ' . $e->getMessage(), [
                 'idActivation' => $idActivation,
                 'periodo'      => $request->input('periodo'),
                 'trace'        => $e->getTraceAsString(),
