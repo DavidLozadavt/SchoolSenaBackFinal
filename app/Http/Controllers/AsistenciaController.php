@@ -8,8 +8,32 @@ use App\Models\JustificacionInasistencia;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
+use Carbon\Carbon;
+
 class AsistenciaController extends Controller
 {
+    /**
+     * Solo filas de asistencia cuya sesión ya ocurrió (fecha de sesión <= hoy, hora local).
+     * Evita contar como inasistencia registros de sesiones futuras precargadas en BD.
+     *
+     * @param  \Illuminate\Support\Collection|\Illuminate\Database\Eloquent\Collection  $asistencias
+     */
+    private function asistenciasSoloSesionYaOcurrida($asistencias)
+    {
+        $hoy = Carbon::today()->startOfDay();
+
+        return collect($asistencias)->filter(function ($a) use ($hoy) {
+            $sm = $a->sesionMateria ?? null;
+            if (!$sm || empty($sm->fechaSesion)) {
+                return false;
+            }
+            try {
+                return Carbon::parse($sm->fechaSesion)->startOfDay()->lte($hoy);
+            } catch (\Throwable $e) {
+                return false;
+            }
+        });
+    }
     
     public function store(Request $request): JsonResponse
 {
@@ -55,7 +79,7 @@ public function getEstadisticasAsistencia(Request $request): JsonResponse
         $matriculas = MatriculaAcademica::with([
             'matricula.person',
             'materia',
-            'asistencias'
+            'asistencias.sesionMateria',
         ])
         ->where('idFicha', $idFicha)
         ->get();
@@ -78,7 +102,7 @@ public function getEstadisticasAsistencia(Request $request): JsonResponse
 
         foreach ($matriculas as $matricula) {
 
-            $asistencias = $matricula->asistencias;
+            $asistencias = $this->asistenciasSoloSesionYaOcurrida($matricula->asistencias);
 
             $asistidas = $asistencias->where('asistio', true)->count();
             $faltas = $asistencias->where('asistio', false)->count();
@@ -133,7 +157,7 @@ public function getEstadisticasAsistencia(Request $request): JsonResponse
         $matriculas = MatriculaAcademica::with([
             'matricula.person',
             'materia',
-            'asistencias'
+            'asistencias.sesionMateria',
         ])
         ->where('idMatricula', $idMatricula)
         ->get();
@@ -156,15 +180,17 @@ public function getEstadisticasAsistencia(Request $request): JsonResponse
 
         foreach ($matriculas as $matricula) {
 
-            $asistidas = $matricula->asistencias
+            $asistenciasFiltradas = $this->asistenciasSoloSesionYaOcurrida($matricula->asistencias);
+
+            $asistidas = $asistenciasFiltradas
                             ->where('asistio', true)
                             ->count();
 
-            $faltas = $matricula->asistencias
+            $faltas = $asistenciasFiltradas
                             ->where('asistio', false)
                             ->count();
 
-            $justificadas = $matricula->asistencias
+            $justificadas = $asistenciasFiltradas
                             ->where('asistio', false)
                             ->filter(function($asistencia) {
                                 return \App\Models\JustificacionInasistencia::where('idAsistencia', $asistencia->id)->where('estado', 'APROBADO')->exists();
@@ -571,8 +597,8 @@ public function getAllAssistance(Request $request): JsonResponse
                   ];
               }
 
-              // Procesar asistencias de esta matrícula
-              foreach ($matricula->asistencias as $asistencia) {
+              // Procesar solo asistencias con sesión ya ocurrida (no sesiones futuras precargadas)
+              foreach ($this->asistenciasSoloSesionYaOcurrida($matricula->asistencias) as $asistencia) {
                   $sesionMateria = $asistencia->sesionMateria;
                   if (!$sesionMateria) {
                       continue;
@@ -785,10 +811,10 @@ public function getAllAssistance(Request $request): JsonResponse
               ], 200);
           }
 
-          // ── 1. Asistencias por área ─────────────────────────────────────────
+          // ── 1. Asistencias por área (solo filas cuya sesión ya ocurrió; coincide con mis-asistencias-generales)
           $matriculas = \App\Models\MatriculaAcademica::with([
               'materia.areaConocimiento',
-              'asistencias.sesionMateria'
+              'asistencias.sesionMateria',
           ])
           ->whereHas('matricula', function($query) use ($idPersona) {
               $query->where('idPersona', $idPersona);
@@ -820,7 +846,7 @@ public function getAllAssistance(Request $request): JsonResponse
                   ];
               }
 
-              foreach ($matricula->asistencias as $asistencia) {
+              foreach ($this->asistenciasSoloSesionYaOcurrida($matricula->asistencias) as $asistencia) {
                   $sesionMateria = $asistencia->sesionMateria;
                   if (!$sesionMateria) {
                       continue;
@@ -835,13 +861,14 @@ public function getAllAssistance(Request $request): JsonResponse
                   }
                   $areasMap[$idArea]['total']++;
               }
-
-              foreach ($areasMap as &$area) {
-                  $area['porcentaje'] = $area['total'] > 0
-                      ? round(($area['asistencias'] / $area['total']) * 100)
-                      : 0;
-              }
           }
+
+          foreach ($areasMap as &$area) {
+              $area['porcentaje'] = $area['total'] > 0
+                  ? round(($area['asistencias'] / $area['total']) * 100)
+                  : 0;
+          }
+          unset($area);
 
           $totalRegistros   = $totalAsistencias + $totalInasistencias;
           $asistenciaGeneral = $totalRegistros > 0
@@ -859,6 +886,8 @@ public function getAllAssistance(Request $request): JsonResponse
           ];
 
           // ── 2. Actividades del aprendiz ─────────────────────────────────────
+          $tableMa = \Illuminate\Support\Facades\Schema::hasTable('matriculaAcademica')
+              ? 'matriculaAcademica' : 'matriculaacademica';
           $actividades = [];
 
           if (\Illuminate\Support\Facades\Schema::hasTable('calificacionActividad')) {
@@ -933,10 +962,10 @@ public function getAllAssistance(Request $request): JsonResponse
       try {
           \Illuminate\Support\Facades\Log::info("Dashboard Estudiante API llamada por parametro. Persona Solicitada ID: " . $idPersona);
 
-          // ── 1. Asistencias por área ─────────────────────────────────────────
+          // ── 1. Asistencias por área (solo sesiones ya ocurridas)
           $matriculas = \App\Models\MatriculaAcademica::with([
               'materia.areaConocimiento',
-              'asistencias.sesionMateria'
+              'asistencias.sesionMateria',
           ])
           ->whereHas('matricula', function($query) use ($idPersona) {
               $query->where('idPersona', $idPersona);
@@ -968,7 +997,7 @@ public function getAllAssistance(Request $request): JsonResponse
                   ];
               }
 
-              foreach ($matricula->asistencias as $asistencia) {
+              foreach ($this->asistenciasSoloSesionYaOcurrida($matricula->asistencias) as $asistencia) {
                   $sesionMateria = $asistencia->sesionMateria;
                   if (!$sesionMateria) {
                       continue;
@@ -978,18 +1007,19 @@ public function getAllAssistance(Request $request): JsonResponse
                       $areasMap[$idArea]['asistencias']++;
                       $totalAsistencias++;
                   } else {
-                      $areasMap[$idArea]['justificacioninasistencia']++;
+                      $areasMap[$idArea]['inasistencias']++;
                       $totalInasistencias++;
                   }
                   $areasMap[$idArea]['total']++;
               }
-
-              foreach ($areasMap as &$area) {
-                  $area['porcentaje'] = $area['total'] > 0
-                      ? round(($area['asistencias'] / $area['total']) * 100)
-                      : 0;
-              }
           }
+
+          foreach ($areasMap as &$area) {
+              $area['porcentaje'] = $area['total'] > 0
+                  ? round(($area['asistencias'] / $area['total']) * 100)
+                  : 0;
+          }
+          unset($area);
 
           $totalRegistros   = $totalAsistencias + $totalInasistencias;
           $asistenciaGeneral = $totalRegistros > 0
