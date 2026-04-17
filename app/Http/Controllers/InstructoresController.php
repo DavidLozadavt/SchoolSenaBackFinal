@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 class InstructoresController extends Controller
@@ -1102,6 +1103,10 @@ class InstructoresController extends Controller
                         'estadoHorario'    => $horario->estado,
                         'archivoPago'      => $detalle->archivoPago,
                         'archivoPagoUrl'   => $detalle->archivoPagoUrl,
+                        'urlInforme'       => $detalle->urlInforme,
+                        'urlInformeUrl'    => $detalle->urlInformeUrl,
+                        'estadoInforme'    => $detalle->estadoInforme,
+                        'numeroPlanilla'   => $detalle->numeroPlanilla,
                     ];
                 }
             }
@@ -1126,15 +1131,62 @@ class InstructoresController extends Controller
         $request->validate([
             'archivoPago' => 'required|file|mimes:pdf,jpg,jpeg,png',
             'idRmi' => 'required|integer',
+            'idsHorarioMateria' => 'required|array',
         ]);
 
+        $idRmi = $request->idRmi;
+        $idsHorario = $request->idsHorarioMateria;
+
+        // 1. Obtener los archivos actuales de estos registros para su posible eliminación
+        $viejosArchivos = DetalleRmi::where('idRmi', $idRmi)
+            ->whereIn('idHorarioMateria', $idsHorario)
+            ->pluck('archivoPago')
+            ->filter()
+            ->unique();
+
+        // 2. Guardar el nuevo archivo
         $ruta = '/storage/' . $request->file('archivoPago')->store('pagos', 'public');
 
-        // Actualizar todos los detalleRmi del periodo (mismo idRmi)
-        DetalleRmi::where('idRmi', $request->idRmi)
+        // 3. Borrar los archivos antiguos si ya no se usan en otro lugar
+        foreach ($viejosArchivos as $viejo) {
+            // Verificar si hay algún DETALLERMI que aún use este archivo y NO esté en el grupo que estamos actualizando
+            $estaEnUso = DetalleRmi::where('archivoPago', $viejo)
+                ->where(function ($query) use ($idRmi, $idsHorario) {
+                    $query->where('idRmi', '!=', $idRmi)
+                        ->orWhereNotIn('idHorarioMateria', $idsHorario);
+                })
+                ->exists();
+
+            if (!$estaEnUso) {
+                // El prefijo /storage/ debe ser removido para usar Storage::disk('public')
+                $pathRelativo = str_replace('/storage/', '', $viejo);
+                if (Storage::disk('public')->exists($pathRelativo)) {
+                    Storage::disk('public')->delete($pathRelativo);
+                }
+            }
+        }
+
+        // 4. Actualizar los detalleRmi con la nueva ruta
+        DetalleRmi::where('idRmi', $idRmi)
+            ->whereIn('idHorarioMateria', $idsHorario)
             ->update(['archivoPago' => $ruta]);
 
         return response()->json(['archivoPago' => $ruta]);
+    }
+
+    public function updateNumeroPlanilla(Request $request)
+    {
+        $request->validate([
+            'numeroPlanilla' => 'required|string|max:50',
+            'idRmi' => 'required|integer',
+            'idsHorarioMateria' => 'required|array',
+        ]);
+
+        DetalleRmi::where('idRmi', $request->idRmi)
+            ->whereIn('idHorarioMateria', $request->idsHorarioMateria)
+            ->update(['numeroPlanilla' => $request->numeroPlanilla]);
+
+        return response()->json(['message' => 'Número de planilla actualizado correctamente']);
     }
     // Ruta: POST merge_pdfs
     public function mergePdfs(Request $request)
