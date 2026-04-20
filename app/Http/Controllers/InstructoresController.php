@@ -1073,11 +1073,16 @@ class InstructoresController extends Controller
                         });
 
                         $estadoConsolidado = 'PENDIENTE';
+                        $estadoInformeConsolidado = 'PENDIENTE';
                         if ($detallesDelPeriodo->isNotEmpty()) {
                             if ($detallesDelPeriodo->contains('estado', 'RECHAZADO')) {
                                 $estadoConsolidado = 'RECHAZADO';
                             } elseif ($detallesDelPeriodo->every(fn($d) => $d->estado === 'ACEPTADO')) {
                                 $estadoConsolidado = 'ACEPTADO';
+                            }
+
+                            if ($detallesDelPeriodo->every(fn($d) => $d->estadoInforme === 'ACEPTADO')) {
+                                $estadoInformeConsolidado = 'ACEPTADO';
                             }
                         }
 
@@ -1085,6 +1090,7 @@ class InstructoresController extends Controller
                             'periodo'        => $period,
                             'idRmi'          => $rmi->id,
                             'estadoRmi'      => $estadoConsolidado,
+                            'estadoInforme'  => $estadoInformeConsolidado,
                             'observacion'    => $rmi->observacion,
                             'horasAsignadas' => round($horasAsignadas, 2),
                             'detalles'       => [],
@@ -1172,6 +1178,54 @@ class InstructoresController extends Controller
             ->update(['archivoPago' => $ruta]);
 
         return response()->json(['archivoPago' => $ruta]);
+    }
+
+    public function uploadInformeInstructor(Request $request)
+    {
+        $request->validate([
+            'urlInforme' => 'required|file|mimes:pdf,jpg,jpeg,png',
+            'idRmi' => 'required|integer',
+            'idsHorarioMateria' => 'required|array',
+        ]);
+
+        $idRmi = $request->idRmi;
+        $idsHorario = $request->idsHorarioMateria;
+
+        // 1. Obtener los informes actuales para su eliminación
+        $viejosInformes = DetalleRmi::where('idRmi', $idRmi)
+            ->whereIn('idHorarioMateria', $idsHorario)
+            ->pluck('urlInforme')
+            ->filter()
+            ->unique();
+
+        // 2. Guardar el nuevo informe
+        $ruta = '/storage/' . $request->file('urlInforme')->store('informes', 'public');
+
+        // 3. Borrar los informes antiguos
+        foreach ($viejosInformes as $viejo) {
+            $estaEnUso = DetalleRmi::where('urlInforme', $viejo)
+                ->where(function ($query) use ($idRmi, $idsHorario) {
+                    $query->where('idRmi', '!=', $idRmi)
+                        ->orWhereNotIn('idHorarioMateria', $idsHorario);
+                })
+                ->exists();
+
+            if (!$estaEnUso) {
+                $pathRelativo = str_replace('/storage/', '', $viejo);
+                if (Storage::disk('public')->exists($pathRelativo)) {
+                    Storage::disk('public')->delete($pathRelativo);
+                }
+            }
+        }
+
+        // 4. Actualizar los detalleRmi
+        DetalleRmi::where('idRmi', $idRmi)
+            ->whereIn('idHorarioMateria', $idsHorario)
+            ->update([
+                'urlInforme' => $ruta,
+            ]);
+
+        return response()->json(['urlInforme' => $ruta]);
     }
 
     public function updateNumeroPlanilla(Request $request)
