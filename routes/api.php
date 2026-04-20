@@ -1435,6 +1435,9 @@ Route::middleware('auth:api')->group(function () {
     Route::post('detalle_rmi/archivo_pago_periodo', [InstructoresController::class, 'uploadArchivoPagoPeriodo']);
     Route::post('detalle_rmi/archivo_informe_instructor', [InstructoresController::class, 'uploadInformeInstructor']);
     Route::post('detalle_rmi/numero_planilla', [InstructoresController::class, 'updateNumeroPlanilla']);
+    Route::post('detalle_rmi/aceptar_informe', [InstructoresController::class, 'aceptarInforme']);
+    Route::post('detalle_rmi/rechazar_informe', [InstructoresController::class, 'rechazarInforme']);
+    Route::get('get_all_rmi_details_for_admin', [InstructoresController::class, 'getAllRmiDetailsForAdmin']);
     Route::post('merge_pdfs', [InstructoresController::class, 'mergePdfs']);
 });
 
