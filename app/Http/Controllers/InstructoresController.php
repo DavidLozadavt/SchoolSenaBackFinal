@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 class InstructoresController extends Controller
@@ -28,13 +29,13 @@ class InstructoresController extends Controller
     {
         $validated = $request->validate([
             'idCentroFormacion' => 'required|integer|exists:centroFormacion,id',
-            'periodo'           => 'nullable|date_format:Y-m',
+            'periodo' => 'nullable|date_format:Y-m',
         ]);
 
         // Determinar periodo
         $periodoReq = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
-        $inicio     = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->startOfMonth();
-        $fin        = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->endOfMonth();
+        $inicio = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->startOfMonth();
+        $fin = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->endOfMonth();
 
         // Cargar el RMI del periodo actual una sola vez
         $rmi = Rmi::where('periodo', $periodoReq)->first();
@@ -84,26 +85,28 @@ class InstructoresController extends Controller
             ->get()
             ->flatMap(function ($acu) use ($inicio, $fin, $rmi) {
 
-                $user     = $acu->user;
-                $persona  = $user->persona;
+                $user = $acu->user;
+                $persona = $user->persona;
                 // Buscar el contrato que tiene horarios en este periodo
                 $contrato = $persona->contracts->first(fn($c) => $c->horarioMateria->isNotEmpty())
                     ?? $persona->contracts->first();
 
-                if (!$contrato) return [];
+                if (!$contrato)
+                    return [];
 
                 // Obtener detallesRmi PENDIENTE/RECHAZADO del periodo actual para este contrato
                 $detallesRmi = $rmi
                     ? DetalleRmi::where('idRmi', $rmi->id)
-                    ->whereIn('estado', ['PENDIENTE', 'RECHAZADO'])
-                    ->whereHas('horarioMateria', function ($q) use ($contrato) {
+                        ->whereIn('estado', ['PENDIENTE', 'RECHAZADO'])
+                        ->whereHas('horarioMateria', function ($q) use ($contrato) {
                         $q->where('idContrato', $contrato->id);
                     })
-                    ->get()
+                        ->get()
                     : collect();
 
                 // Si no tiene detallesRmi PENDIENTE/RECHAZADO en el periodo, excluir
-                if ($detallesRmi->isEmpty()) return [];
+                if ($detallesRmi->isEmpty())
+                    return [];
 
                 // IDs de horarios con detalleRmi PENDIENTE o RECHAZADO
                 $idsConDetalle = $detallesRmi->pluck('idHorarioMateria')->toArray();
@@ -112,31 +115,32 @@ class InstructoresController extends Controller
                 $horariosBase = $contrato->horarioMateria
                     ->filter(fn($h) => in_array($h->id, $idsConDetalle))
                     ->map(function ($h) use ($inicio, $fin) {
-                        $duracionSesion   = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                        $desde            = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                        $hasta            = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-                        $idDiaInt         = (int)$h->idDia;
-                        $diaSemanaCarbon  = $idDiaInt === 7 ? 0 : $idDiaInt;
-                        $cantidadSesiones = 0;
-                        $cursor           = $desde->copy();
-                        while ($cursor->lte($hasta)) {
-                            if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantidadSesiones++;
-                            $cursor->addDay();
-                        }
-                        return [
-                            'id'               => $h->id,
-                            'idContrato'       => $h->idContrato,
-                            'horaInicial'      => $h->horaInicial,
-                            'horaFinal'        => $h->horaFinal,
-                            'estado'           => $h->estado,
-                            'idDia'            => $h->idDia,
-                            'fechaInicial'     => $h->fechaInicial,
-                            'fechaFinal'       => $h->fechaFinal,
-                            'duracionSesion'   => (float)$duracionSesion,
-                            'cantidadSesiones' => (int)$cantidadSesiones,
-                            'duracionHoras'    => (float)round($duracionSesion * $cantidadSesiones, 2),
-                        ];
-                    })->keyBy('id');
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                    $idDiaInt = (int) $h->idDia;
+                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
+                    $cantidadSesiones = 0;
+                    $cursor = $desde->copy();
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                            $cantidadSesiones++;
+                        $cursor->addDay();
+                    }
+                    return [
+                        'id' => $h->id,
+                        'idContrato' => $h->idContrato,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'estado' => $h->estado,
+                        'idDia' => $h->idDia,
+                        'fechaInicial' => $h->fechaInicial,
+                        'fechaFinal' => $h->fechaFinal,
+                        'duracionSesion' => (float) $duracionSesion,
+                        'cantidadSesiones' => (int) $cantidadSesiones,
+                        'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
+                    ];
+                })->keyBy('id');
 
                 // Horas ejecutadas en el mes actual (sesiones registradas)
                 $horasEjecutadas = round(
@@ -149,45 +153,45 @@ class InstructoresController extends Controller
 
                 $personaData = [
                     'identificacion' => $persona->identificacion,
-                    'nombre1'        => $persona->nombre1,
-                    'nombre2'        => $persona->nombre2,
-                    'apellido1'      => $persona->apellido1,
-                    'apellido2'      => $persona->apellido2,
-                    'fechaNac'       => $persona->fechaNac,
-                    'direccion'      => $persona->direccion,
-                    'email'          => $persona->email,
-                    'celular'        => $persona->celular,
-                    'telefonoFijo'   => $persona->telefonoFijo,
-                    'perfil'         => $persona->perfil,
-                    'sexo'           => $persona->sexo,
-                    'rh'             => $persona->rh,
-                    'rutaFoto'       => $persona->rutaFotoUrl
+                    'nombre1' => $persona->nombre1,
+                    'nombre2' => $persona->nombre2,
+                    'apellido1' => $persona->apellido1,
+                    'apellido2' => $persona->apellido2,
+                    'fechaNac' => $persona->fechaNac,
+                    'direccion' => $persona->direccion,
+                    'email' => $persona->email,
+                    'celular' => $persona->celular,
+                    'telefonoFijo' => $persona->telefonoFijo,
+                    'perfil' => $persona->perfil,
+                    'sexo' => $persona->sexo,
+                    'rh' => $persona->rh,
+                    'rutaFoto' => $persona->rutaFotoUrl
                 ];
 
                 // Agrupar por estado → una entrada por cada estado distinto
                 return $detallesRmi
                     ->groupBy('estado')
                     ->map(function ($grupo, $estado) use ($acu, $user, $contrato, $personaData, $horariosBase, $horasEjecutadas, $rmi) {
-                        $idsGrupo = $grupo->pluck('idHorarioMateria')->toArray();
+                    $idsGrupo = $grupo->pluck('idHorarioMateria')->toArray();
 
-                        $motivoRechazo = $estado === 'RECHAZADO'
-                            ? $grupo->first(fn($d) => !empty($d->observacion))?->observacion
-                            : null;
+                    $motivoRechazo = $estado === 'RECHAZADO'
+                        ? $grupo->first(fn($d) => !empty($d->observacion))?->observacion
+                        : null;
 
-                        return [
-                            'idActivation'      => $acu->id,
-                            'emailUsuario'      => $user->email,
-                            'idContrato'        => $contrato->id,
-                            'idRmi'             => $rmi?->id,
-                            'roles'             => $acu->getRoleNames(),
-                            'estado'            => $estado,
-                            'totalHoras'        => $contrato->horasmes ?? 0,
-                            'totalHorasFormato' => $horasEjecutadas,
-                            'motivoRechazo'     => $motivoRechazo,
-                            'horarios'          => $horariosBase->only($idsGrupo)->values(),
-                            'persona'           => $personaData,
-                        ];
-                    })
+                    return [
+                        'idActivation' => $acu->id,
+                        'emailUsuario' => $user->email,
+                        'idContrato' => $contrato->id,
+                        'idRmi' => $rmi?->id,
+                        'roles' => $acu->getRoleNames(),
+                        'estado' => $estado,
+                        'totalHoras' => $contrato->horasmes ?? 0,
+                        'totalHorasFormato' => $horasEjecutadas,
+                        'motivoRechazo' => $motivoRechazo,
+                        'horarios' => $horariosBase->only($idsGrupo)->values(),
+                        'persona' => $personaData,
+                    ];
+                })
                     ->values()
                     ->toArray();
             });
@@ -198,14 +202,14 @@ class InstructoresController extends Controller
     {
         $validated = $request->validate([
             'idCentroFormacion' => 'required|integer|exists:centroFormacion,id',
-            'periodo'           => 'nullable|date_format:Y-m',
-            'estado'            => 'nullable|string|in:PENDIENTE,ACEPTADO,RECHAZADO',
+            'periodo' => 'nullable|date_format:Y-m',
+            'estado' => 'nullable|string|in:PENDIENTE,ACEPTADO,RECHAZADO',
         ]);
 
         // Determinar periodo
         $periodoReq = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
         $inicio = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->startOfMonth();
-        $fin    = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->endOfMonth();
+        $fin = \Carbon\Carbon::createFromFormat('Y-m', $periodoReq)->endOfMonth();
 
         $instructors = ActivationCompanyUser::with([
             'user.persona.contracts' => function ($q) use ($inicio, $fin) {
@@ -254,8 +258,8 @@ class InstructoresController extends Controller
             ->get()
             ->map(function ($acu) use ($periodoReq, $inicio, $fin) {
 
-                $user     = $acu->user;
-                $persona  = $user->persona;
+                $user = $acu->user;
+                $persona = $user->persona;
                 // Buscar el contrato que tiene horarios en este periodo
                 $contrato = $persona->contracts->first(fn($c) => $c->horarioMateria->isNotEmpty())
                     ?? $persona->contracts->first();
@@ -266,10 +270,10 @@ class InstructoresController extends Controller
                     $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
                     $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
 
-                    $idDiaInt         = (int)$h->idDia;
-                    $diaSemanaCarbon  = $idDiaInt === 7 ? 0 : $idDiaInt;
+                    $idDiaInt = (int) $h->idDia;
+                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
                     $cantidadSesiones = 0;
-                    $cursor           = $desde->copy();
+                    $cursor = $desde->copy();
 
                     while ($cursor->lte($hasta)) {
                         if ($cursor->dayOfWeek === $diaSemanaCarbon) {
@@ -279,17 +283,17 @@ class InstructoresController extends Controller
                     }
 
                     return [
-                        'id'               => $h->id,
-                        'idContrato'       => $h->idContrato,
-                        'horaInicial'      => $h->horaInicial,
-                        'horaFinal'        => $h->horaFinal,
-                        'estado'           => $h->estado,
-                        'idDia'            => $h->idDia,
-                        'fechaInicial'     => $h->fechaInicial,
-                        'fechaFinal'       => $h->fechaFinal,
-                        'duracionSesion'   => (float)$duracionSesion,
-                        'cantidadSesiones' => (int)$cantidadSesiones,
-                        'duracionHoras'    => (float)round($duracionSesion * $cantidadSesiones, 2),
+                        'id' => $h->id,
+                        'idContrato' => $h->idContrato,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'estado' => $h->estado,
+                        'idDia' => $h->idDia,
+                        'fechaInicial' => $h->fechaInicial,
+                        'fechaFinal' => $h->fechaFinal,
+                        'duracionSesion' => (float) $duracionSesion,
+                        'cantidadSesiones' => (int) $cantidadSesiones,
+                        'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
                     ];
                 });
 
@@ -325,9 +329,11 @@ class InstructoresController extends Controller
                                 $estadoRmi = 'RECHAZADO';
                                 $detalleRechazado = $detallesRmi->firstWhere('estado', 'RECHAZADO');
                                 $motivoRechazo = $detalleRechazado?->observacion;
-                            } elseif ($detallesRmi->every(function ($d) {
-                                return $d->estado === 'ACEPTADO';
-                            })) {
+                            } elseif (
+                                $detallesRmi->every(function ($d) {
+                                    return $d->estado === 'ACEPTADO';
+                                })
+                            ) {
                                 $estadoRmi = 'ACEPTADO';
                             } else {
                                 $estadoRmi = 'PENDIENTE';
@@ -339,29 +345,29 @@ class InstructoresController extends Controller
                 return [
                     'idActivation' => $acu->id,
                     'emailUsuario' => $user->email,
-                    'idContrato'   => $contrato?->id,
-                    'idRmi'         => $idRmi,
-                    'roles'        => $acu->getRoleNames(),
-                    'horarios'     => $horarios,
-                    'estado'       => $estadoRmi,
-                    'totalHoras'        => $contrato?->horasmes ?? 0,
+                    'idContrato' => $contrato?->id,
+                    'idRmi' => $idRmi,
+                    'roles' => $acu->getRoleNames(),
+                    'horarios' => $horarios,
+                    'estado' => $estadoRmi,
+                    'totalHoras' => $contrato?->horasmes ?? 0,
                     'totalHorasFormato' => $horasEjecutadas,
                     'motivoRechazo' => $motivoRechazo,
-                    'persona'      => [
+                    'persona' => [
                         'identificacion' => $persona->identificacion,
-                        'nombre1'        => $persona->nombre1,
-                        'nombre2'        => $persona->nombre2,
-                        'apellido1'      => $persona->apellido1,
-                        'apellido2'      => $persona->apellido2,
-                        'fechaNac'       => $persona->fechaNac,
-                        'direccion'      => $persona->direccion,
-                        'email'          => $persona->email,
-                        'celular'        => $persona->celular,
-                        'telefonoFijo'   => $persona->telefonoFijo,
-                        'perfil'         => $persona->perfil,
-                        'sexo'           => $persona->sexo,
-                        'rh'             => $persona->rh,
-                        'rutaFoto'       => $persona->rutaFotoUrl,
+                        'nombre1' => $persona->nombre1,
+                        'nombre2' => $persona->nombre2,
+                        'apellido1' => $persona->apellido1,
+                        'apellido2' => $persona->apellido2,
+                        'fechaNac' => $persona->fechaNac,
+                        'direccion' => $persona->direccion,
+                        'email' => $persona->email,
+                        'celular' => $persona->celular,
+                        'telefonoFijo' => $persona->telefonoFijo,
+                        'perfil' => $persona->perfil,
+                        'sexo' => $persona->sexo,
+                        'rh' => $persona->rh,
+                        'rutaFoto' => $persona->rutaFotoUrl,
                     ],
                 ];
             });
@@ -377,7 +383,7 @@ class InstructoresController extends Controller
     {
         $validated = $request->validate([
             'idContrato' => 'required|integer|exists:contrato,id',
-            'periodo'    => 'nullable|date_format:Y-m',
+            'periodo' => 'nullable|date_format:Y-m',
         ]);
 
         $query = \App\Models\HorarioMateria::with([
@@ -390,10 +396,10 @@ class InstructoresController extends Controller
 
         if (!empty($validated['periodo'])) {
             $inicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-            $fin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
+            $fin = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
         } else {
             $inicio = \Carbon\Carbon::now()->startOfMonth();
-            $fin    = \Carbon\Carbon::now()->endOfMonth();
+            $fin = \Carbon\Carbon::now()->endOfMonth();
         }
 
         $query->where(function ($q) use ($inicio, $fin) {
@@ -408,31 +414,31 @@ class InstructoresController extends Controller
         $horarios = $query->get();
 
         $fichas = $horarios->groupBy('idFicha')->map(function ($horariosGrupo) use ($validated) {
-            $ficha    = $horariosGrupo->first()->ficha;
+            $ficha = $horariosGrupo->first()->ficha;
             $programa = $ficha?->asignacion?->programa;
 
             // Paso 1: mapear cada horario con todos sus datos y su idGradoMateria
             $horariosConDatos = $horariosGrupo->map(function ($h) use ($validated) {
-                $rap            = $h->gradoMateria?->materia;
-                $competencia    = $rap?->padre;
+                $rap = $h->gradoMateria?->materia;
+                $competencia = $rap?->padre;
                 $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
 
                 // Determinar el rango a calcular
                 if (!empty($validated['periodo'])) {
                     $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-                    $rangoFin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-                    $desde       = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
-                    $hasta       = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
+                    $rangoFin = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
                 } else {
                     $desde = \Carbon\Carbon::parse($h->fechaInicial)->max(\Carbon\Carbon::now()->startOfMonth());
                     $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min(\Carbon\Carbon::now()->endOfMonth());
                 }
 
                 // idDia: 1=Lunes...6=Sabado, 7=Domingo → Carbon: 0=Domingo, 1=Lunes...6=Sabado
-                $idDiaInt         = (int)$h->idDia;
-                $diaSemanaCarbon  = $idDiaInt === 7 ? 0 : $idDiaInt;
+                $idDiaInt = (int) $h->idDia;
+                $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
                 $cantidadSesiones = 0;
-                $cursor           = $desde->copy();
+                $cursor = $desde->copy();
 
                 while ($cursor->lte($hasta)) {
                     if ($cursor->dayOfWeek === $diaSemanaCarbon) {
@@ -442,18 +448,18 @@ class InstructoresController extends Controller
                 }
 
                 return [
-                    'idGradoMateria'       => $h->idGradoMateria,
-                    'competencia'          => $competencia?->nombreMateria,
+                    'idGradoMateria' => $h->idGradoMateria,
+                    'competencia' => $competencia?->nombreMateria,
                     'resultadoAprendizaje' => $rap?->nombreMateria,
-                    'idHorario'            => $h->id,
-                    'horaInicial'          => $h->horaInicial,
-                    'horaFinal'            => $h->horaFinal,
-                    'fechaInicial'         => $h->fechaInicial,
-                    'fechaFinal'           => $h->fechaFinal,
-                    'duracionSesion'       => $duracionSesion,
-                    'cantidadSesiones'     => $cantidadSesiones,
-                    'duracionHoras'        => round($duracionSesion * $cantidadSesiones, 2),
-                    'idDia'                => $h->idDia
+                    'idHorario' => $h->id,
+                    'horaInicial' => $h->horaInicial,
+                    'horaFinal' => $h->horaFinal,
+                    'fechaInicial' => $h->fechaInicial,
+                    'fechaFinal' => $h->fechaFinal,
+                    'duracionSesion' => $duracionSesion,
+                    'cantidadSesiones' => $cantidadSesiones,
+                    'duracionHoras' => round($duracionSesion * $cantidadSesiones, 2),
+                    'idDia' => $h->idDia
                 ];
             });
 
@@ -466,32 +472,32 @@ class InstructoresController extends Controller
                         $query->where('idGradoMateria', $primero['idGradoMateria']);
                     })->get();
                     return [
-                        'idGradoMateria'       => $primero['idGradoMateria'],
-                        'competencia'          => $primero['competencia'],
+                        'idGradoMateria' => $primero['idGradoMateria'],
+                        'competencia' => $primero['competencia'],
                         'resultadoAprendizaje' => $primero['resultadoAprendizaje'],
-                        'estadoAsociacion'     => $detallesRmi->first()?->estadoAsociacion,
-                        'horarios'             => $horariosGM->map(function ($item) use ($detallesRmi) {
+                        'estadoAsociacion' => $detallesRmi->first()?->estadoAsociacion,
+                        'horarios' => $horariosGM->map(function ($item) use ($detallesRmi) {
                             return [
-                                'idHorario'        => $item['idHorario'],
-                                'horaInicial'      => $item['horaInicial'],
-                                'horaFinal'        => $item['horaFinal'],
-                                'fechaInicial'     => $item['fechaInicial'],
-                                'fechaFinal'       => $item['fechaFinal'],
-                                'duracionSesion'   => $item['duracionSesion'],
+                                'idHorario' => $item['idHorario'],
+                                'horaInicial' => $item['horaInicial'],
+                                'horaFinal' => $item['horaFinal'],
+                                'fechaInicial' => $item['fechaInicial'],
+                                'fechaFinal' => $item['fechaFinal'],
+                                'duracionSesion' => $item['duracionSesion'],
                                 'cantidadSesiones' => $item['cantidadSesiones'],
-                                'duracionHoras'    => $item['duracionHoras'],
-                                'idDia'            => $item['idDia']
+                                'duracionHoras' => $item['duracionHoras'],
+                                'idDia' => $item['idDia']
                             ];
                         })->values(),
                     ];
                 })->values();
 
             return [
-                'idFicha'           => $ficha?->id,
-                'codigoFicha'       => $ficha?->codigo,
+                'idFicha' => $ficha?->id,
+                'codigoFicha' => $ficha?->codigo,
                 'programaFormacion' => $programa?->nombrePrograma,
-                'codigoPrograma'    => $programa?->codigoPrograma,
-                'resultados'        => $resultados,
+                'codigoPrograma' => $programa?->codigoPrograma,
+                'resultados' => $resultados,
             ];
         })->values();
 
@@ -581,7 +587,7 @@ class InstructoresController extends Controller
             $email = $validated['email'];
             $nombre = $activation->user->persona->nombre1;
 
-            $asunto  = 'Aprobación de RMI - Periodo ' . $periodo;
+            $asunto = 'Aprobación de RMI - Periodo ' . $periodo;
             $mensaje = "Estimado(a) $nombre,\n\n"
                 . "Nos complace informarle que su RMI correspondiente al periodo $periodo ha sido APROBADO.\n\n"
                 . "No se requieren acciones adicionales por su parte.\n\n"
@@ -689,9 +695,9 @@ class InstructoresController extends Controller
 
             $nombre = $activation->user->persona->nombre1;
 
-            $nombre   = $activation->user->persona->nombre1;
-            $asunto   = 'Rechazo de RMI - Periodo ' . $periodo;
-            $mensaje  = "Estimado(a) $nombre,\n\n"
+            $nombre = $activation->user->persona->nombre1;
+            $asunto = 'Rechazo de RMI - Periodo ' . $periodo;
+            $mensaje = "Estimado(a) $nombre,\n\n"
                 . "Le informamos que su RMI correspondiente al periodo $periodo ha sido RECHAZADO.\n\n"
                 . "Motivo del rechazo:\n"
                 . $validated['motivo'] . "\n\n"
@@ -756,8 +762,8 @@ class InstructoresController extends Controller
             }
 
             $periodo = $validated['periodo'] ?? \Carbon\Carbon::now()->format('Y-m');
-            $inicio  = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->startOfMonth();
-            $fin     = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->endOfMonth();
+            $inicio = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->startOfMonth();
+            $fin = \Carbon\Carbon::createFromFormat('Y-m', $periodo)->endOfMonth();
 
             // Obtener horarios del contrato en el periodo
             $horarios = \App\Models\HorarioMateria::where('idContrato', $contrato->id)
@@ -788,7 +794,7 @@ class InstructoresController extends Controller
             $detallesActualizados = DetalleRmi::where('idRmi', $rmi->id)
                 ->whereIn('idHorarioMateria', $horarios)
                 ->update([
-                    'estado'      => 'PENDIENTE',
+                    'estado' => 'PENDIENTE',
                     'observacion' => null,
                 ]);
 
@@ -801,8 +807,8 @@ class InstructoresController extends Controller
             DB::commit();
 
             return response()->json([
-                'message'              => 'RMI revertido a pendiente con éxito',
-                'estado'               => 'PENDIENTE',
+                'message' => 'RMI revertido a pendiente con éxito',
+                'estado' => 'PENDIENTE',
                 'detalles_actualizados' => $detallesActualizados,
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -812,8 +818,8 @@ class InstructoresController extends Controller
             DB::rollBack();
             Log::error('Error al revertir RMI: ' . $e->getMessage(), [
                 'idActivation' => $idActivation,
-                'periodo'      => $request->input('periodo'),
-                'trace'        => $e->getTraceAsString(),
+                'periodo' => $request->input('periodo'),
+                'trace' => $e->getTraceAsString(),
             ]);
             return response()->json(['message' => 'Error al revertir el RMI', 'error' => $e->getMessage()], 500);
         }
@@ -856,7 +862,7 @@ class InstructoresController extends Controller
     public function getDashboardInstructor(Request $request)
     {
         try {
-            $user    = auth()->user();
+            $user = auth()->user();
             $persona = $user?->persona;
 
             if (!$persona) {
@@ -871,7 +877,7 @@ class InstructoresController extends Controller
             }
 
             $inicio = \Carbon\Carbon::now()->startOfMonth();
-            $fin    = \Carbon\Carbon::now()->endOfMonth();
+            $fin = \Carbon\Carbon::now()->endOfMonth();
 
             $horarios = \App\Models\HorarioMateria::with([
                 'ficha.asignacion.programa',
@@ -890,47 +896,48 @@ class InstructoresController extends Controller
                 ->get();
 
             $fichas = $horarios->groupBy('idFicha')->map(function ($grupo) use ($inicio, $fin) {
-                $ficha    = $grupo->first()->ficha;
+                $ficha = $grupo->first()->ficha;
                 $programa = $ficha?->asignacion?->programa;
 
                 // Resultados planos (un registro por horario)
                 $resultados = $grupo->map(function ($h) use ($inicio, $fin) {
-                    $rap         = $h->gradoMateria?->materia;
+                    $rap = $h->gradoMateria?->materia;
                     $competencia = $rap?->padre;
-                    $durSesion   = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+                    $durSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
 
                     $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
                     $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
 
                     $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
-                    $cantSesiones    = 0;
-                    $cursor          = $desde->copy();
+                    $cantSesiones = 0;
+                    $cursor = $desde->copy();
                     while ($cursor->lte($hasta)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantSesiones++;
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                            $cantSesiones++;
                         $cursor->addDay();
                     }
 
                     return [
-                        'idHorario'            => $h->id,
-                        'competencia'          => $competencia?->nombreMateria,
+                        'idHorario' => $h->id,
+                        'competencia' => $competencia?->nombreMateria,
                         'resultadoAprendizaje' => $rap?->nombreMateria,
-                        'horaInicial'          => $h->horaInicial,
-                        'horaFinal'            => $h->horaFinal,
-                        'fechaInicial'         => $h->fechaInicial,
-                        'fechaFinal'           => $h->fechaFinal,
-                        'idDia'                => $h->idDia,
-                        'duracionSesion'       => $durSesion,
-                        'cantidadSesiones'     => $cantSesiones,
-                        'duracionHoras'        => round($durSesion * $cantSesiones, 2),
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'fechaInicial' => $h->fechaInicial,
+                        'fechaFinal' => $h->fechaFinal,
+                        'idDia' => $h->idDia,
+                        'duracionSesion' => $durSesion,
+                        'cantidadSesiones' => $cantSesiones,
+                        'duracionHoras' => round($durSesion * $cantSesiones, 2),
                     ];
                 })->values();
 
                 return [
-                    'idFicha'           => $ficha?->id,
-                    'codigoFicha'       => $ficha?->codigo,
+                    'idFicha' => $ficha?->id,
+                    'codigoFicha' => $ficha?->codigo,
                     'programaFormacion' => $programa?->nombrePrograma,
-                    'codigoPrograma'    => $programa?->codigoPrograma,
-                    'resultados'        => $resultados,
+                    'codigoPrograma' => $programa?->codigoPrograma,
+                    'resultados' => $resultados,
                 ];
             })->values();
 
@@ -943,7 +950,7 @@ class InstructoresController extends Controller
     //Dejo preparado para agregarlos endpoints del contrato para el instructor...
     public function getContratoByInstructor(Request $request)
     {
-        $user    = auth()->user();
+        $user = auth()->user();
         $persona = $user?->persona;
 
         $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->with('centroFormacion', 'persona.ciudadExpedicionRel.departamento')->get();
@@ -953,11 +960,11 @@ class InstructoresController extends Controller
     public function updateSupervisor(Request $request, int $id)
     {
         $request->validate([
-            'supervisorContrato'  => 'nullable|string|max:255',
-            'cargoSupervisor'     => 'nullable|string|max:255',
-            'objetoContrato'      => 'nullable|string|max:1000',
-            'formaDePago'         => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
-            'ciudadExpedicionId'  => 'nullable|integer|exists:ciudad,id',
+            'supervisorContrato' => 'nullable|string|max:255',
+            'cargoSupervisor' => 'nullable|string|max:255',
+            'objetoContrato' => 'nullable|string|max:1000',
+            'formaDePago' => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
+            'ciudadExpedicionId' => 'nullable|integer|exists:ciudad,id',
             'siif' => 'nullable|numeric',
             'descripcionFormaPago' => 'nullable|string|max:1000',
         ]);
@@ -1011,7 +1018,7 @@ class InstructoresController extends Controller
     }
     public function getDataRmiConfiguracionByYear(Request $request)
     {
-        $year     = $request->year;
+        $year = $request->year;
         $idPerson = $request->idPerson ?? KeyUtil::user()->idPersona;
 
         if (!$year) {
@@ -1036,15 +1043,16 @@ class InstructoresController extends Controller
 
             foreach ($contract->horarioMateria as $horario) {
                 foreach ($horario->detallesRmi as $detalle) {
-                    $rmi    = $detalle->rmi;
+                    $rmi = $detalle->rmi;
                     $period = $rmi->periodo;
 
-                    if (!str_starts_with($period, $year)) continue;
+                    if (!str_starts_with($period, $year))
+                        continue;
 
                     if (!isset($periodos[$period])) {
                         // Calcular horas asignadas en ese periodo (mismo cálculo que getFichasByContrato)
                         $inicio = Carbon::createFromFormat('Y-m', $period)->startOfMonth();
-                        $fin    = Carbon::createFromFormat('Y-m', $period)->endOfMonth();
+                        $fin = Carbon::createFromFormat('Y-m', $period)->endOfMonth();
 
                         $horasAsignadas = 0;
 
@@ -1052,15 +1060,17 @@ class InstructoresController extends Controller
                             $desde = Carbon::parse($h->fechaInicial)->max($inicio);
                             $hasta = Carbon::parse($h->fechaFinal ?? Carbon::now())->min($fin);
 
-                            if ($desde->gt($hasta)) continue;
+                            if ($desde->gt($hasta))
+                                continue;
 
-                            $duracionSesion  = (strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600;
+                            $duracionSesion = (strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600;
                             $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
-                            $cantSesiones    = 0;
-                            $cursor          = $desde->copy();
+                            $cantSesiones = 0;
+                            $cursor = $desde->copy();
 
                             while ($cursor->lte($hasta)) {
-                                if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantSesiones++;
+                                if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                                    $cantSesiones++;
                                 $cursor->addDay();
                             }
 
@@ -1072,36 +1082,46 @@ class InstructoresController extends Controller
                         });
 
                         $estadoConsolidado = 'PENDIENTE';
+                        $estadoInformeConsolidado = 'PENDIENTE';
                         if ($detallesDelPeriodo->isNotEmpty()) {
                             if ($detallesDelPeriodo->contains('estado', 'RECHAZADO')) {
                                 $estadoConsolidado = 'RECHAZADO';
                             } elseif ($detallesDelPeriodo->every(fn($d) => $d->estado === 'ACEPTADO')) {
                                 $estadoConsolidado = 'ACEPTADO';
                             }
+
+                            if ($detallesDelPeriodo->every(fn($d) => $d->estadoInforme === 'ACEPTADO')) {
+                                $estadoInformeConsolidado = 'ACEPTADO';
+                            }
                         }
 
                         $periodos[$period] = [
-                            'periodo'        => $period,
-                            'idRmi'          => $rmi->id,
-                            'estadoRmi'      => $estadoConsolidado,
-                            'observacion'    => $rmi->observacion,
+                            'periodo' => $period,
+                            'idRmi' => $rmi->id,
+                            'estadoRmi' => $estadoConsolidado,
+                            'estadoInforme' => $estadoInformeConsolidado,
+                            'observacion' => $rmi->observacion,
                             'horasAsignadas' => round($horasAsignadas, 2),
-                            'detalles'       => [],
+                            'detalles' => [],
                         ];
                     }
 
                     $periodos[$period]['detalles'][] = [
-                        'idDetalleRmi'     => $detalle->id,
-                        'estadoDetalle'    => $detalle->estado,
-                        'observacion'      => $detalle->observacion,
+                        'idDetalleRmi' => $detalle->id,
+                        'estadoDetalle' => $detalle->estado,
+                        'observacion' => $detalle->observacion,
                         'idHorarioMateria' => $horario->id,
-                        'horaInicial'      => $horario->horaInicial,
-                        'horaFinal'        => $horario->horaFinal,
-                        'fechaInicial'     => $horario->fechaInicial,
-                        'fechaFinal'       => $horario->fechaFinal,
-                        'estadoHorario'    => $horario->estado,
-                        'archivoPago'      => $detalle->archivoPago,
-                        'archivoPagoUrl'   => $detalle->archivoPagoUrl,
+                        'horaInicial' => $horario->horaInicial,
+                        'horaFinal' => $horario->horaFinal,
+                        'fechaInicial' => $horario->fechaInicial,
+                        'fechaFinal' => $horario->fechaFinal,
+                        'estadoHorario' => $horario->estado,
+                        'archivoPago' => $detalle->archivoPago,
+                        'archivoPagoUrl' => $detalle->archivoPagoUrl,
+                        'urlInforme' => $detalle->urlInforme,
+                        'urlInformeUrl' => $detalle->urlInformeUrl,
+                        'estadoInforme' => $detalle->estadoInforme,
+                        'numeroPlanilla' => $detalle->numeroPlanilla,
                     ];
                 }
             }
@@ -1109,12 +1129,12 @@ class InstructoresController extends Controller
             ksort($periodos);
 
             return [
-                'idContrato'        => $contract->id,
-                'siif'             => $contract->siif,
-                'identificacion'   => $contract->persona->identificacion,
+                'idContrato' => $contract->id,
+                'siif' => $contract->siif,
+                'identificacion' => $contract->persona->identificacion,
                 'fechaContratacion' => $contract->fechaContratacion,
-                'fechaFinal'        => $contract->fechaFinalContrato,
-                'periodos'          => array_values($periodos),
+                'fechaFinal' => $contract->fechaFinalContrato,
+                'periodos' => array_values($periodos),
             ];
         });
 
@@ -1126,16 +1146,201 @@ class InstructoresController extends Controller
         $request->validate([
             'archivoPago' => 'required|file|mimes:pdf,jpg,jpeg,png',
             'idRmi' => 'required|integer',
+            'idsHorarioMateria' => 'required|array',
         ]);
 
+        $idRmi = $request->idRmi;
+        $idsHorario = $request->idsHorarioMateria;
+
+        // 1. Obtener los archivos actuales de estos registros para su posible eliminación
+        $viejosArchivos = DetalleRmi::where('idRmi', $idRmi)
+            ->whereIn('idHorarioMateria', $idsHorario)
+            ->pluck('archivoPago')
+            ->filter()
+            ->unique();
+
+        // 2. Guardar el nuevo archivo
         $ruta = '/storage/' . $request->file('archivoPago')->store('pagos', 'public');
 
-        // Actualizar todos los detalleRmi del periodo (mismo idRmi)
-        DetalleRmi::where('idRmi', $request->idRmi)
+        // 3. Borrar los archivos antiguos si ya no se usan en otro lugar
+        foreach ($viejosArchivos as $viejo) {
+            // Verificar si hay algún DETALLERMI que aún use este archivo y NO esté en el grupo que estamos actualizando
+            $estaEnUso = DetalleRmi::where('archivoPago', $viejo)
+                ->where(function ($query) use ($idRmi, $idsHorario) {
+                    $query->where('idRmi', '!=', $idRmi)
+                        ->orWhereNotIn('idHorarioMateria', $idsHorario);
+                })
+                ->exists();
+
+            if (!$estaEnUso) {
+                // El prefijo /storage/ debe ser removido para usar Storage::disk('public')
+                $pathRelativo = str_replace('/storage/', '', $viejo);
+                if (Storage::disk('public')->exists($pathRelativo)) {
+                    Storage::disk('public')->delete($pathRelativo);
+                }
+            }
+        }
+
+        // 4. Actualizar los detalleRmi con la nueva ruta
+        DetalleRmi::where('idRmi', $idRmi)
+            ->whereIn('idHorarioMateria', $idsHorario)
             ->update(['archivoPago' => $ruta]);
 
         return response()->json(['archivoPago' => $ruta]);
     }
+
+    public function uploadInformeInstructor(Request $request)
+    {
+        $request->validate([
+            'urlInforme' => 'required|file|mimes:pdf,jpg,jpeg,png',
+            'idRmi' => 'required|integer',
+            'idsHorarioMateria' => 'required|array',
+        ]);
+
+        $idRmi = $request->idRmi;
+        $idsHorario = $request->idsHorarioMateria;
+
+        // 1. Obtener los informes actuales para su eliminación
+        $viejosInformes = DetalleRmi::where('idRmi', $idRmi)
+            ->whereIn('idHorarioMateria', $idsHorario)
+            ->pluck('urlInforme')
+            ->filter()
+            ->unique();
+
+        // 2. Guardar el nuevo informe
+        $ruta = '/storage/' . $request->file('urlInforme')->store('informes', 'public');
+
+        // 3. Borrar los informes antiguos
+        foreach ($viejosInformes as $viejo) {
+            $estaEnUso = DetalleRmi::where('urlInforme', $viejo)
+                ->where(function ($query) use ($idRmi, $idsHorario) {
+                    $query->where('idRmi', '!=', $idRmi)
+                        ->orWhereNotIn('idHorarioMateria', $idsHorario);
+                })
+                ->exists();
+
+            if (!$estaEnUso) {
+                $pathRelativo = str_replace('/storage/', '', $viejo);
+                if (Storage::disk('public')->exists($pathRelativo)) {
+                    Storage::disk('public')->delete($pathRelativo);
+                }
+            }
+        }
+
+        // 4. Actualizar los detalleRmi
+        DetalleRmi::where('idRmi', $idRmi)
+            ->whereIn('idHorarioMateria', $idsHorario)
+            ->update([
+                'urlInforme' => $ruta,
+            ]);
+
+        return response()->json(['urlInforme' => $ruta]);
+    }
+
+    public function updateNumeroPlanilla(Request $request)
+    {
+        $request->validate([
+            'numeroPlanilla' => 'required|string|max:50',
+            'idRmi' => 'required|integer',
+            'idsHorarioMateria' => 'required|array',
+        ]);
+
+        DetalleRmi::where('idRmi', $request->idRmi)
+            ->whereIn('idHorarioMateria', $request->idsHorarioMateria)
+            ->update(['numeroPlanilla' => $request->numeroPlanilla]);
+
+        return response()->json(['message' => 'Número de planilla actualizado correctamente']);
+    }
+
+    public function aceptarInforme(Request $request)
+    {
+        $request->validate([
+            'idRmi' => 'required|integer',
+            'idsHorarioMateria' => 'required|array',
+        ]);
+
+        DetalleRmi::where('idRmi', $request->idRmi)
+            ->whereIn('idHorarioMateria', $request->idsHorarioMateria)
+            ->update(['estadoInforme' => 'ACEPTADO']);
+
+        return response()->json(['message' => 'Informe aceptado correctamente']);
+    }
+
+    public function rechazarInforme(Request $request)
+    {
+        $request->validate([
+            'idRmi' => 'required|integer',
+            'idsHorarioMateria' => 'required|array'
+        ]);
+
+        DetalleRmi::where('idRmi', $request->idRmi)
+            ->whereIn('idHorarioMateria', $request->idsHorarioMateria)
+            ->update([
+                'estadoInforme' => 'PENDIENTE'
+            ]);
+
+        return response()->json(['message' => 'Informe rechazado correctamente']);
+    }
+
+    public function getAllRmiDetailsForAdmin(Request $request)
+    {
+        try {
+            // Obtener todos los RMI con sus detalles
+            $rmiRecords = Rmi::with([
+                'detalles.horarioMateria.gradoMateria.materia',
+                'detalles.horarioMateria.contrato.persona'
+            ])->orderBy('periodo', 'desc')->get();
+
+            $result = [];
+
+            foreach ($rmiRecords as $rmi) {
+                $detallesGrouped = [];
+
+                foreach ($rmi->detalles as $detalle) {
+                    $horario = $detalle->horarioMateria;
+                    $contrato = $horario->contrato;
+                    $persona = $contrato->persona;
+                    $materia = $horario->gradoMateria->materia ?? null;
+
+                    $detallesGrouped[] = [
+                        'idDetalleRmi' => $detalle->id,
+                        'idRmi' => $rmi->id,
+                        'idHorarioMateria' => $horario->id,
+                        'estadoInforme' => $detalle->estadoInforme,
+                        'urlInforme' => $detalle->urlInformeUrl,
+                        'numeroPlanilla' => $detalle->numeroPlanilla,
+                        'horaInicial' => $horario->horaInicial,
+                        'horaFinal' => $horario->horaFinal,
+                        'fechaInicial' => $horario->fechaInicial,
+                        'materia' => $materia?->nombre ?? 'Sin materia'
+                    ];
+                }
+
+                if (!empty($detallesGrouped)) {
+                    $firstDetalle = $detallesGrouped[0];
+
+                    $result[] = [
+                        'idRmi' => $rmi->id,
+                        'periodo' => $rmi->periodo,
+                        'estadoRmi' => $rmi->estado,
+                        'instructorNombre' => $persona->nombre1 . ' ' . $persona->apellido1,
+                        'instructorId' => $persona->id,
+                        'identificacion' => $persona->identificacion,
+                        'idContrato' => $contrato->id,
+                        'detalles' => $detallesGrouped
+                    ];
+                }
+            }
+
+            return response()->json($result);
+        } catch (\Exception $e) {
+            Log::error('Error al obtener RMI para admin: ' . $e->getMessage(), [
+                'exception' => $e,
+            ]);
+            return response()->json(['message' => 'Error al obtener los datos', 'error' => $e->getMessage()], 500);
+        }
+    }
+
     // Ruta: POST merge_pdfs
     public function mergePdfs(Request $request)
     {
@@ -1188,10 +1393,10 @@ class InstructoresController extends Controller
     public function getInformeByInstructorRmi(Request $request)
     {
         $idContrato = $request->idContrato;
-        $idRmi      = $request->idRmi;
-        $nPlanilla  = $request->nPlanilla;
+        $idRmi = $request->idRmi;
+        $nPlanilla = $request->nPlanilla;
 
-        $rmi      = Rmi::findOrFail($idRmi);
+        $rmi = Rmi::findOrFail($idRmi);
         $contrato = Contract::with([
             'persona',
             'persona.ciudadExpedicionRel',
@@ -1200,7 +1405,7 @@ class InstructoresController extends Controller
         ])->findOrFail($idContrato);
 
         $actividades = ActividadInstructor::where('idRmi', $idRmi)->where('idContrato', $idContrato)->get();
-        $comisiones  = ComisionInstructor::where('idRmi', $idRmi)
+        $comisiones = ComisionInstructor::where('idRmi', $idRmi)
             ->where('idContrato', $idContrato)
             ->get();
 
@@ -1209,7 +1414,7 @@ class InstructoresController extends Controller
 
         // ── HORARIOS DEL PERIODO ──────────────────────────────────────────────
         $inicio = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->startOfMonth();
-        $fin    = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->endOfMonth();
+        $fin = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->endOfMonth();
 
         $diasSemana = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miércoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sábado', 7 => 'Domingo'];
 
@@ -1229,39 +1434,40 @@ class InstructoresController extends Controller
             ->get()
             ->groupBy('idFicha')
             ->map(function ($horarios) use ($inicio, $fin, $diasSemana) {
-                $ficha    = $horarios->first()->ficha;
+                $ficha = $horarios->first()->ficha;
                 $programa = $ficha?->asignacion?->programa;
-                $idFicha  = $horarios->first()->idFicha;
+                $idFicha = $horarios->first()->idFicha;
 
                 $filas = $horarios->map(function ($h) use ($inicio, $fin, $diasSemana) {
-                    $desde           = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                    $hasta           = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
                     $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
-                    $cantSesiones    = 0;
-                    $cursor          = $desde->copy();
+                    $cantSesiones = 0;
+                    $cursor = $desde->copy();
 
                     while ($cursor->lte($hasta)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon) $cantSesiones++;
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                            $cantSesiones++;
                         $cursor->addDay();
                     }
 
                     $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
 
                     return [
-                        'dia'            => $diasSemana[$h->idDia] ?? $h->idDia,
-                        'horaInicial'    => $h->horaInicial,
-                        'horaFinal'      => $h->horaFinal,
-                        'cantSesiones'   => $cantSesiones,
-                        'horasTotales'   => round($duracionSesion * $cantSesiones, 2),
+                        'dia' => $diasSemana[$h->idDia] ?? $h->idDia,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'cantSesiones' => $cantSesiones,
+                        'horasTotales' => round($duracionSesion * $cantSesiones, 2),
                     ];
                 })->values();
 
                 return [
-                    'idFicha'           => $idFicha,
-                    'codigoFicha'       => $ficha?->codigo,
+                    'idFicha' => $idFicha,
+                    'codigoFicha' => $ficha?->codigo,
                     'programaFormacion' => $programa?->nombrePrograma,
-                    'filas'             => $filas,
-                    'totalHorasFicha'   => $filas->sum('horasTotales'),
+                    'filas' => $filas,
+                    'totalHorasFicha' => $filas->sum('horasTotales'),
                 ];
             })->values();
         // ─────────────────────────────────────────────────────────────────────
@@ -1305,30 +1511,31 @@ class InstructoresController extends Controller
         $fichasConProyecto = $horariosMaterias
             ->groupBy('idFicha')
             ->map(function ($horariosGrupo) use ($fasesPorMateria) {
-                $ficha    = $horariosGrupo->first()->ficha;
+                $ficha = $horariosGrupo->first()->ficha;
                 $programa = $ficha?->asignacion?->programa;
 
                 $materias = $horariosGrupo
                     ->map(function ($h) use ($fasesPorMateria) {
-                        $rap         = $h->gradoMateria?->materia;
+                        $rap = $h->gradoMateria?->materia;
                         $competencia = $rap?->padre;
-                        $idMateria   = $rap?->id;
+                        $idMateria = $rap?->id;
 
-                        if (!$idMateria) return null;
+                        if (!$idMateria)
+                            return null;
 
                         // Buscar la fase asociada a este RAP
                         $fprRap = $fasesPorMateria->get($idMateria);
-                        $fase   = $fprRap?->fase;
+                        $fase = $fprRap?->fase;
 
                         return [
-                            'idMateria'            => $idMateria,
+                            'idMateria' => $idMateria,
                             'resultadoAprendizaje' => $rap?->nombreMateria,
-                            'competencia'          => $competencia?->nombreMateria,
-                            'faseProyecto'         => $fase?->descripcionFase,
-                            'proyectoFormativo'    => $fase?->proyectoFormativo?->nombreProyecto,
-                            'actividades'          => $fase?->actividades
-                                ?->map(fn($a) => [
-                                    'id'                   => $a->id,
+                            'competencia' => $competencia?->nombreMateria,
+                            'faseProyecto' => $fase?->descripcionFase,
+                            'proyectoFormativo' => $fase?->proyectoFormativo?->nombreProyecto,
+                            'actividades' => $fase?->actividades
+                                    ?->map(fn($a) => [
+                                    'id' => $a->id,
                                     'descripcionActividad' => $a->descripcionActividad,
                                 ])->values()->toArray() ?? [],
                         ];
@@ -1338,10 +1545,10 @@ class InstructoresController extends Controller
                     ->values();
 
                 return [
-                    'idFicha'           => $ficha?->id,
-                    'codigoFicha'       => $ficha?->codigo,
+                    'idFicha' => $ficha?->id,
+                    'codigoFicha' => $ficha?->codigo,
                     'programaFormacion' => $programa?->nombrePrograma,
-                    'materias'          => $materias,
+                    'materias' => $materias,
                 ];
             })->values();
 
@@ -1360,7 +1567,7 @@ class InstructoresController extends Controller
                 return $matriculas->map(function ($matricula) {
                     $person = $matricula->person;
                     return [
-                        'idMatricula'    => $matricula->id,
+                        'idMatricula' => $matricula->id,
                         'identificacion' => $person?->identificacion,
                         'nombreCompleto' => trim(implode(' ', array_filter([
                             $person?->nombre1,
@@ -1368,8 +1575,8 @@ class InstructoresController extends Controller
                             $person?->apellido1,
                             $person?->apellido2,
                         ]))),
-                        'estado'         => $matricula->estado,
-                        'observacion'    => $matricula->observacion,
+                        'estado' => $matricula->estado,
+                        'observacion' => $matricula->observacion,
                     ];
                 })->values();
             });
