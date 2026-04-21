@@ -517,16 +517,15 @@ class AsistenciaController extends Controller
     public function getAsistenciasPorArea(Request $request): JsonResponse
     {
         try {
-            // Obtener el usuario autenticado
-            $user = auth()->user();
-            if (!$user || !$user->idpersona) {
+            $user = \App\Util\KeyUtil::user() ?? auth()->user();
+            $idPersona = $user?->idpersona ?? $user?->persona?->id;
+
+            if (!$idPersona) {
                 return response()->json([
                     'message' => 'Usuario no autenticado o sin persona asociada',
                     'data' => []
                 ], 401);
             }
-
-            $idPersona = $user->idpersona;
 
             // Obtener todas las matrículas académicas del estudiante
             $matriculas = MatriculaAcademica::with([
@@ -583,6 +582,10 @@ class AsistenciaController extends Controller
                 foreach ($matricula->asistencias as $asistencia) {
                     $sesionMateria = $asistencia->sesionMateria;
                     $fechaSesion = $sesionMateria ? $sesionMateria->fechaSesion : null;
+                    $materiaMatricula = $matricula->materia;
+                    $idMateria = $materiaMatricula ? ($materiaMatricula->id ?? null) : null;
+                    $nombreMateria = $materiaMatricula ? ($materiaMatricula->nombreMateria ?? '') : '';
+                    $numeroSesion = $sesionMateria ? ($sesionMateria->numeroSesion ?? null) : null;
 
                     // Verificar si tiene justificación aprobada
                     $justificacion = JustificacionInasistencia::where('idAsistencia', $asistencia->id)
@@ -660,7 +663,10 @@ class AsistenciaController extends Controller
             }
 
             usort($registrosDetallados, function ($a, $b) {
-                return strtotime($b['fecha']) - strtotime($a['fecha']);
+                $ta = strtotime((string) ($a['fecha'] ?? '')) ?: 0;
+                $tb = strtotime((string) ($b['fecha'] ?? '')) ?: 0;
+
+                return $tb <=> $ta;
             });
 
             $totalRegistros = $totalAsistencias + $totalInasistencias;

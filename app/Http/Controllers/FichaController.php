@@ -883,7 +883,8 @@ class FichaController extends Controller
                     ], 400);
                 }
             }
-            $clases = DB::table('ficha as f')
+            // Grano: una fila por horarioMateria.id (PK). Sin GROUP BY amplio que duplique hm.id.
+            $clases = DB::table('horarioMateria as hm')
                 ->select([
                     'f.id as ficha_id',
                     'f.codigo as ficha_codigo',
@@ -903,12 +904,12 @@ class FichaController extends Controller
                     'g.nombreGrado as grado_nombre',
                     'hm.id as idHorarioMateria',
                     'hm.idGradoMateria as idGradoMateria',
-                    'gm.idMateria as idMateria'
+                    'gm.idMateria as idMateria',
                 ])
+                ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
                 ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
                 ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
                 ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
-                ->join('horarioMateria as hm', 'f.id', '=', 'hm.idFicha')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
                 ->join('materia as m', 'gm.idMateria', '=', 'm.id')
                 ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
@@ -920,28 +921,14 @@ class FichaController extends Controller
                 ->whereNotNull('hm.idDia')
                 ->whereNotNull('hm.horaInicial')
                 ->whereNotNull('hm.horaFinal')
-                ->groupBy([
-                    'f.id',
-                    'f.codigo',
-                    'p.nombrePrograma',
-                    'm.nombreMateria',
-                    'j.nombreJornada',
-                    'd.dia',
-                    'hm.horaInicial',
-                    'hm.horaFinal',
-                    'hm.fechaInicial',
-                    'hm.fechaFinal',
-                    'hm.idDia',
-                    'c.id',
-                    'per.nombre1',
-                    'per.apellido1',
-                    'gp.id',
-                    'g.nombreGrado',
-                    'hm.id',
-                    'hm.idGradoMateria',
-                    'gm.idMateria'
-                ])
+                ->orderBy('hm.fechaInicial', 'asc')
+                ->orderBy('hm.horaInicial', 'asc')
                 ->get();
+
+            // Una fila por PK horarioMateria (entero; evita colisión string/int al agrupar).
+            $clases = collect($clases)
+                ->keyBy(fn ($row) => (int) ($row->idHorarioMateria ?? 0))
+                ->values();
 
             // Procesar resultados para calcular estado, total_sesiones y sesiones_restantes
             $clases = $clases->map(function ($clase) {
@@ -1429,28 +1416,58 @@ class FichaController extends Controller
             // Agregar datos del instructor a claseData
             $claseDataArray = (array) $claseData;
             $claseDataArray['instructor'] = $instructorClase;
+            // Cast (array) de stdClass puede dejar claves raras según driver; fijar campos críticos para el calendario.
+            $claseDataArray['idDia'] = isset($claseData->idDia) ? (int) $claseData->idDia : null;
+            $claseDataArray['idHorarioMateria'] = (int) ($claseData->idHorarioMateria ?? $idHorarioMateria);
+            if (isset($claseData->dia_semana)) {
+                $claseDataArray['dia_semana'] = $claseData->dia_semana;
+            }
 
-            // Obtener TODAS las fechas de clase del INSTRUCTOR para el calendario
-            // Esto permite que el instructor vea todas sus clases en el calendario, no solo la clase actual
+            // Todas las franjas del mismo instructor (misma persona en contrato): mañana + tarde, varias fichas.
+            $idPersonaInstructor = DB::table('contrato')
+                ->where('id', $claseData->contrato_id)
+                ->value('idpersona');
+
             $todasLasFechasClase = DB::table('horarioMateria as hm')
                 ->select([
                     'hm.id as idHorarioMateria',
                     'hm.fechaInicial',
                     'hm.fechaFinal',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
                     'd.dia as dia_semana',
-                    'hm.idDia'
+                    'hm.idDia',
+                    'f.codigo as ficha_codigo',
+                    'm.nombreMateria as materia_nombre',
+                    'p.nombrePrograma as programa_nombre',
+                    'j.nombreJornada as jornada_nombre',
                 ])
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
-                ->where('hm.idContrato', $claseData->contrato_id) // Filtrar por instructor, no por horario específico
+                ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
+                ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+                ->leftJoin('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
+                ->leftJoin('programa as p', 'ap.idPrograma', '=', 'p.id')
+                ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->join('contrato as c_instr', 'hm.idContrato', '=', 'c_instr.id')
+                ->when(
+                    $idPersonaInstructor,
+                    fn ($q) => $q->where('c_instr.idpersona', $idPersonaInstructor),
+                    fn ($q) => $q->where('hm.idContrato', $claseData->contrato_id)
+                )
                 ->whereNotNull('hm.fechaInicial')
                 ->whereNotNull('d.dia')
                 ->orderBy('hm.fechaInicial', 'asc')
+                ->orderBy('hm.horaInicial', 'asc')
                 ->get();
 
             $apertura = AperturarPrograma::find($ficha->idAsignacion);
 
             // Obtener sesiones completadas con sus fechas específicas
             $sesionesCompletadas = $this->obtenerSesionesCompletadas($idHorarioMateria);
+
+            $idsCalendario = $todasLasFechasClase->pluck('idHorarioMateria')->map(fn ($v) => (int) $v)->unique()->values()->all();
+            $sesionesCompletadasPorHorario = $this->obtenerSesionesCompletadasPorHorarios($idsCalendario);
 
             return response()->json([
                 'message' => 'Clase encontrada',
@@ -1459,7 +1476,8 @@ class FichaController extends Controller
                     'ficha' => $ficha,
                     'apertura' => $apertura,
                     'todasLasFechasClase' => $todasLasFechasClase,
-                    'sesionesCompletadas' => $sesionesCompletadas
+                    'sesionesCompletadas' => $sesionesCompletadas,
+                    'sesionesCompletadasPorHorario' => $sesionesCompletadasPorHorario,
                 ]
             ], 200);
         } catch (\Throwable $e) {
@@ -1477,6 +1495,37 @@ class FichaController extends Controller
     }
 
     /**
+     * Fechas consecutivas en [fechaInicial, fechaFinal] donde coincide el día de clase (idDia).
+     * Una sola fuente de verdad para total de sesiones, sincronización y conteo de sesiones dadas.
+     *
+     * @return string[] Fechas en formato Y-m-d
+     */
+    private function obtenerFechasSesionesProgramadas(string $fechaInicial, ?string $fechaFinal, int $idDia): array
+    {
+        if (!$fechaFinal) {
+            return [];
+        }
+
+        $inicio = Carbon::parse($fechaInicial);
+        $fin = Carbon::parse($fechaFinal);
+
+        // idDia BD: 1=Lunes … 7=Domingo → Carbon dayOfWeek (0=Domingo … 6=Sábado)
+        $carbonDayOfWeek = $idDia === 7 ? 0 : $idDia;
+
+        $fechas = [];
+        $fechaActual = $inicio->copy();
+
+        while ($fechaActual->lte($fin)) {
+            if ($fechaActual->dayOfWeek === $carbonDayOfWeek) {
+                $fechas[] = $fechaActual->format('Y-m-d');
+            }
+            $fechaActual->addDay();
+        }
+
+        return $fechas;
+    }
+
+    /**
      * Calcula el total de sesiones entre fechaInicial y fechaFinal
      * basado en el día de la semana (idDia)
      * 
@@ -1487,28 +1536,81 @@ class FichaController extends Controller
      */
     private function calcularTotalSesiones(string $fechaInicial, ?string $fechaFinal, int $idDia): int
     {
-        if (!$fechaFinal) {
-            return 0;
+        return count($this->obtenerFechasSesionesProgramadas($fechaInicial, $fechaFinal, $idDia));
+    }
+
+    /**
+     * Horas y nombre de jornada del horario (para alinear sesionMateria con hora final real).
+     */
+    private function metaHorarioParaSesiones(int $idHorarioMateria): ?object
+    {
+        $row = DB::table('horarioMateria as hm')
+            ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
+            ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+            ->where('hm.id', $idHorarioMateria)
+            ->select(['hm.horaInicial', 'hm.horaFinal', 'j.nombreJornada as jornada_nombre'])
+            ->first();
+
+        return $row ?: null;
+    }
+
+    /**
+     * Momento de fin de la franja de clase en la fecha dada (ajuste tarde/noche como en sincronizarSesionesCompletadas).
+     */
+    private function carbonFinVentanaClaseDia(
+        string $fechaYmd,
+        string $horaInicial,
+        string $horaFinal,
+        ?string $jornadaNombre
+    ): ?Carbon {
+        $horaIni = $this->parseHora($horaInicial);
+        $horaFin = $this->parseHora($horaFinal);
+        if (!$horaIni || !$horaFin) {
+            return null;
         }
 
-        $inicio = Carbon::parse($fechaInicial);
-        $fin = Carbon::parse($fechaFinal);
-
-        // Convertir idDia a formato Carbon (0=Domingo, 1=Lunes, ..., 6=Sábado)
-        // idDia BD: 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado, 7=Domingo
-        $carbonDayOfWeek = $idDia === 7 ? 0 : $idDia;
-
-        $totalSesiones = 0;
-        $fechaActual = $inicio->copy();
-
-        while ($fechaActual->lte($fin)) {
-            if ($fechaActual->dayOfWeek === $carbonDayOfWeek) {
-                $totalSesiones++;
-            }
-            $fechaActual->addDay();
+        $hIni = $horaIni->hour;
+        $mIni = $horaIni->minute;
+        $hFin = $horaFin->hour;
+        $mFin = $horaFin->minute;
+        $lowerJ = strtolower((string) $jornadaNombre);
+        $esTardeONoche = str_contains($lowerJ, 'tarde')
+            || str_contains($lowerJ, 'noche')
+            || str_contains($lowerJ, 'nocturna');
+        if ($esTardeONoche && $hIni < 12) {
+            $hIni += 12;
+        }
+        if ($esTardeONoche && $hFin < 12) {
+            $hFin += 12;
         }
 
-        return $totalSesiones;
+        $base = Carbon::parse($fechaYmd)->startOfDay();
+        $inicio = $base->copy()->setTime($hIni, $mIni, 0);
+        $fin = $base->copy()->setTime($hFin, $mFin, 0);
+        if ($fin->lt($inicio)) {
+            $fin->addDay();
+        }
+
+        return $fin;
+    }
+
+    /**
+     * La fila en sesionMateria solo cuenta como sesión finalizada para totales/API
+     * cuando el reloj actual ya pasó la hora final del horario ese día.
+     */
+    private function sesionMateriaContadaComoFinalizada(
+        string $fechaSesion,
+        string $horaInicial,
+        string $horaFinal,
+        ?string $jornadaNombre
+    ): bool {
+        $ymd = Carbon::parse($fechaSesion)->format('Y-m-d');
+        $fin = $this->carbonFinVentanaClaseDia($ymd, $horaInicial, $horaFinal, $jornadaNombre);
+        if ($fin === null) {
+            return false;
+        }
+
+        return Carbon::now()->gte($fin);
     }
 
     /**
@@ -1529,12 +1631,33 @@ class FichaController extends Controller
         string $horaFinal,
         int $idDia
     ): int {
-        // Contar sesiones registradas en la base de datos con fechaSesion no nula
-        $sesionesRegistradas = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
-            ->whereNotNull('fechaSesion')
-            ->count();
+        $fechasProgramadas = $this->obtenerFechasSesionesProgramadas($fechaInicial, $fechaFinal, $idDia);
+        if ($fechasProgramadas === []) {
+            return 0;
+        }
 
-        return $sesionesRegistradas;
+        $meta = $this->metaHorarioParaSesiones($idHorarioMateria);
+        if ($meta === null) {
+            return 0;
+        }
+
+        // Solo cuentan fechas con registro en sesionMateria y ya pasada la hora final de esa franja (reloj real).
+        return SesionMateria::query()
+            ->where('idHorarioMateria', $idHorarioMateria)
+            ->whereNotNull('fechaSesion')
+            ->whereIn(DB::raw('DATE(fechaSesion)'), $fechasProgramadas)
+            ->get()
+            ->filter(function ($s) use ($meta) {
+                return $this->sesionMateriaContadaComoFinalizada(
+                    (string) $s->fechaSesion,
+                    (string) $meta->horaInicial,
+                    (string) $meta->horaFinal,
+                    $meta->jornada_nombre ?? null
+                );
+            })
+            ->map(fn ($s) => Carbon::parse($s->fechaSesion)->format('Y-m-d'))
+            ->unique()
+            ->count();
     }
 
     /**
@@ -1563,8 +1686,6 @@ class FichaController extends Controller
         }
 
         try {
-            $inicio = Carbon::parse($fechaInicial);
-            $fin = Carbon::parse($fechaFinal);
             $ahora = Carbon::now();
 
             // Parsear horas
@@ -1574,9 +1695,6 @@ class FichaController extends Controller
                 return;
             }
 
-            // Convertir idDia a formato Carbon (0=Domingo, 1=Lunes, ..., 6=Sábado)
-            $carbonDayOfWeek = $idDia === 7 ? 0 : $idDia;
-
             // Obtener sesiones existentes como array de fechas para validación rápida
             $sesionesExistentes = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
                 ->whereNotNull('fechaSesion')
@@ -1584,38 +1702,8 @@ class FichaController extends Controller
                 ->map(fn($fecha) => Carbon::parse($fecha)->format('Y-m-d'))
                 ->toArray();
 
-            // Calcular todas las fechas de clase desde fechaInicial hasta fechaFinal
-            $todasLasFechasClase = [];
-            $fechaTemporal = $inicio->copy();
-
-            // Si fechaInicial coincide con el día de la semana, incluirla como primera sesión
-            // Si no coincide, también incluirla si ya pasó su hora de inicio (clase que comenzó ese día)
-            if ($fechaTemporal->dayOfWeek === $carbonDayOfWeek) {
-                // Coincide: incluir fechaInicial como primera sesión
-                $todasLasFechasClase[] = $fechaTemporal->format('Y-m-d');
-                $fechaTemporal->addWeek(); // Avanzar una semana para la siguiente sesión
-            } else {
-                // No coincide: incluir fechaInicial si ya pasó su hora de inicio
-                $fechaHoraInicioPrimera = $fechaTemporal->copy()
-                    ->setTime($horaIni->hour, $horaIni->minute, $horaIni->second);
-                if ($ahora->gte($fechaHoraInicioPrimera)) {
-                    $todasLasFechasClase[] = $fechaTemporal->format('Y-m-d');
-                }
-                // Avanzar hasta el siguiente día de la semana correspondiente
-                $diasHastaProximoDia = ($carbonDayOfWeek - $fechaTemporal->dayOfWeek + 7) % 7;
-                if ($diasHastaProximoDia === 0) {
-                    $diasHastaProximoDia = 7;
-                }
-                $fechaTemporal->addDays($diasHastaProximoDia);
-            }
-
-            // Continuar con las siguientes sesiones semanales
-            while ($fechaTemporal->lte($fin)) {
-                if ($fechaTemporal->dayOfWeek === $carbonDayOfWeek) {
-                    $todasLasFechasClase[] = $fechaTemporal->format('Y-m-d');
-                }
-                $fechaTemporal->addWeek();
-            }
+            // Misma lista de fechas que total_sesiones / calcularTotalSesiones (sin sesiones “fantasma” en días incorrectos)
+            $todasLasFechasClase = $this->obtenerFechasSesionesProgramadas($fechaInicial, $fechaFinal, $idDia);
 
             // Crear mapa de fecha -> numeroSesion (orden cronológico)
             $mapaFechaNumeroSesion = [];
@@ -1625,7 +1713,6 @@ class FichaController extends Controller
 
             // Crear sesiones para fechas pasadas que ya cumplieron su hora de inicio
             $nuevasSesiones = [];
-            $ahoraStr = $ahora->format('Y-m-d H:i:s');
 
             foreach ($todasLasFechasClase as $fechaClaseStr) {
                 // Si ya existe, omitir
@@ -1775,16 +1862,32 @@ class FichaController extends Controller
      */
     /**
      * Obtiene las sesiones completadas de un horario con sus fechas formateadas
-     * 
+     * (solo sesiones ya cerradas según hora final del horario y reloj actual).
+     *
      * @param int $idHorarioMateria ID del horario de materia
      * @return array Array de sesiones completadas con fecha formateada
      */
     private function obtenerSesionesCompletadas(int $idHorarioMateria): array
     {
+        $meta = $this->metaHorarioParaSesiones($idHorarioMateria);
+        if ($meta === null) {
+            return [];
+        }
+
         $sesiones = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
             ->whereNotNull('fechaSesion')
             ->orderBy('fechaSesion', 'asc')
-            ->get();
+            ->get()
+            ->unique('id')
+            ->values()
+            ->filter(function ($sesion) use ($meta) {
+                return $this->sesionMateriaContadaComoFinalizada(
+                    (string) $sesion->fechaSesion,
+                    (string) $meta->horaInicial,
+                    (string) $meta->horaFinal,
+                    $meta->jornada_nombre ?? null
+                );
+            });
 
         return $sesiones->map(function ($sesion) {
             $fecha = Carbon::parse($sesion->fechaSesion);
@@ -1798,6 +1901,61 @@ class FichaController extends Controller
                 'observacion' => $sesion->observacion,
             ];
         })->toArray();
+    }
+
+    /**
+     * Sesiones completadas agrupadas por idHorarioMateria (calendario con varias franjas el mismo día).
+     *
+     * @param  array<int>  $idsHorarioMateria
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    private function obtenerSesionesCompletadasPorHorarios(array $idsHorarioMateria): array
+    {
+        $idsHorarioMateria = array_values(array_unique(array_filter(array_map('intval', $idsHorarioMateria))));
+        if ($idsHorarioMateria === []) {
+            return [];
+        }
+
+        $sesiones = SesionMateria::whereIn('idHorarioMateria', $idsHorarioMateria)
+            ->whereNotNull('fechaSesion')
+            ->orderBy('fechaSesion', 'asc')
+            ->get()
+            ->unique('id')
+            ->values();
+
+        $metasPorHm = [];
+        foreach ($idsHorarioMateria as $idHm) {
+            $metasPorHm[$idHm] = $this->metaHorarioParaSesiones($idHm);
+        }
+
+        $porHorario = [];
+        foreach ($sesiones as $sesion) {
+            $idHm = (int) $sesion->idHorarioMateria;
+            $meta = $metasPorHm[$idHm] ?? null;
+            if (
+                $meta === null
+                || !$this->sesionMateriaContadaComoFinalizada(
+                    (string) $sesion->fechaSesion,
+                    (string) $meta->horaInicial,
+                    (string) $meta->horaFinal,
+                    $meta->jornada_nombre ?? null
+                )
+            ) {
+                continue;
+            }
+            $fecha = Carbon::parse($sesion->fechaSesion);
+            $porHorario[$idHm][] = [
+                'id' => $sesion->id,
+                'numeroSesion' => $sesion->numeroSesion,
+                'fechaSesion' => $sesion->fechaSesion,
+                'fechaFormateada' => $fecha->locale('es')->isoFormat('dddd, D [de] MMMM [de] YYYY'),
+                'fechaCorta' => $fecha->format('d/m/Y'),
+                'estado' => $sesion->estado,
+                'observacion' => $sesion->observacion,
+            ];
+        }
+
+        return $porHorario;
     }
 
     /**

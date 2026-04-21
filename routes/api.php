@@ -1391,7 +1391,6 @@ Route::middleware('auth:api')->group(function () {
 
 Route::get('estadisticas-asistencia', [AsistenciaController::class, 'getEstadisticasAsistencia']);
 Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
-Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
 Route::post('registrar-asistencia', [AsistenciaController::class, 'store']);
 // Endpoint temporal para subir documento de excusa
 Route::post('excusas/{idExcusa}/documento', [AsistenciaController::class, 'subirDocumentoExcusa']);
