@@ -12,6 +12,7 @@ use App\Models\DetalleRmi;
 use App\Models\NotificacionSistema;
 use App\Models\Rmi;
 use App\Models\SesionMateria;
+use App\Models\User;
 use App\Util\KeyUtil;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
@@ -825,7 +826,6 @@ class InstructoresController extends Controller
         }
     }
 
-
     // cambiar el estado de asociacion de un detalleRmi
     public function setEstadoAsociacion($idGradoMateria, Request $request)
     {
@@ -1254,33 +1254,265 @@ class InstructoresController extends Controller
 
     public function aceptarInforme(Request $request)
     {
-        $request->validate([
-            'idRmi' => 'required|integer',
-            'idsHorarioMateria' => 'required|array',
-        ]);
-
-        DetalleRmi::where('idRmi', $request->idRmi)
-            ->whereIn('idHorarioMateria', $request->idsHorarioMateria)
-            ->update(['estadoInforme' => 'ACEPTADO']);
-
-        return response()->json(['message' => 'Informe aceptado correctamente']);
-    }
-
-    public function rechazarInforme(Request $request)
-    {
-        $request->validate([
-            'idRmi' => 'required|integer',
-            'idsHorarioMateria' => 'required|array'
-        ]);
-
-        DetalleRmi::where('idRmi', $request->idRmi)
-            ->whereIn('idHorarioMateria', $request->idsHorarioMateria)
-            ->update([
-                'estadoInforme' => 'PENDIENTE'
+        DB::beginTransaction();
+        try {
+            $validated = $request->validate([
+                'idRmi' => 'required|integer',
+                'idsHorarioMateria' => 'required|array',
+                'email' => 'required|email'
             ]);
 
-        return response()->json(['message' => 'Informe rechazado correctamente']);
+            // Obtener información del RMI
+            $rmi = Rmi::findOrFail($validated['idRmi']);
+            
+            // Obtener el instructor a través del primer DetalleRmi
+            $primerDetalle = DetalleRmi::where('idRmi', $validated['idRmi'])
+                ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
+                ->first();
+
+            if (!$primerDetalle) {
+                DB::rollBack();
+                return response()->json(['message' => 'No se encontraron detalles del RMI'], 404);
+            }
+
+            $horario = $primerDetalle->horarioMateria;
+            $contrato = $horario->contrato;
+            $instructor = $contrato->persona;
+
+            // Actualizar el estado del informe
+            DetalleRmi::where('idRmi', $validated['idRmi'])
+                ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
+                ->update(['estadoInforme' => 'ACEPTADO']);
+
+            // Obtener el usuario actual
+            $user = KeyUtil::user();
+            //remitente:
+            $userRemitente = User::where('idpersona', $contrato->idpersona)->first();
+
+            // Enviar notificación
+            $this->enviarNotificacionInforme($user->id, $userRemitente->id, $rmi->periodo, null, 'APROBADO');
+
+            DB::commit();
+
+            // Enviar correo
+            $email = $validated['email'];
+            $nombre = $instructor->nombre1;
+            $asunto = 'Informe Aceptado - Periodo ' . $rmi->periodo;
+            $mensaje = "Estimado(a) $nombre,\n\n"
+                . "Le informamos que su informe correspondiente al periodo {$rmi->periodo} ha sido ACEPTADO.\n\n"
+                . "No se requieren acciones adicionales por su parte.\n\n"
+                . "Si tiene alguna inquietud, puede comunicarse con el equipo administrativo.\n\n"
+                . "Atentamente,\n"
+                . "Equipo Administrativo\n"
+                . "Sistema de Gestión Académica";
+
+            \App\Jobs\SendBasicEmail::dispatch($email, $asunto, $mensaje);
+
+            return response()->json(['message' => 'Informe aceptado correctamente']);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error al aceptar informe: ' . $e->getMessage(), [
+                'idRmi' => $request->input('idRmi'),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'Error al aceptar el informe', 'error' => $e->getMessage()], 500);
+        }
     }
+
+    public function revertirInforme(Request $request)
+    {
+        DB::beginTransaction();
+        try {
+            $validated = $request->validate([
+                'idRmi' => 'required|integer',
+                'idsHorarioMateria' => 'required|array',
+                'email' => 'required|email'
+            ]);
+
+            // Obtener información del RMI
+            $rmi = Rmi::findOrFail($validated['idRmi']);
+            
+            // Obtener el instructor a través del primer DetalleRmi
+            $primerDetalle = DetalleRmi::where('idRmi', $validated['idRmi'])
+                ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
+                ->first();
+
+            if (!$primerDetalle) {
+                DB::rollBack();
+                return response()->json(['message' => 'No se encontraron detalles del RMI'], 404);
+            }
+
+            $horario = $primerDetalle->horarioMateria;
+            $contrato = $horario->contrato;
+            $instructor = $contrato->persona;
+
+            // Revertir el estado del informe a PENDIENTE
+            DetalleRmi::where('idRmi', $validated['idRmi'])
+                ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
+                ->update([
+                    'estadoInforme' => 'PENDIENTE'
+                ]);
+
+            // Obtener el usuario actual
+            $user = KeyUtil::user();
+            //remitente:
+            $userRemitente = User::where('idpersona', $contrato->idpersona)->first();
+
+            // Enviar notificación
+            $this->enviarNotificacionInforme($user->id, $userRemitente->id, $rmi->periodo, null, 'DEVUELTO');
+
+            DB::commit();
+
+            // Enviar correo
+            $email = $validated['email'];
+            $nombre = $instructor->nombre1;
+            $asunto = 'Informe Revertido a Pendiente - Periodo ' . $rmi->periodo;
+            $mensaje = "Estimado(a) $nombre,\n\n"
+                . "Le informamos que su informe correspondiente al periodo {$rmi->periodo} ha sido REVERTIDO a PENDIENTE.\n\n"
+                . "Por favor revise la plataforma para más detalles y proceda con las correcciones o acciones necesarias.\n\n"
+                . "Atentamente,\n"
+                . "Equipo Administrativo\n"
+                . "Sistema de Gestión Académica";
+
+            \App\Jobs\SendBasicEmail::dispatch($email, $asunto, $mensaje);
+
+            return response()->json([
+                'message' => 'Informe revertido a pendiente correctamente',
+                'estado' => 'PENDIENTE'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error al revertir informe: ' . $e->getMessage(), [
+                'idRmi' => $request->input('idRmi'),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'Error al revertir el informe', 'error' => $e->getMessage()], 500);
+        }
+    }
+    
+    public function rechazarInforme(Request $request)
+    {
+        DB::beginTransaction();
+        try {
+            $validated = $request->validate([
+                'idRmi' => 'required|integer',
+                'idsHorarioMateria' => 'required|array',
+                'email' => 'required|email',
+                'motivo' => 'required|string'
+            ]);
+
+            // Obtener información del RMI
+            $rmi = Rmi::findOrFail($validated['idRmi']);
+            $motivo =$validated['motivo'];
+            
+            // Obtener el instructor a través del primer DetalleRmi
+            $primerDetalle = DetalleRmi::where('idRmi', $validated['idRmi'])
+                ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
+                ->first();
+
+            if (!$primerDetalle) {
+                DB::rollBack();
+                return response()->json(['message' => 'No se encontraron detalles del RMI'], 404);
+            }
+
+            $horario = $primerDetalle->horarioMateria;
+            $contrato = $horario->contrato;
+            $instructor = $contrato->persona;
+
+            // Actualizar el estado del informe
+            DetalleRmi::where('idRmi', $validated['idRmi'])
+                ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
+                ->update([
+                    'estadoInforme' => 'PENDIENTE'
+                ]);
+
+            // Obtener el usuario actual
+            $user = KeyUtil::user();
+            //remitente:
+            $userRemitente = User::where('idpersona', $contrato->idpersona)->first();
+
+            // Enviar notificación
+            $this->enviarNotificacionInforme($user->id, $userRemitente->id, $rmi->periodo, $motivo, 'RECHAZADO');
+
+            DB::commit();
+
+            // Enviar correo
+            $email = $validated['email'];
+            $nombre = $instructor->nombre1;
+            $asunto = 'Informe Rechazado - Periodo ' . $rmi->periodo;
+            $mensaje = "Estimado(a) $nombre,\n\n"
+                . "Le informamos que su informe correspondiente al periodo {$rmi->periodo} ha sido RECHAZADO.\n\n"
+                . "Por favor revise las observaciones y realice las correcciones necesarias.\n\n"
+                . "Motivo:\n\n"
+                . "* {$motivo}:.\n\n"
+                . "Atentamente,\n"
+                . "Equipo administrativo";
+
+            \App\Jobs\SendBasicEmail::dispatch($email, $asunto, $mensaje);
+
+            return response()->json(['message' => 'Informe rechazado correctamente']);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Error de validación', 'errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error al rechazar informe: ' . $e->getMessage(), [
+                'idRmi' => $request->input('idRmi'),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'Error al rechazar el informe', 'error' => $e->getMessage()], 500);
+        }
+    }
+    protected function enviarNotificacionInforme(
+            $remitenteId,
+            $receptorId,
+            $periodo,
+            $motivo = null,
+            $accion = 'APROBADO'
+        ) {
+            switch ($accion) {
+                case 'APROBADO':
+                    $asunto = 'Informe aprobado';
+                    $mensaje = "Su informe del periodo {$periodo} ha sido aprobado.";
+                    break;
+
+                case 'RECHAZADO':
+                    $asunto = 'Informe rechazado';
+                    $mensaje = "Su informe del periodo {$periodo} ha sido rechazado."
+                        . ($motivo ? " Motivo: {$motivo}" : "");
+                    break;
+
+                case 'DEVUELTO':
+                    $asunto = 'Informe devuelto a pendiente';
+                    $mensaje = "Su informe del periodo {$periodo} ha sido devuelto a estado PENDIENTE."
+                        . " Por favor revise la plataforma y realice los ajustes necesarios.";
+                    break;
+
+                default:
+                    $asunto = 'Actualización de informe';
+                    $mensaje = "El estado de su informe del periodo {$periodo} ha cambiado.";
+                    break;
+            }
+
+            return NotificacionSistema::create([
+                'fecha' => now()->toDateString(),
+                'hora' => now()->toTimeString(),
+                'asunto' => $asunto,
+                'mensaje' => $mensaje,
+                'estado_id' => 1,
+                'idUsuarioReceptor' => $receptorId,
+                'idUsuarioRemitente' => $remitenteId,
+                'idTipoNotificacion' => 1,
+                'idEmpresa' => KeyUtil::idCompany(),
+                'route' => '/rmi'
+            ]);
+        }
 
     public function getAllRmiDetailsForAdmin(Request $request)
     {
@@ -1326,6 +1558,7 @@ class InstructoresController extends Controller
                         'instructorNombre' => $persona->nombre1 . ' ' . $persona->apellido1,
                         'instructorId' => $persona->id,
                         'identificacion' => $persona->identificacion,
+                        'emailInstructor' => $persona->email,
                         'idContrato' => $contrato->id,
                         'detalles' => $detallesGrouped
                     ];
