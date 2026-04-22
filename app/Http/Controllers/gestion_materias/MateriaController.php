@@ -86,8 +86,8 @@ class MateriaController extends Controller
 
                 foreach ($rapsIdsEnMatricula as $rapId) {
                     $estudiantes = $matriculasAgrupadas->get($rapId, collect());
-                    // Si al menos un estudiante aparece como EVALUADO, FINALIZADO o APROBADO, se cuenta el RAP como completado
-                    if ($estudiantes->contains(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']))) {
+                    // Si al menos 5 estudiantes aparecen como EVALUADO, FINALIZADO o APROBADO, se cuenta el RAP como completado
+                    if ($estudiantes->filter(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']))->count() >= 5) {
                         $rapsFinalizados++;
                     }
                 }
@@ -431,10 +431,10 @@ class MateriaController extends Controller
             $horasRequeridas = $horasRap * ($porcentajeEjecucion / 100);
 
             // Detección de estado:
-            // Por matrícula (FINALIZADO / EVALUADO / APROBADO), o
+            // Por matrícula (FINALIZADO / EVALUADO / APROBADO con al menos 5 aprendices), o
             // Por horas ejecutadas >= horas requeridas con el % de ejecución
             $finalizadoPorMatricula = $matriculasFicha->get($materiaId, collect())
-                ->contains(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']));
+                ->filter(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']))->count() >= 5;
 
             $finalizadoPorHoras = $horasRequeridas > 0 && $horasActuales >= $horasRequeridas;
 
@@ -703,6 +703,9 @@ class MateriaController extends Controller
 
         $rapsYaFinalizados = MatriculaAcademica::where('idFicha', $idFicha)
                 ->whereIn('estado', ['FINALIZADO', 'EVALUADO', 'APROBADO'])
+                ->select('idMateria')
+                ->groupBy('idMateria')
+                ->havingRaw('COUNT(*) >= 5')
                 ->pluck('idMateria')->toArray();
                 
                 $raps = MatriculaAcademica::where('idFicha', $idFicha)
