@@ -1365,10 +1365,10 @@ class HorarioMateriaController extends Controller
                             $horasData = $this->calcularHorasMateria($horarios->filter(fn($h) => $h->gradoMateria->idMateria == $idMateriaPadre || $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre));
 
                             // Estado global de RAPs en la ficha basado en MatriculaAcademica
-                            // Si al menos un aprendiz está EVALUADO, FINALIZADO o APROBADO en MatriculaAcademica, se marca como terminado
+                            // Si al menos 5 aprendices están EVALUADOS, FINALIZADOS o APROBADOS en MatriculaAcademica, se marca como terminado
                             $estadoRapsGlobal = $horariosRapsFicha->groupBy('gradoMateria.idMateria')->map(function ($g, $idMateria) use ($matriculasFicha) {
                                 $matriculas = $matriculasFicha->get($idMateria, collect());
-                                return $matriculas->contains(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']));
+                                return $matriculas->filter(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']))->count() >= 5;
                             });
 
                             // Sincronizar estados de RAPs en este trimestre si ya están finalizados en matricula
@@ -1735,13 +1735,15 @@ class HorarioMateriaController extends Controller
                 return response()->json([], 200);
             }
 
-            // RAPs cuyo estado en MatriculaAcademica sea FINALIZADO, EVALUADO o APROBADO
+            // RAPs cuyo estado en MatriculaAcademica sea FINALIZADO, EVALUADO o APROBADO (con al menos 5 aprendices)
             // para las fichas y materias que maneja el contrato
             $materiasFinalizadasIds = MatriculaAcademica::whereIn('idFicha', $fichaIds)
                 ->whereIn('idMateria', $materiaIds)
-                ->whereIn('estado', ['FINALIZADO'])
+                ->whereIn('estado', ['FINALIZADO', 'EVALUADO', 'APROBADO'])
+                ->select('idMateria')
+                ->groupBy('idMateria')
+                ->havingRaw('COUNT(*) >= 5')
                 ->pluck('idMateria')
-                ->unique()
                 ->toArray();
 
             $materias = Materia::whereIn('id', $materiasFinalizadasIds)->get();
