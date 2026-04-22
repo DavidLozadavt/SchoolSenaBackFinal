@@ -1431,11 +1431,13 @@ Route::middleware('auth:api')->group(function () {
     Route::get('get_years_contract_person', [InstructoresController::class, 'getYearsContractPerson']);
     Route::get('get_data_rmi_configuration_by_year', [InstructoresController::class, 'getDataRmiConfiguracionByYear']);
     Route::get('get_informe_by_instructor_rmi', [InstructoresController::class, 'getInformeByInstructorRmi']);
+    Route::get('get_informe_by_coordinador_rmi', [InstructoresController::class, 'getInformeByCoordinadorRmi']);
     Route::post('detalle_rmi/archivo_pago_periodo', [InstructoresController::class, 'uploadArchivoPagoPeriodo']);
     Route::post('detalle_rmi/archivo_informe_instructor', [InstructoresController::class, 'uploadInformeInstructor']);
     Route::post('detalle_rmi/numero_planilla', [InstructoresController::class, 'updateNumeroPlanilla']);
     Route::post('detalle_rmi/aceptar_informe', [InstructoresController::class, 'aceptarInforme']);
     Route::post('detalle_rmi/rechazar_informe', [InstructoresController::class, 'rechazarInforme']);
+    Route::post('detalle_rmi/revertir_informe', [InstructoresController::class, 'revertirInforme']);
     Route::get('get_all_rmi_details_for_admin', [InstructoresController::class, 'getAllRmiDetailsForAdmin']);
     Route::post('merge_pdfs', [InstructoresController::class, 'mergePdfs']);
 });
