@@ -147,8 +147,8 @@
 
 
 <body>
-    @php 
-        $actividadesContrato = $actividadesContrato ?? collect(); 
+    @php
+        $actividadesContrato = $actividadesContrato ?? collect();
     @endphp
     <div class="header">
         <img src="{{ public_path('media/images/sena/logo-sena.png') }}">
@@ -332,203 +332,210 @@
         <tbody>
             {{-- ── Fila 1: índice [0] ── --}}
             @if ($actividadesContrato->has(0))
-            <tr>
-                <td style="text-align:center;">1</td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[0]->obligaciones }}
-                </td>
-                <td style="vertical-align: middle; padding: 5px; text-align: justify;">
-                    <div style="margin-bottom: 8px;">{{ $actividadesContrato[0]->accionesRealizadas }}</div>
+                <tr>
+                    <td style="text-align:center;">1</td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        {{ $actividadesContrato[0]->obligaciones }}
+                    </td>
+                    <td style="vertical-align: middle; padding: 5px; text-align: justify;">
+                        <div style="margin-bottom: 8px;">{{ $actividadesContrato[0]->accionesRealizadas }}</div>
 
-                    <table class="tabla-horarios" style="margin: 8px 0; border: 1px solid #000;">
-                        <colgroup>
-                            <col style="width: 12%;">
-                            <col style="width: 30%;">
-                            <col style="width: 40%;">
-                            <col style="width: 18%;">
-                        </colgroup>
-                        <thead>
-                            <tr>
-                                <th style="font-size: 9px; padding: 3px; text-align: justify;">No. Ficha</th>
-                                <th style="font-size: 9px; padding: 3px; text-align: justify;">Nombre Programa</th>
-                                <th style="font-size: 9px; padding: 3px; text-align: justify;">Horario</th>
-                                <th style="font-size: 9px; padding: 3px; text-align: justify;">Horas Mes</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @php $totalGeneral = 0; @endphp
-
-                            @foreach ($horariosPorFicha as $fichaData)
-                                @php $totalGeneral += $fichaData['totalHorasFicha']; @endphp
+                        <table class="tabla-horarios" style="margin: 8px 0; border: 1px solid #000;">
+                            <colgroup>
+                                <col style="width: 12%;">
+                                <col style="width: 30%;">
+                                <col style="width: 40%;">
+                                <col style="width: 18%;">
+                            </colgroup>
+                            <thead>
                                 <tr>
-                                    <td style="font-size: 9px; padding: 3px; text-align: justify;">
-                                        {{ $fichaData['codigoFicha'] }}</td>
-                                    <td style="font-size: 9px; padding: 3px; text-align: justify;">
-                                        {{ $fichaData['programaFormacion'] }}</td>
-                                    <td style="font-size: 9px; padding: 3px; text-align: justify;">
-                                        @foreach ($fichaData['filas'] as $fila)
-                                            <div style="margin: 2px 0;">
-                                                <strong>{{ $fila['dia'] }}:</strong>
-                                                {{ \Carbon\Carbon::parse($fila['horaInicial'])->format('h:i A') }} -
-                                                {{ \Carbon\Carbon::parse($fila['horaFinal'])->format('h:i A') }}
-                                            </div>
-                                        @endforeach
+                                    <th style="font-size: 9px; padding: 3px; text-align: justify;">No. Ficha</th>
+                                    <th style="font-size: 9px; padding: 3px; text-align: justify;">Nombre Programa</th>
+                                    <th style="font-size: 9px; padding: 3px; text-align: justify;">Horario</th>
+                                    <th style="font-size: 9px; padding: 3px; text-align: justify;">Horas Mes</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @php $totalGeneral = 0; @endphp
+
+                                @foreach ($horariosPorFicha as $fichaData)
+                                    @php $totalGeneral += $fichaData['totalHorasFicha']; @endphp
+                                    <tr>
+                                        <td style="font-size: 9px; padding: 3px; text-align: justify;">
+                                            {{ $fichaData['codigoFicha'] }}</td>
+                                        <td style="font-size: 9px; padding: 3px; text-align: justify;">
+                                            {{ $fichaData['programaFormacion'] }}</td>
+                                        <td style="font-size: 9px; padding: 3px; text-align: justify;">
+                                            @foreach ($fichaData['filas'] as $fila)
+                                                <div style="margin: 2px 0;">
+                                                    <strong>{{ $fila['dia'] }}:</strong>
+                                                    {{ \Carbon\Carbon::parse($fila['horaInicial'])->format('h:i A') }}
+                                                    -
+                                                    {{ \Carbon\Carbon::parse($fila['horaFinal'])->format('h:i A') }}
+                                                </div>
+                                            @endforeach
+                                        </td>
+                                        <td style="font-size: 9px; padding: 3px; text-align: justify;">
+                                            {{ $fichaData['totalHorasFicha'] }}</td>
+                                    </tr>
+                                @endforeach
+
+                                <tr>
+                                    <td colspan="3" style="text-align: right; font-size: 9px; padding: 3px;">
+                                        <strong>TOTAL HORAS MES</strong>
                                     </td>
                                     <td style="font-size: 9px; padding: 3px; text-align: justify;">
-                                        {{ $fichaData['totalHorasFicha'] }}</td>
+                                        <strong>{{ $totalGeneral }}</strong>
+                                    </td>
                                 </tr>
-                            @endforeach
+                            </tbody>
+                        </table>
 
-                            <tr>
-                                <td colspan="3" style="text-align: right; font-size: 9px; padding: 3px;">
-                                    <strong>TOTAL HORAS MES</strong>
-                                </td>
-                                <td style="font-size: 9px; padding: 3px; text-align: justify;">
-                                    <strong>{{ $totalGeneral }}</strong>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-
-                    <div style="margin-top: 8px; font-size: 10px; text-align: justify;">
-                        Realizar y entregar los seguimientos de etapa productiva de las fichas,
-                        asignadas Revisión de bitácoras Evaluación de etapa productiva.
-                    </div>
-                </td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[0]->evidencias }}</td>
-            </tr>
+                        <div style="margin-top: 8px; font-size: 10px; text-align: justify;">
+                            Realizar y entregar los seguimientos de etapa productiva de las fichas,
+                            asignadas Revisión de bitácoras Evaluación de etapa productiva.
+                        </div>
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[0]->evidencias }}
+                    </td>
+                </tr>
             @endif
 
             {{-- ── Fila 2: índice [1] ── --}}
             @if ($actividadesContrato->has(1))
-            <tr>
-                <td style="text-align:center;">2</td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[1]->obligaciones }}
-                </td>
-                <td style="vertical-align: middle; text-align: justify;">
-                    {{ $actividadesContrato[1]->accionesRealizadas }}
+                <tr>
+                    <td style="text-align:center;">2</td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        {{ $actividadesContrato[1]->obligaciones }}
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        {{ $actividadesContrato[1]->accionesRealizadas }}
 
-                    @foreach ($fichasConProyecto as $ficha)
-                        @foreach ($ficha['materias'] as $materia)
-                            <table style="margin-top: 20px; width:100%">
+                        @foreach ($fichasConProyecto as $ficha)
+                            @foreach ($ficha['materias'] as $materia)
+                                <table style="margin-top: 20px; width:100%">
+                                    <tr>
+                                        <td style="text-align: justify; width: 30%">Ficha</td>
+                                        <td style="text-align: justify">{{ $ficha['codigoFicha'] }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="text-align: justify">Programa</td>
+                                        <td style="text-align: justify">{{ $ficha['programaFormacion'] }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="text-align: justify">Proyecto</td>
+                                        <td style="text-align: justify">{{ $materia['proyectoFormativo'] }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="text-align: justify">Actividad</td>
+                                        <td style="text-align: justify">
+                                            @foreach ($materia['actividades'] as $actividad)
+                                                {{ $actividad['descripcionActividad'] }}<br>
+                                            @endforeach
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="text-align: justify">Fase del Proyecto</td>
+                                        <td style="text-align: justify">{{ $materia['faseProyecto'] }}</td>
+                                    </tr>
+                                </table>
+                            @endforeach
+                        @endforeach
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[1]->evidencias }}
+                    </td>
+                </tr>
+            @endif
+            {{-- ── Fila 3: índice [2] ── --}}
+            @if ($actividadesContrato->has(2))
+                <tr>
+                    <td style="text-align:center;">3</td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        {{ $actividadesContrato[2]->obligaciones }}
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        {{ $actividadesContrato[2]->accionesRealizadas }}
+                        @foreach ($aprendicesPorFicha as $idFicha => $aprendices)
+                            @php
+                                $fichaInfo = $horariosPorFicha->firstWhere('idFicha', $idFicha);
+                                $porEstado = collect($aprendices)->groupBy('estado');
+                            @endphp
+                            <table style="margin-top: 20px; margin-bottom: 10px;">
                                 <tr>
-                                    <td style="text-align: justify; width: 30%">Ficha</td>
-                                    <td style="text-align: justify">{{ $ficha['codigoFicha'] }}</td>
+                                    <td style="text-align: justify; width: 40%;"><strong>No. Ficha</strong></td>
+                                    <td style="text-align: justify">{{ $fichaInfo['codigoFicha'] ?? $idFicha }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Programa</td>
-                                    <td style="text-align: justify">{{ $ficha['programaFormacion'] }}</td>
+                                    <td style="text-align: justify"><strong>Nombre Programa</strong></td>
+                                    <td style="text-align: justify">{{ $fichaInfo['programaFormacion'] ?? '—' }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Proyecto</td>
-                                    <td style="text-align: justify">{{ $materia['proyectoFormativo'] }}</td>
+                                    <td style="text-align: justify"><strong>No. Aprendices con novedades</strong></td>
+                                    <td style="text-align: justify">{{ count($aprendices) }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Actividad</td>
+                                    <td style="text-align: justify"><strong>Novedad reportada</strong></td>
                                     <td style="text-align: justify">
-                                        @foreach ($materia['actividades'] as $actividad)
-                                            {{ $actividad['descripcionActividad'] }}<br>
+                                        @foreach ($porEstado as $estado => $grupo)
+                                            {{ $estado }} ({{ count($grupo) }})<br>
                                         @endforeach
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Fase del Proyecto</td>
-                                    <td style="text-align: justify">{{ $materia['faseProyecto'] }}</td>
+                                    <td style="text-align: justify"><strong>Nombre de Aprendices</strong></td>
+                                    <td style="text-align: justify">
+                                        @foreach ($aprendices as $aprendiz)
+                                            {{ $aprendiz['nombreCompleto'] }}<br>
+                                        @endforeach
+                                    </td>
                                 </tr>
                             </table>
                         @endforeach
-                    @endforeach
-                </td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[1]->evidencias }}</td>
-            </tr>
-            @endif
-            {{-- ── Fila 3: índice [2] ── --}}
-            @if ($actividadesContrato->has(2))
-            <tr>
-                <td style="text-align:center;">3</td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[2]->obligaciones }}
-                </td>
-                <td style="vertical-align: middle; text-align: justify;">
-                    {{ $actividadesContrato[2]->accionesRealizadas }}
-                    @foreach ($aprendicesPorFicha as $idFicha => $aprendices)
-                        @php
-                            $fichaInfo = $horariosPorFicha->firstWhere('idFicha', $idFicha);
-                            $porEstado = collect($aprendices)->groupBy('estado');
-                        @endphp
-                        <table style="margin-top: 20px; margin-bottom: 10px;">
-                            <tr>
-                                <td style="text-align: justify; width: 40%;"><strong>No. Ficha</strong></td>
-                                <td style="text-align: justify">{{ $fichaInfo['codigoFicha'] ?? $idFicha }}</td>
-                            </tr>
-                            <tr>
-                                <td style="text-align: justify"><strong>Nombre Programa</strong></td>
-                                <td style="text-align: justify">{{ $fichaInfo['programaFormacion'] ?? '—' }}</td>
-                            </tr>
-                            <tr>
-                                <td style="text-align: justify"><strong>No. Aprendices con novedades</strong></td>
-                                <td style="text-align: justify">{{ count($aprendices) }}</td>
-                            </tr>
-                            <tr>
-                                <td style="text-align: justify"><strong>Novedad reportada</strong></td>
-                                <td style="text-align: justify">
-                                    @foreach ($porEstado as $estado => $grupo)
-                                        {{ $estado }} ({{ count($grupo) }})<br>
-                                    @endforeach
-                                </td>
-                            </tr>
-                            <tr>
-                                <td style="text-align: justify"><strong>Nombre de Aprendices</strong></td>
-                                <td style="text-align: justify">
-                                    @foreach ($aprendices as $aprendiz)
-                                        {{ $aprendiz['nombreCompleto'] }}<br>
-                                    @endforeach
-                                </td>
-                            </tr>
-                        </table>
-                    @endforeach
-                </td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[2]->evidencias }}
-                </td>
-            </tr>
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[2]->evidencias }}
+                    </td>
+                </tr>
             @endif
             {{-- ── Fila 4: índice [3] ── --}}
             @if ($actividadesContrato->has(3))
-            <tr>
-                <td style="text-align:center;">4</td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[3]->obligaciones }}
-                </td>
-                <td style="vertical-align: middle; text-align: justify;">
-                    {{ $actividadesContrato[3]->accionesRealizadas }}
-                    <table style="margin-top: 20px; margin-bottom: 10px;">
-                        <tr>
-                            <td style="text-align: justify; width: 40%;"><strong>No. Ficha</strong></td>
-                            <td style="text-align: justify"></td>
-                        </tr>
-                        <tr>
-                            <td style="text-align: justify"><strong>Nombre Programa</strong></td>
-                            <td style="text-align: justify"></td>
-                        </tr>
-                        <tr>
-                            <td style="text-align: justify"><strong>Actividad realizada</strong></td>
-                            <td style="text-align: justify"></td>
-                        </tr>
-                        <tr>
-                            <td style="text-align: justify"><strong>Horas asignadas</strong></td>
-                            <td style="text-align: justify">
+                <tr>
+                    <td style="text-align:center;">4</td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        {{ $actividadesContrato[3]->obligaciones }}
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;">
+                        {{ $actividadesContrato[3]->accionesRealizadas }}
+                        <table style="margin-top: 20px; margin-bottom: 10px;">
+                            <tr>
+                                <td style="text-align: justify; width: 40%;"><strong>No. Ficha</strong></td>
+                                <td style="text-align: justify"></td>
+                            </tr>
+                            <tr>
+                                <td style="text-align: justify"><strong>Nombre Programa</strong></td>
+                                <td style="text-align: justify"></td>
+                            </tr>
+                            <tr>
+                                <td style="text-align: justify"><strong>Actividad realizada</strong></td>
+                                <td style="text-align: justify"></td>
+                            </tr>
+                            <tr>
+                                <td style="text-align: justify"><strong>Horas asignadas</strong></td>
+                                <td style="text-align: justify">
 
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="text-align: justify"><strong>Observación</strong></td>
-                            <td style="text-align: justify">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="text-align: justify"><strong>Observación</strong></td>
+                                <td style="text-align: justify">
 
-                            </td>
-                        </tr>
-                    </table>
+                                </td>
+                            </tr>
+                        </table>
 
-                </td>
-                <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[3]->evidencias }}
-                </td>
-            </tr>
+                    </td>
+                    <td style="vertical-align: middle; text-align: justify;">{{ $actividadesContrato[3]->evidencias }}
+                    </td>
+                </tr>
             @endif
             {{-- ── Filas dinámicas desde [3] en adelante ── --}}
             @foreach ($actividadesContrato->slice(4) as $actividad)
@@ -544,7 +551,8 @@
                 <tr>
                     <td style="text-align:center;">{{ $actividadesContrato->count() + 1 }}</td>
                     <td style="vertical-align: middle; text-align: justify;">
-                        LAS DEMÁS QUE SE REQUIERAN PARA EL CUMPLIMIENTO DEL OBJETO CONTRACTUAL ESPECIFICO Y QUE EL CENTRO DE FORMACIÓN DEMANDE.
+                        LAS DEMÁS QUE SE REQUIERAN PARA EL CUMPLIMIENTO DEL OBJETO CONTRACTUAL ESPECIFICO Y QUE EL
+                        CENTRO DE FORMACIÓN DEMANDE.
                     </td>
                     <td style="vertical-align: middle; text-align: justify;">
                         REPORTAR DETALLE DE ACCIONES REALIZADAS
@@ -689,7 +697,13 @@
     <div class="spacer2"></div>
     <div>Firma</div>
 
-    <div class="spacer-higth"></div>
+    </div>
+    @if ($coordinador->firmaDigital)
+        <img src="{{ storage_path('app/public/firmas/' . basename($coordinador->firmaDigital)) }}"
+            style="height: 70px; max-width: 250px; object-fit: contain;" />
+    @else
+        <div class="spacer-higth"></div>
+    @endif
 
     <div>
         <strong>

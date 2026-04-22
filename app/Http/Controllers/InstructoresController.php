@@ -10,6 +10,7 @@ use App\Models\ComisionInstructor;
 use App\Models\Contract;
 use App\Models\DetalleRmi;
 use App\Models\NotificacionSistema;
+use App\Models\Person;
 use App\Models\Rmi;
 use App\Models\SesionMateria;
 use App\Models\User;
@@ -1822,6 +1823,222 @@ class InstructoresController extends Controller
             'actividades',
             'comisiones',
             'nPlanilla',
+            'horariosPorFicha',
+            'actividadesContrato',
+            'fichasConProyecto',
+            'aprendicesPorFicha'
+        ))
+            ->setPaper('letter')
+            ->setOption('isPhpEnabled', true)
+            ->setOption('isHtml5ParserEnabled', true)
+            ->setOption('isFontSubsettingEnabled', true);
+
+        return $pdf->stream("RMI_{$idContrato}_{$idRmi}.pdf");
+    }
+    public function getInformeByCoordinadorRmi(Request $request)
+    {
+        $idContrato = $request->idContrato;
+        $idRmi = $request->idRmi;
+        $nPlanilla = $request->nPlanilla;
+
+        // Obtener el usuario actual "Coordinador"
+        $user = KeyUtil::user();
+        $coordinador = Person::where('id', $user->idpersona)->first();
+
+        $rmi = Rmi::findOrFail($idRmi);
+        $contrato = Contract::with([
+            'persona',
+            'persona.ciudadExpedicionRel',
+            'persona.ciudadExpedicionRel.departamento',
+            'centroFormacion'
+        ])->findOrFail($idContrato);
+
+        $actividades = ActividadInstructor::where('idRmi', $idRmi)->where('idContrato', $idContrato)->get();
+        $comisiones = ComisionInstructor::where('idRmi', $idRmi)
+            ->where('idContrato', $idContrato)
+            ->get();
+
+
+        $actividadesContrato = ActividadContrato::where('idContrato', $idContrato)->orderBy('created_at', 'asc')->get();
+
+        // ── HORARIOS DEL PERIODO ──────────────────────────────────────────────
+        $inicio = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->startOfMonth();
+        $fin = \Carbon\Carbon::createFromFormat('Y-m', $rmi->periodo)->endOfMonth();
+
+        $diasSemana = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miércoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sábado', 7 => 'Domingo'];
+
+        $horariosPorFicha = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+        ])
+            ->where('idContrato', $idContrato)
+            ->where('estado', 'ASIGNADO')
+            ->where(function ($q) use ($inicio, $fin) {
+                $q->whereBetween('fechaInicial', [$inicio, $fin])
+                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                    ->orWhere(function ($q2) use ($inicio, $fin) {
+                        $q2->where('fechaInicial', '<=', $inicio)
+                            ->where('fechaFinal', '>=', $fin);
+                    });
+            })
+            ->get()
+            ->groupBy('idFicha')
+            ->map(function ($horarios) use ($inicio, $fin, $diasSemana) {
+                $ficha = $horarios->first()->ficha;
+                $programa = $ficha?->asignacion?->programa;
+                $idFicha = $horarios->first()->idFicha;
+
+                $filas = $horarios->map(function ($h) use ($inicio, $fin, $diasSemana) {
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                    $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                    $cantSesiones = 0;
+                    $cursor = $desde->copy();
+
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                            $cantSesiones++;
+                        $cursor->addDay();
+                    }
+
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                    return [
+                        'dia' => $diasSemana[$h->idDia] ?? $h->idDia,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'cantSesiones' => $cantSesiones,
+                        'horasTotales' => round($duracionSesion * $cantSesiones, 2),
+                    ];
+                })->values();
+
+                return [
+                    'idFicha' => $idFicha,
+                    'codigoFicha' => $ficha?->codigo,
+                    'programaFormacion' => $programa?->nombrePrograma,
+                    'filas' => $filas,
+                    'totalHorasFicha' => $filas->sum('horasTotales'),
+                ];
+            })->values();
+        // ─────────────────────────────────────────────────────────────────────
+
+        // ── MATERIAS / RAPs POR FICHA CON FASE DE PROYECTO ───────────────────────────
+
+        $horariosMaterias = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+            'gradoMateria.materia.padre',
+        ])
+            ->where('idContrato', $idContrato)
+            ->where('estado', 'ASIGNADO')
+            ->where(function ($q) use ($inicio, $fin) {
+                $q->whereBetween('fechaInicial', [$inicio, $fin])
+                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                    ->orWhere(function ($q2) use ($inicio, $fin) {
+                        $q2->where('fechaInicial', '<=', $inicio)
+                            ->where('fechaFinal', '>=', $fin);
+                    });
+            })
+            ->get();
+
+        // IDs únicos de los RAPs que se están impartiendo en el periodo
+        $idMaterias = $horariosMaterias
+            ->pluck('gradoMateria.materia.id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        // Usar la relación belongsToMany de FaseProyecto para traer
+        // las fases que tienen esos RAPs, con proyecto y actividades
+        $fasesPorMateria = \App\Models\FaseProyectoRap::with([
+            'fase.proyectoFormativo',
+            'fase.actividades',
+        ])
+            ->whereIn('idMateria', $idMaterias)
+            ->get()
+            ->keyBy('idMateria'); // clave: idMateria → fácil lookup
+
+        // Agrupar por ficha
+        $fichasConProyecto = $horariosMaterias
+            ->groupBy('idFicha')
+            ->map(function ($horariosGrupo) use ($fasesPorMateria) {
+                $ficha = $horariosGrupo->first()->ficha;
+                $programa = $ficha?->asignacion?->programa;
+
+                $materias = $horariosGrupo
+                    ->map(function ($h) use ($fasesPorMateria) {
+                        $rap = $h->gradoMateria?->materia;
+                        $competencia = $rap?->padre;
+                        $idMateria = $rap?->id;
+
+                        if (!$idMateria)
+                            return null;
+
+                        // Buscar la fase asociada a este RAP
+                        $fprRap = $fasesPorMateria->get($idMateria);
+                        $fase = $fprRap?->fase;
+
+                        return [
+                            'idMateria' => $idMateria,
+                            'resultadoAprendizaje' => $rap?->nombreMateria,
+                            'competencia' => $competencia?->nombreMateria,
+                            'faseProyecto' => $fase?->descripcionFase,
+                            'proyectoFormativo' => $fase?->proyectoFormativo?->nombreProyecto,
+                            'actividades' => $fase?->actividades
+                                    ?->map(fn($a) => [
+                                    'id' => $a->id,
+                                    'descripcionActividad' => $a->descripcionActividad,
+                                ])->values()->toArray() ?? [],
+                        ];
+                    })
+                    ->filter()
+                    ->unique('idMateria')
+                    ->values();
+
+                return [
+                    'idFicha' => $ficha?->id,
+                    'codigoFicha' => $ficha?->codigo,
+                    'programaFormacion' => $programa?->nombrePrograma,
+                    'materias' => $materias,
+                ];
+            })->values();
+
+        // ─────────────────────────────────────────────────────────────────────────────
+
+        // ── APRENDICES CON RETIRO VOLUNTARIO O TRASLADADO POR FICHA ──────────────────
+
+        $idFichas = $horariosMaterias->pluck('idFicha')->filter()->unique()->values();
+
+        $aprendicesPorFicha = \App\Models\Matricula::with(['person'])
+            ->whereIn('idFicha', $idFichas)
+            ->whereIn('estado', ['RETIRO VOLUNTARIO', 'TRASLADADO'])
+            ->get()
+            ->groupBy('idFicha')
+            ->map(function ($matriculas) {
+                return $matriculas->map(function ($matricula) {
+                    $person = $matricula->person;
+                    return [
+                        'idMatricula' => $matricula->id,
+                        'identificacion' => $person?->identificacion,
+                        'nombreCompleto' => trim(implode(' ', array_filter([
+                            $person?->nombre1,
+                            $person?->nombre2,
+                            $person?->apellido1,
+                            $person?->apellido2,
+                        ]))),
+                        'estado' => $matricula->estado,
+                        'observacion' => $matricula->observacion,
+                    ];
+                })->values();
+            });
+
+        // ─────────────────────────────────────────────────────────────────────────────
+
+        $pdf = Pdf::loadView('pdf.informeCoordinador', compact(
+            'rmi',
+            'contrato',
+            'actividades',
+            'comisiones',
+            'nPlanilla',
+            'coordinador',
             'horariosPorFicha',
             'actividadesContrato',
             'fichasConProyecto',
