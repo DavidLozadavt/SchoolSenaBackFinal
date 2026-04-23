@@ -19,6 +19,141 @@ use Illuminate\Support\Facades\Schema;
 class AsignacionActividadController extends Controller
 {
     /**
+     * Estudiantes (matrículas) en ficha y, por actividad, cuántos ya tienen registro en calificacionActividad.
+     * Usado en la lista de actividades: el estado "Asignado" es informativo; no bloquea nuevas asignaciones
+     * a estudiantes aún no cubiertos (los duplicados reales se omiten en asignar()).
+     */
+    public function cobertura(int $idFicha): JsonResponse
+    {
+        try {
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            if (!Schema::hasTable('calificacionActividad')) {
+                $ap = $this->aprendicesPorFicha($idFicha);
+                $total = count($ap);
+
+                return response()->json([
+                    'totalEnFicha' => $total,
+                    'porActividad' => (object) [],
+                ]);
+            }
+
+            $colFicha = Schema::hasColumn($tableMa, 'idFicha')
+                ? 'idFicha'
+                : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada')
+                    ? 'idAsignacionPeriodoProgramaJornada'
+                    : 'idFicha');
+
+            $idsMatFicha = DB::table($tableMa)
+                ->where($colFicha, $idFicha)
+                ->whereNotNull('idMatricula')
+                ->distinct()
+                ->pluck('idMatricula');
+            $totalEnFicha = $idsMatFicha->unique()->count();
+            if ($totalEnFicha === 0) {
+                $ap = $this->aprendicesPorFicha($idFicha);
+                $totalEnFicha = count($ap);
+            }
+
+            $asignadosPorActividad = collect();
+            $entregaronPorActividad = collect();
+            if (Schema::hasTable('calificacionActividad') && $totalEnFicha > 0) {
+                $asignadosPorActividad = DB::table('calificacionActividad as ca')
+                    ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                    ->where('ma.' . $colFicha, $idFicha)
+                    ->select('ca.idActividad', DB::raw('COUNT(DISTINCT ma.idMatricula) as asignados'))
+                    ->groupBy('ca.idActividad')
+                    ->get()
+                    ->keyBy('idActividad');
+
+                // Aprendices con entrega (archivo o comentario del estudiante), mismo criterio que listarPorActividad.
+                $entregaCond = "(TRIM(COALESCE(ca.archivo, '')) <> '' OR TRIM(COALESCE(ca.ComentarioEstudiante, '')) <> '')";
+                $entregaronPorActividad = DB::table('calificacionActividad as ca')
+                    ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                    ->where('ma.' . $colFicha, $idFicha)
+                    ->whereRaw($entregaCond)
+                    ->select('ca.idActividad', DB::raw('COUNT(DISTINCT ma.idMatricula) as entregaron'))
+                    ->groupBy('ca.idActividad')
+                    ->get()
+                    ->keyBy('idActividad');
+            }
+
+            $porActividad = [];
+            foreach ($asignadosPorActividad as $idAct => $row) {
+                $asig = (int) ($row->asignados ?? 0);
+                $faltan = max(0, $totalEnFicha - $asig);
+                $ent = (int) ($entregaronPorActividad[(int) $idAct]->entregaron ?? 0);
+                $pendEntrega = max(0, $asig - $ent);
+                $porActividad[(int) $idAct] = [
+                    'asignados' => $asig,
+                    'faltan' => $faltan,
+                    'total' => (int) $totalEnFicha,
+                    'entregaron' => $ent,
+                    'pendientesEntrega' => $pendEntrega,
+                ];
+            }
+
+            return response()->json([
+                'totalEnFicha' => (int) $totalEnFicha,
+                'porActividad' => (object) $porActividad,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Listado de aprendices asignados vs pendientes por asignar para una actividad en la ficha.
+     * Alineado con el conteo de cobertura (matrículas distintas con registro en calificacionActividad).
+     */
+    public function coberturaDetalleActividad(int $idFicha, int $idActividad): JsonResponse
+    {
+        try {
+            [$tableMa, $colFicha] = $this->resolverMatriculaAcademicaFicha();
+
+            $idsTodos = $this->idsMatriculaDistintasEnFicha($idFicha, $tableMa, $colFicha);
+            $totalEnFicha = $idsTodos->count();
+
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json([
+                    'totalEnFicha' => $totalEnFicha,
+                    'asignados' => 0,
+                    'faltan' => $totalEnFicha,
+                    'detalleAsignados' => [],
+                    'detallePendientes' => $this->detalleAprendicesPorMatriculas($idsTodos->all()),
+                ]);
+            }
+
+            $idsAsignados = collect();
+            if ($totalEnFicha > 0) {
+                $idsAsignados = DB::table('calificacionActividad as ca')
+                    ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                    ->where('ca.idActividad', $idActividad)
+                    ->where('ma.' . $colFicha, $idFicha)
+                    ->distinct()
+                    ->pluck('ma.idMatricula')
+                    ->filter()
+                    ->unique()
+                    ->values();
+            }
+
+            $asignadosCount = $idsAsignados->count();
+            $faltan = max(0, $totalEnFicha - $asignadosCount);
+
+            $idsPendientes = $idsTodos->diff($idsAsignados)->values();
+
+            return response()->json([
+                'totalEnFicha' => $totalEnFicha,
+                'asignados' => $asignadosCount,
+                'faltan' => $faltan,
+                'detalleAsignados' => $this->detalleAprendicesPorMatriculas($idsAsignados->all()),
+                'detallePendientes' => $this->detalleAprendicesPorMatriculas($idsPendientes->all()),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * E1-HU1: Datos para asignar - actividades del banco, aprendices y grupos del RAP.
      */
     public function datos(int $idFicha): JsonResponse
@@ -458,6 +593,7 @@ class AsignacionActividadController extends Controller
                 'idMatriculaAcademica' => $m->id,
                 'idMateria' => $m->idMateria,
                 'nombre' => $p ? trim(($p->nombre1 ?? '') . ' ' . ($p->apellido1 ?? '')) : 'N/A',
+                'rutaFoto' => $p->rutaFoto ?? null,
             ];
         }
         return $result;
@@ -586,5 +722,85 @@ class AsignacionActividadController extends Controller
             return 'asignacionparticipantes';
         }
         return null;
+    }
+
+    /** @return array{0: string, 1: string} [tabla matriculaAcademica, columna ficha] */
+    private function resolverMatriculaAcademicaFicha(): array
+    {
+        $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+        $colFicha = Schema::hasColumn($tableMa, 'idFicha')
+            ? 'idFicha'
+            : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada')
+                ? 'idAsignacionPeriodoProgramaJornada'
+                : 'idFicha');
+
+        return [$tableMa, $colFicha];
+    }
+
+    /**
+     * Matrículas distintas en la ficha (misma lógica que cobertura: pluck MA o fallback aprendicesPorFicha).
+     *
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    private function idsMatriculaDistintasEnFicha(int $idFicha, string $tableMa, string $colFicha): \Illuminate\Support\Collection
+    {
+        $ids = DB::table($tableMa)
+            ->where($colFicha, $idFicha)
+            ->whereNotNull('idMatricula')
+            ->distinct()
+            ->pluck('idMatricula')
+            ->map(fn ($v) => (int) $v)
+            ->filter(fn ($v) => $v > 0)
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return collect($this->aprendicesPorFicha($idFicha))
+                ->pluck('id')
+                ->map(fn ($v) => (int) $v)
+                ->filter(fn ($v) => $v > 0)
+                ->unique()
+                ->values();
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  array<int>  $idsMatricula
+     * @return array<int, array{idMatricula: int, identificacion: string, nombreCompleto: string, rutaFoto: string|null}>
+     */
+    private function detalleAprendicesPorMatriculas(array $idsMatricula): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $idsMatricula))));
+        if ($ids === []) {
+            return [];
+        }
+
+        $rows = DB::table('matricula as m')
+            ->join('persona as p', 'm.idPersona', '=', 'p.id')
+            ->whereIn('m.id', $ids)
+            ->select([
+                'm.id as idMatricula',
+                'p.identificacion',
+                DB::raw("TRIM(CONCAT(COALESCE(p.nombre1,''), ' ', COALESCE(p.nombre2,''), ' ', COALESCE(p.apellido1,''), ' ', COALESCE(p.apellido2,''))) as nombreCompleto"),
+                'p.rutaFoto',
+            ])
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $nombre = trim((string) ($r->nombreCompleto ?? ''));
+            $out[] = [
+                'idMatricula' => (int) $r->idMatricula,
+                'identificacion' => (string) ($r->identificacion ?? ''),
+                'nombreCompleto' => $nombre !== '' ? $nombre : 'Sin nombre',
+                'rutaFoto' => $r->rutaFoto ?? null,
+            ];
+        }
+
+        usort($out, fn ($a, $b) => strcasecmp($a['nombreCompleto'], $b['nombreCompleto']));
+
+        return $out;
     }
 }
