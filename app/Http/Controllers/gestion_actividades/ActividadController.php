@@ -273,6 +273,95 @@ class ActividadController extends Controller
                 });
             }
 
+            /**
+             * Filtro por contexto de clase (ambiente virtual):
+             * - id_materia_clase: materia del horario (RAP). Se incluye la competencia (padre) y todos los RAP
+             *   hijos de esa competencia, para listar actividades creadas en cualquier RAP de la misma competencia.
+             * - id_programa: restringe a materias del programa vía gradoMateria / gradoPrograma.
+             */
+            $idMateriaClase = $request->query('id_materia_clase');
+            $idPrograma = $request->query('id_programa');
+            $materiaIdsFilter = null;
+
+            if ($idMateriaClase !== null && $idMateriaClase !== '') {
+                $mc = (int) $idMateriaClase;
+                if ($mc > 0) {
+                    $mRow = Materia::query()->find($mc);
+                    if ($mRow) {
+                        $idCompetencia = ! empty($mRow->idMateriaPadre) ? (int) $mRow->idMateriaPadre : (int) $mRow->id;
+                        $materiaIdsFilter = Materia::query()
+                            ->where(function ($q) use ($idCompetencia) {
+                                $q->where('id', $idCompetencia)
+                                    ->orWhere('idMateriaPadre', $idCompetencia);
+                            })
+                            ->pluck('id')
+                            ->map(fn ($id) => (int) $id)
+                            ->unique()
+                            ->values()
+                            ->all();
+                    } else {
+                        $materiaIdsFilter = [];
+                    }
+                }
+            }
+
+            if ($idPrograma !== null && $idPrograma !== '') {
+                $ip = (int) $idPrograma;
+                if ($ip > 0 && Schema::hasTable('gradoMateria') && Schema::hasTable('gradoPrograma')) {
+                    $idsProg = DB::table('gradoMateria as gm')
+                        ->join('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
+                        ->where('gp.idPrograma', $ip)
+                        ->pluck('gm.idMateria')
+                        ->map(fn ($id) => (int) $id)
+                        ->unique()
+                        ->values()
+                        ->all();
+                    if ($materiaIdsFilter === null) {
+                        $materiaIdsFilter = $idsProg;
+                    } else {
+                        $materiaIdsFilter = array_values(array_intersect($materiaIdsFilter, $idsProg));
+                    }
+                }
+            }
+
+            /**
+             * Coherencia programa + materia de clase: evita que un cliente envíe id_programa de un programa
+             * e id_materia_clase de otra competencia/RAP y obtenga un listado inconsistente.
+             */
+            if ($idMateriaClase !== null && $idMateriaClase !== '' && $idPrograma !== null && $idPrograma !== '') {
+                $mc = (int) $idMateriaClase;
+                $ip = (int) $idPrograma;
+                if ($mc > 0 && $ip > 0 && Schema::hasTable('gradoMateria') && Schema::hasTable('gradoPrograma')) {
+                    $pertenece = DB::table('gradoMateria as gm')
+                        ->join('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
+                        ->where('gp.idPrograma', $ip)
+                        ->where('gm.idMateria', $mc)
+                        ->exists();
+                    if (! $pertenece) {
+                        return response()->json([
+                            'error' => 'La materia de la clase no pertenece al programa indicado.',
+                            'code' => 'PROGRAMA_MATERIA_INCONSISTENTE',
+                        ], 422);
+                    }
+                }
+            }
+
+            /**
+             * Sin id_materia_clase ni id_programa no se debe exponer el banco completo de la empresa
+             * (riesgo de mezclar programas/RAPs). El cliente debe acotar contexto.
+             */
+            if ($materiaIdsFilter === null) {
+                return response()->json([]);
+            }
+
+            if (is_array($materiaIdsFilter)) {
+                if (count($materiaIdsFilter) > 0) {
+                    $query->whereIn('idMateria', $materiaIdsFilter);
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
             $actividades = $query->orderBy('id', 'asc')->get();
             return response()->json($actividades);
         } catch (\Throwable $e) {
@@ -746,19 +835,34 @@ class ActividadController extends Controller
         }
     }
 
-    public function planeacionActividadesPorFicha(int $idFicha): JsonResponse
+    public function planeacionActividadesPorFicha(Request $request, int $id): JsonResponse
     {
         try {
+            $idFicha = $id;
             $ficha = \App\Models\Ficha::with('asignacion')->findOrFail($idFicha);
             $items = collect();
 
             if (\Illuminate\Support\Facades\Schema::hasTable('planeacion')) {
                 $idContrato = null;
                 if (\Illuminate\Support\Facades\Schema::hasTable('horarioMateria') && \Illuminate\Support\Facades\Schema::hasColumn('horarioMateria', 'idContrato')) {
-                    $horario = \Illuminate\Support\Facades\DB::table('horarioMateria')
-                        ->where('idFicha', $idFicha)
-                        ->whereNotNull('idContrato')
-                        ->first();
+                    $idHmParam = $request->query('id_horario_materia');
+                    $idHm = ($idHmParam !== null && $idHmParam !== '') ? (int) $idHmParam : 0;
+                    $horario = null;
+                    // Preferir el horario de la clase actual (misma ficha) para no tomar otro contrato/planeación por accidente.
+                    if ($idHm > 0) {
+                        $horario = \Illuminate\Support\Facades\DB::table('horarioMateria')
+                            ->where('id', $idHm)
+                            ->where('idFicha', $idFicha)
+                            ->whereNotNull('idContrato')
+                            ->first();
+                    }
+                    if (! $horario) {
+                        $horario = \Illuminate\Support\Facades\DB::table('horarioMateria')
+                            ->where('idFicha', $idFicha)
+                            ->whereNotNull('idContrato')
+                            ->orderBy('id')
+                            ->first();
+                    }
                     $idContrato = $horario->idContrato ?? null;
                 }
                 $idPlaneacion = null;
@@ -797,6 +901,33 @@ class ActividadController extends Controller
                             'actividad' => $act,
                         ]);
                     }
+                }
+            }
+
+            /**
+             * Si se envía id_materia_clase (RAP de la clase), limitar resultados a esa competencia y sus RAP hijos,
+             * para no mezclar actividades de otro RAP aunque compartan planeación o ficha.
+             */
+            $mcPlaneacion = $request->query('id_materia_clase');
+            if ($items->isNotEmpty() && $mcPlaneacion !== null && $mcPlaneacion !== '' && (int) $mcPlaneacion > 0) {
+                $mRowP = Materia::query()->find((int) $mcPlaneacion);
+                if ($mRowP) {
+                    $idCompP = ! empty($mRowP->idMateriaPadre) ? (int) $mRowP->idMateriaPadre : (int) $mRowP->id;
+                    $idsMateriaRap = Materia::query()
+                        ->where(function ($q) use ($idCompP) {
+                            $q->where('id', $idCompP)
+                                ->orWhere('idMateriaPadre', $idCompP);
+                        })
+                        ->pluck('id')
+                        ->map(fn ($mid) => (int) $mid)
+                        ->unique()
+                        ->values()
+                        ->all();
+                    $items = $items->filter(function ($item) use ($idsMateriaRap) {
+                        $idM = (int) ($item->idMateria ?? (isset($item->actividad) ? ($item->actividad->idMateria ?? 0) : 0));
+
+                        return $idM > 0 && in_array($idM, $idsMateriaRap, true);
+                    })->values();
                 }
             }
 

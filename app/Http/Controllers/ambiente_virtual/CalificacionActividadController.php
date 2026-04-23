@@ -166,6 +166,7 @@ class CalificacionActividadController extends Controller
                     'ca.ComentarioEstudiante',
                     'ca.archivo',
                     'ca.fechaCalificacion',
+                    'ca.updated_at',
                     'm.id as idMatricula',
                     'p.identificacion',
                     'p.rutaFoto',
@@ -202,6 +203,8 @@ class CalificacionActividadController extends Controller
                     'ComentarioEstudiante' => $c->ComentarioEstudiante,
                     'archivo' => $c->archivo,
                     'fechaCalificacion' => $c->fechaCalificacion,
+                    /** Útil como referencia de última modificación del registro (p. ej. tras entrega). */
+                    'fechaActualizacionRegistro' => $c->updated_at ?? null,
                     'estado' => $estado,
                 ];
             }

@@ -1307,6 +1307,8 @@ Route::middleware('auth:api')->group(function () {
 
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
     Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);
+    Route::get('fichas/{idFicha}/asignacion-actividades/cobertura', [AsignacionActividadController::class, 'cobertura']);
+    Route::get('fichas/{idFicha}/asignacion-actividades/{idActividad}/cobertura-detalle', [AsignacionActividadController::class, 'coberturaDetalleActividad']);
     Route::post('fichas/{idFicha}/asignacion-actividades', [AsignacionActividadController::class, 'asignar']);
     Route::get('get_student_by_id_materia', [MatriculaAcademicaController::class, 'getStudentByIdMateria']);
     //calificaciones por ficha, materia e instructor (evaluador)
