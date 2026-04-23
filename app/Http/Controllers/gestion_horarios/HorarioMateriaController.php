@@ -27,10 +27,12 @@ use App\Mail\EmailDocenteHorarioMateria;
 use App\Models\AsignacionPeriodoPrograma;
 use App\Http\Controllers\MateriaController;
 use App\Mail\MailService;
+use App\Models\AgregarMateriaPrograma;
 use App\Models\Ficha;
 use App\Models\Dia;
 use App\Models\Asistencia;
 use App\Models\DetalleRmi;
+use App\Models\GradoPrograma;
 use App\Models\Rmi;
 use App\Models\MatriculaAcademica;
 use App\Models\NotificacionSistema;
@@ -331,11 +333,15 @@ class HorarioMateriaController extends Controller
 
             $horarioMateria = HorarioMateria::find($id);
 
-            $horasRap = $horarioMateria->materia->materia->horas ?? 0;
-
             $idFicha = $horarioMateria->idAsignacionPeriodoJornada;
-            $ficha   = Ficha::find($idFicha);
-            $porcentajeEjecucion = $ficha->porcentajeEjecucion;
+            $ficha   = Ficha::with('aperturarPrograma')->find($idFicha);
+            $porcentajeEjecucion = $ficha->porcentajeEjecucion ?? 100;
+            $idPrograma = $ficha->aperturarPrograma->idPrograma;
+
+            $amp = AgregarMateriaPrograma::where('idMateria', $horarioMateria->materia->idMateria)
+                ->where('idPrograma', $idPrograma)
+                ->first();
+            $horasRap = $amp ? $amp->horas : 0;
 
             $totalHorasRap = ($horasRap * $porcentajeEjecucion) / 100;
 
@@ -827,7 +833,14 @@ class HorarioMateriaController extends Controller
                 $horaInicial    = isset($data['horarioMateria']['horaInicial'])    ? $data['horarioMateria']['horaInicial']    : $horario->horaInicial;
                 $horaFinal      = isset($data['horarioMateria']['horaFinal'])      ? $data['horarioMateria']['horaFinal']      : $horario->horaFinal;
                 $idDia          = isset($idDia)                                    ? $idDia                                    : $horario->idDia;
-                $horasRap       = $horario->materia->materia->horas;
+                $idFicha = $horario->idAsignacionPeriodoJornada;
+                $ficha   = Ficha::with('aperturarPrograma')->find($idFicha);
+                $idPrograma = $ficha->aperturarPrograma->idPrograma;
+
+                $amp = AgregarMateriaPrograma::where('idMateria', $horario->materia->idMateria)
+                    ->where('idPrograma', $idPrograma)
+                    ->first();
+                $horasRap       = $amp ? $amp->horas : 0;
                 $creditos       = $horario->materia->materia->creditos;
 
                 if (!$horasRap) {
@@ -1010,7 +1023,14 @@ class HorarioMateriaController extends Controller
     {
         $idAsignacionPeriodoJornada = $horariosMateria[0]['idAsignacionPeriodoJornada']  ?? $horarioMateria->idAsignacionPeriodoJornada;
         $idGradoMateria             = $horariosMateria[0]['idGradoMateria']              ?? $horarioMateria->idGradoMateria;
-        $horasRap                   = $horariosMateria[0]['materia']['materia']['horas'] ?? 0;
+        $gradoMateria    = GradoMateria::findOrFail($idGradoMateria);
+        $idGradoPrograma = $gradoMateria->idGradoPrograma;
+        $idPrograma      = GradoPrograma::findOrFail($idGradoPrograma)->idPrograma;
+
+        $amp = AgregarMateriaPrograma::where('idMateria', $gradoMateria->idMateria)
+            ->where('idPrograma', $idPrograma)
+            ->first();
+        $horasRap = $amp ? $amp->horas : 0;
 
         $idDia                      = $data['idDia'];
         $idContrato                 = $data['idContrato']   ?? null;
@@ -1021,9 +1041,6 @@ class HorarioMateriaController extends Controller
 
         $fechaInicial = $horarioMateria['fechaInicial'] ?? $horarioMateria->fechaInicial;
         $fechaFinal   = $horarioMateria['fechaFinal']   ?? $horarioMateria->fechaFinal;
-
-        $gradoMateria    = GradoMateria::findOrFail($idGradoMateria);
-        $idGradoPrograma = $gradoMateria->idGradoPrograma;
 
         $query = HorarioMateria::with([
             'infraestructura.sede.ciudad',
@@ -1258,7 +1275,9 @@ class HorarioMateriaController extends Controller
                 $q->where('idPrograma', $idPrograma);
             })
             ->with([
-                'gradoMateria.materia',
+                'gradoMateria.materia.agregarMateriaPrograma' => function ($q) use ($idPrograma) {
+                    $q->where('idPrograma', $idPrograma);
+                },
                 'gradoMateria.gradoPrograma.grado',
                 'gradoMateria.gradoPrograma',
                 'dia',
@@ -1284,7 +1303,7 @@ class HorarioMateriaController extends Controller
             })
 
             // Recorremos cada grado
-            ->map(function ($horariosPorGrado) use ($horarios, $matriculasFicha) {
+            ->map(function ($horariosPorGrado) use ($horarios, $matriculasFicha, $idPrograma) {
                 // Tomamos el grado una sola vez
                 $gradoPrograma = $horariosPorGrado->first()
                     ->gradoMateria
@@ -1342,20 +1361,28 @@ class HorarioMateriaController extends Controller
 
                             return is_null($materia->idMateriaPadre);
                         })
-                        ->map(function ($horariosPorMateriaPadre, $idMateriaPadre) use ($horariosPorGrado, $horarios, $matriculasFicha) {
+                        ->map(function ($horariosPorMateriaPadre, $idMateriaPadre) use ($horariosPorGrado, $horarios, $matriculasFicha, $idPrograma) {
                             $materiaPadre = $horariosPorMateriaPadre->first()
                                 ->gradoMateria
                                 ->materia;
 
-                            // Actualizar las horas del padre basándose en la suma de sus hijos (RAPs)
-                            $hijosQuery = Materia::where('idMateriaPadre', $materiaPadre->id);
+                            // Actualizar las horas del padre basándose en la suma de sus hijos (RAPs) para este programa
+                            $hijosQuery = Materia::where('materia.idMateriaPadre', $materiaPadre->id)
+                                ->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
+                                ->where('agregarMateriaPrograma.idPrograma', $idPrograma);
+
                             if ($hijosQuery->exists()) {
-                                $horasSum = $hijosQuery->sum('horas');
-                                if ($materiaPadre->horas != $horasSum) {
-                                    $materiaPadre->horas = $horasSum;
-                                    $materiaPadre->save();
-                                }
+                                $horasSum = $hijosQuery->sum('agregarMateriaPrograma.horas');
+                                
+                                $ampPadre = AgregarMateriaPrograma::updateOrCreate(
+                                    ['idMateria' => $materiaPadre->id, 'idPrograma' => $idPrograma],
+                                    ['horas' => $horasSum]
+                                );
+
+                                $materiaPadre->setRelation('agregarMateriaPrograma', collect([$ampPadre])); // Actualizar relación cargada
                             }
+
+                            $horasPadre = $materiaPadre->agregarMateriaPrograma->first()->horas ?? 0;
 
                             // Horarios de hijos en TODA la ficha y solo en este trimestre
                             $horariosRapsFicha = $horarios->filter(fn($h) => $h->gradoMateria->materia->idMateriaPadre == $idMateriaPadre);
@@ -1381,7 +1408,7 @@ class HorarioMateriaController extends Controller
                             // Verificar y actualizar estado de la competencia (Padre)
                             $gradoMateriaParaEstado = $horariosPorMateriaPadre->first()->gradoMateria;
                             $todosRapsTerminados = $estadoRapsGlobal->isNotEmpty() && $estadoRapsGlobal->every(fn($f) => $f);
-                            if ($todosRapsTerminados || ($horasData['horasActuales'] >= $materiaPadre->horas && $horasData['horasActuales'] > 0)) {
+                            if ($todosRapsTerminados || ($horasData['horasActuales'] >= $horasPadre && $horasData['horasActuales'] > 0)) {
                                 if ($gradoMateriaParaEstado->estado != EstadoHorarioMateria::FINALIZADO) {
                                     $gradoMateriaParaEstado->update(['estado' => EstadoHorarioMateria::FINALIZADO]);
                                 }
@@ -1394,9 +1421,9 @@ class HorarioMateriaController extends Controller
                                 'estado' => $gradoMateriaParaEstado->estado,
                                 'idMateriaPadre' => $materiaPadre->idMateriaPadre,
                                 'idGradoMateria' => $gradoMateriaParaEstado->id,
-                                'horasTotales' => $materiaPadre->horas,
+                                'horasTotales' => $horasPadre,
                                 'horasActuales' => $horasData['horasActuales'],
-                                'horasFaltantes' => max(0, $materiaPadre->horas - $horasData['horasActuales']),
+                                'horasFaltantes' => max(0, $horasPadre - $horasData['horasActuales']),
                                 'porcentajeAvance' => $horasData['porcentajeAvance'],
 
                                 // Horarios de los hijos agrupados por asignación
