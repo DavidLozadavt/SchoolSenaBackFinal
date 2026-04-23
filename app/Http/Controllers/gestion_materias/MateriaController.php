@@ -63,10 +63,19 @@ class MateriaController extends Controller
             // Identificamos las competencias padre (competencias) asociadas a estos RAPs matriculados
             // Obtenemos los padres de las materias encontradas en la matrícula
             $padresIds = $matriculasFicha->map(fn($m) => $m->materia?->idMateriaPadre)->filter()->unique();
-            $materiasPrograma = Materia::whereIn('id', $padresIds)->get();
+            $materiasPrograma = Materia::whereIn('materia.id', $padresIds)
+                ->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
+                ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
+                ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa')
+                ->get();
 
             // Obtenemos todos los RAPs posibles de estas competencias para cruzar con la matrícula
-            $todosRaps = Materia::whereIn('idMateriaPadre', $padresIds)->get()->groupBy('idMateriaPadre');
+            $todosRaps = Materia::whereIn('idMateriaPadre', $padresIds)
+                ->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
+                ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
+                ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa')
+                ->get()
+                ->groupBy('idMateriaPadre');
 
             // Mapear cada competencia encontrada
             $resultado = $materiasPrograma->map(function ($materia) use ($todosRaps, $matriculasAgrupadas) {
@@ -99,7 +108,7 @@ class MateriaController extends Controller
                     'id' => $materia->id,
                     'nombreMateria' => $materia->nombreMateria,
                     'codigo' => $materia->codigo,
-                    'horas' => $materia->horas,
+                    'horas' => $materia->horas_programa,
                     'descripcion' => $materia->descripcion,
                     'isCompleta' => $estaFinalizada,
                     'estado' => $estaFinalizada ? 'FINALIZADO' : 'PENDIENTE'
@@ -191,7 +200,11 @@ class MateriaController extends Controller
             foreach ($materia->grados as $grado) {
                 $gradoId = $grado->id;
 
-                $result = Materia::where('idMateriaPadre', $materia->idMateriaPadre)
+                $idPrograma = $idAperturarPrograma->aperturarPrograma->idPrograma;
+                $result = Materia::where('materia.idMateriaPadre', $materia->idMateriaPadre)
+                    ->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
+                    ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
+                    ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa')
                     ->whereHas('grados', function ($query) use ($gradoId) {
                         $query->where('id', $gradoId);
                     })
@@ -218,14 +231,14 @@ class MateriaController extends Controller
 
                         $horasEjecutadas     = $horasPorSesion * $sesionesRegistradas;
 
-                        $horasRestantes      = $materiaData->horas - $horasEjecutadas;
+                        $horasRestantes      = $materiaData->horas_programa - $horasEjecutadas;
 
                         $grado->horasPorSesion            = $horasPorSesion;
                         $grado->sesionesRegistradas       = $sesionesRegistradas;
                         $grado->horasEjecutadas           = $horasEjecutadas;
                         $grado->horasRestantes            = $horasRestantes;
-                        $grado->porcentajeHorasEjecutadas = ($materiaData->horas > 0)
-                            ? round(($horasEjecutadas / $materiaData->horas) * 100, 2)
+                        $grado->porcentajeHorasEjecutadas = ($materiaData->horas_programa > 0)
+                            ? round(($horasEjecutadas / $materiaData->horas_programa) * 100, 2)
                             : 0;
                     }
                 }
@@ -290,9 +303,18 @@ class MateriaController extends Controller
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
                 'idAreaConocimiento' => $datos['idAreaConocimiento'],
-                'horas' => $datos['horas'],
-                'creditos' => $datos['creditos']
             ]);
+
+            if (isset($datos['idPrograma'])) {
+                $materiaPrograma = AgregarMateriaPrograma::where('idMateria', $materia->id)
+                    ->where('idPrograma', $datos['idPrograma'])
+                    ->firstOrFail();
+
+                $materiaPrograma->update([
+                    'horas' => $datos['horas'],
+                    'creditos' => $datos['creditos']
+                ]);
+            }
 
             DB::commit();
 
@@ -352,6 +374,15 @@ class MateriaController extends Controller
             ], 400);
         }
 
+        // Cargar la ficha para obtener el porcentaje de ejecución e idPrograma
+        $ficha = Ficha::with('aperturarPrograma')->find($idFicha);
+        if (!$ficha) {
+            return response()->json([
+                'message' => 'Ficha no encontrada'
+            ], 404);
+        }
+
+        $idPrograma = $ficha->aperturarPrograma->idPrograma;
         // Buscar los RAPs asignados a esa ficha, trimestre y competencia padre
         $raps = GradoMateria::where('idGradoPrograma', $idGradoPrograma)
             ->whereHas('materia', function ($q) use ($idMateriaPadre) {
@@ -361,7 +392,11 @@ class MateriaController extends Controller
                 $q->where('idFicha', $idFicha); // De la ficha seleccionada
             })
             ->with([
-                'materia',
+                'materia' => function($q) use ($idPrograma) {
+                    $q->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
+                      ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
+                      ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa');
+                },
                 'horarioMateria' => function ($q) use ($idFicha) {
                     $q->where('idFicha', $idFicha)
                         ->with(['dia', 'contrato.persona'])
@@ -388,8 +423,6 @@ class MateriaController extends Controller
             ->get()
             ->groupBy('idMateria');
 
-        // Cargar la ficha para obtener el porcentaje de ejecución
-        $ficha = Ficha::find($idFicha);
         $porcentajeEjecucion = $ficha ? ($ficha->porcentajeEjecucion ?? 100) : 100;
 
         // Cargamos todos los horarios de la ficha con sus conteos de sesiones (igual que getTrimestresFicha)
@@ -427,7 +460,7 @@ class MateriaController extends Controller
             }
 
             // Horas requeridas del RAP ajustadas por el % de ejecución de la ficha
-            $horasRap = $gradoMateria->materia->horas ?? 0;
+            $horasRap = $gradoMateria->materia->horas_programa ?? 0;
             $horasRequeridas = $horasRap * ($porcentajeEjecucion / 100);
 
             // Detección de estado:
@@ -450,11 +483,11 @@ class MateriaController extends Controller
                 'codigo' => $gradoMateria->materia->codigo ?? '',
                 'estado' => $estaFinalizado ? 'FINALIZADO' : 'PENDIENTE',
                 'fechaFinalRap' => $fechaFinalRap instanceof Carbon ? $fechaFinalRap->format('Y-m-d') : null,
-                'horas' => $gradoMateria->materia->horas ?? 0,
+                'horas' => $gradoMateria->materia->horas_programa ?? 0,
                 'horasActuales' => round($horasActuales, 2),
-                'horasFaltantes' => round(max(0, ($gradoMateria->materia->horas ?? 0) - $horasActuales), 2),
-                'porcentajeAvance' => ($gradoMateria->materia->horas ?? 0) > 0
-                    ? round(($horasActuales / $gradoMateria->materia->horas) * 100, 2)
+                'horasFaltantes' => round(max(0, ($gradoMateria->materia->horas_programa ?? 0) - $horasActuales), 2),
+                'porcentajeAvance' => ($gradoMateria->materia->horas_programa ?? 0) > 0
+                    ? round(($horasActuales / $gradoMateria->materia->horas_programa) * 100, 2)
                     : 0,
                 'trimestre' => [
                     'id' => $gradoMateria->gradoPrograma->grado->id ?? null,
@@ -552,8 +585,6 @@ class MateriaController extends Controller
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
                 'idAreaConocimiento' => $datos['idMateriaPadre'] != null ? $materiaPadre->idAreaConocimiento : $datos['idAreaConocimiento'],
-                'horas' => $datos['horas'],
-                'creditos' => $datos['creditos'],
                 'idMateriaPadre' => $datos['idMateriaPadre'] ?? null,
                 'idCompany' => $datos['idCompany'],
                 'idEmpresa' => $datos['idCompany']
@@ -577,11 +608,23 @@ class MateriaController extends Controller
                 ]);
             }
 
-            if ($compe->idMateriaPadre == null) {
-                AgregarMateriaPrograma::create([
-                    'idMateria' => $compe->id,
-                    'idPrograma' => $datos['idPrograma']
-                ]);
+            // Auto-detectar idPrograma si no viene pero hay idFicha
+            if (!isset($datos['idPrograma']) && isset($datos['idFicha'])) {
+                $ficha = Ficha::with('aperturarPrograma')->find($datos['idFicha']);
+                if ($ficha && $ficha->aperturarPrograma) {
+                    $datos['idPrograma'] = $ficha->aperturarPrograma->idPrograma;
+                }
+            }
+
+            if (isset($datos['idPrograma'])) {
+                AgregarMateriaPrograma::create(
+                    [
+                        'idMateria' => $compe->id,
+                        'idPrograma' => $datos['idPrograma'],
+                        'horas' => $datos['horas'],
+                        'creditos' => $datos['creditos']
+                    ]
+                );
             }
             DB::commit();
             return response()->json([
@@ -596,10 +639,16 @@ class MateriaController extends Controller
         }
     }
 
-    public function getById($id)
+    public function getById($id, Request $request)
     {
 
         $materia = Materia::with('areaConocimiento')->find($id);
+        $agregarMateriaPrograma = AgregarMateriaPrograma::where('idMateria', $id)
+            ->where('idPrograma', $request->input('idPrograma'))
+            ->firstOrFail();
+
+        $materia->horas = $agregarMateriaPrograma->horas;
+        $materia->creditos = $agregarMateriaPrograma->creditos;
 
         if (!$materia) {
             return response()->json([
