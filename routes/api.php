@@ -116,6 +116,7 @@ use App\Http\Controllers\gestion_programas_academicos\PensumController;
 use App\Http\Controllers\gestion_regional\RegionalController;
 use App\Http\Controllers\PeriodosController;
 use App\Http\Controllers\gestion_jornadas\JornadaController;
+use App\Http\Controllers\GCController;
 
 use App\Http\Controllers\gestion_programas_academicos\NivelesProgramaController;
 use App\Http\Controllers\SedeController as ControllersSedeController;
@@ -1442,6 +1443,16 @@ Route::middleware('auth:api')->group(function () {
     Route::post('detalle_rmi/revertir_informe', [InstructoresController::class, 'revertirInforme']);
     Route::get('get_all_rmi_details_for_admin', [InstructoresController::class, 'getAllRmiDetailsForAdmin']);
     Route::post('merge_pdfs', [InstructoresController::class, 'mergePdfs']);
+
+    // GC routes
+    Route::post('gc/crear', [GCController::class, 'crear']);
+    Route::get('gc/documentos/{id}', [GCController::class, 'getDocumentos']);
+    Route::post('gc/documento/aceptar/{id}', [GCController::class, 'aceptarDocumento']);
+    Route::post('gc/documentos/aceptar-todos/{idGC}', [GCController::class, 'aceptarTodosDocumentos']);
+    Route::post('gc/documento/rechazar/{id}', [GCController::class, 'rechazarDocumento']);
+    Route::post('gc/documento/revertir/{id}', [GCController::class, 'revertirDocumento']);
+    Route::post('gc/documento/subir', [GCController::class, 'subirDocumento']);
+    Route::delete('gc/documento/eliminar/{id}', [GCController::class, 'eliminarDocumento']);
 });
 
 //Intructores Comisiones:

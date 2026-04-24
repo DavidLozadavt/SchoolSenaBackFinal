@@ -12,6 +12,7 @@ use App\Models\DetalleRmi;
 use App\Models\NotificacionSistema;
 use App\Models\Person;
 use App\Models\Rmi;
+use App\Models\GC;
 use App\Models\SesionMateria;
 use App\Models\User;
 use App\Util\KeyUtil;
@@ -99,11 +100,11 @@ class InstructoresController extends Controller
                 // Obtener detallesRmi PENDIENTE/RECHAZADO del periodo actual para este contrato
                 $detallesRmi = $rmi
                     ? DetalleRmi::where('idRmi', $rmi->id)
-                        ->whereIn('estado', ['PENDIENTE', 'RECHAZADO'])
-                        ->whereHas('horarioMateria', function ($q) use ($contrato) {
+                    ->whereIn('estado', ['PENDIENTE', 'RECHAZADO'])
+                    ->whereHas('horarioMateria', function ($q) use ($contrato) {
                         $q->where('idContrato', $contrato->id);
                     })
-                        ->get()
+                    ->get()
                     : collect();
 
                 // Si no tiene detallesRmi PENDIENTE/RECHAZADO en el periodo, excluir
@@ -117,32 +118,32 @@ class InstructoresController extends Controller
                 $horariosBase = $contrato->horarioMateria
                     ->filter(fn($h) => in_array($h->id, $idsConDetalle))
                     ->map(function ($h) use ($inicio, $fin) {
-                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-                    $idDiaInt = (int) $h->idDia;
-                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-                    $cantidadSesiones = 0;
-                    $cursor = $desde->copy();
-                    while ($cursor->lte($hasta)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
-                            $cantidadSesiones++;
-                        $cursor->addDay();
-                    }
-                    return [
-                        'id' => $h->id,
-                        'idContrato' => $h->idContrato,
-                        'horaInicial' => $h->horaInicial,
-                        'horaFinal' => $h->horaFinal,
-                        'estado' => $h->estado,
-                        'idDia' => $h->idDia,
-                        'fechaInicial' => $h->fechaInicial,
-                        'fechaFinal' => $h->fechaFinal,
-                        'duracionSesion' => (float) $duracionSesion,
-                        'cantidadSesiones' => (int) $cantidadSesiones,
-                        'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
-                    ];
-                })->keyBy('id');
+                        $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+                        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                        $idDiaInt = (int) $h->idDia;
+                        $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
+                        $cantidadSesiones = 0;
+                        $cursor = $desde->copy();
+                        while ($cursor->lte($hasta)) {
+                            if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                                $cantidadSesiones++;
+                            $cursor->addDay();
+                        }
+                        return [
+                            'id' => $h->id,
+                            'idContrato' => $h->idContrato,
+                            'horaInicial' => $h->horaInicial,
+                            'horaFinal' => $h->horaFinal,
+                            'estado' => $h->estado,
+                            'idDia' => $h->idDia,
+                            'fechaInicial' => $h->fechaInicial,
+                            'fechaFinal' => $h->fechaFinal,
+                            'duracionSesion' => (float) $duracionSesion,
+                            'cantidadSesiones' => (int) $cantidadSesiones,
+                            'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
+                        ];
+                    })->keyBy('id');
 
                 // Horas ejecutadas en el mes actual (sesiones registradas)
                 $horasEjecutadas = round(
@@ -174,26 +175,26 @@ class InstructoresController extends Controller
                 return $detallesRmi
                     ->groupBy('estado')
                     ->map(function ($grupo, $estado) use ($acu, $user, $contrato, $personaData, $horariosBase, $horasEjecutadas, $rmi) {
-                    $idsGrupo = $grupo->pluck('idHorarioMateria')->toArray();
+                        $idsGrupo = $grupo->pluck('idHorarioMateria')->toArray();
 
-                    $motivoRechazo = $estado === 'RECHAZADO'
-                        ? $grupo->first(fn($d) => !empty($d->observacion))?->observacion
-                        : null;
+                        $motivoRechazo = $estado === 'RECHAZADO'
+                            ? $grupo->first(fn($d) => !empty($d->observacion))?->observacion
+                            : null;
 
-                    return [
-                        'idActivation' => $acu->id,
-                        'emailUsuario' => $user->email,
-                        'idContrato' => $contrato->id,
-                        'idRmi' => $rmi?->id,
-                        'roles' => $acu->getRoleNames(),
-                        'estado' => $estado,
-                        'totalHoras' => $contrato->horasmes ?? 0,
-                        'totalHorasFormato' => $horasEjecutadas,
-                        'motivoRechazo' => $motivoRechazo,
-                        'horarios' => $horariosBase->only($idsGrupo)->values(),
-                        'persona' => $personaData,
-                    ];
-                })
+                        return [
+                            'idActivation' => $acu->id,
+                            'emailUsuario' => $user->email,
+                            'idContrato' => $contrato->id,
+                            'idRmi' => $rmi?->id,
+                            'roles' => $acu->getRoleNames(),
+                            'estado' => $estado,
+                            'totalHoras' => $contrato->horasmes ?? 0,
+                            'totalHorasFormato' => $horasEjecutadas,
+                            'motivoRechazo' => $motivoRechazo,
+                            'horarios' => $horariosBase->only($idsGrupo)->values(),
+                            'persona' => $personaData,
+                        ];
+                    })
                     ->values()
                     ->toArray();
             });
@@ -1032,7 +1033,7 @@ class InstructoresController extends Controller
                 $query->whereYear('fechaContratacion', '<=', $year)
                     ->whereYear('fechaFinalContrato', '>=', $year);
             })
-            ->with(['horarioMateria.detallesRmi.rmi'])
+            ->with(['horarioMateria.detallesRmi.rmi', 'gcs'])
             ->get();
 
         if ($contracts->isEmpty()) {
@@ -1104,6 +1105,7 @@ class InstructoresController extends Controller
                             'observacion' => $rmi->observacion,
                             'horasAsignadas' => round($horasAsignadas, 2),
                             'detalles' => [],
+                            'gc' => $contract->gcs->firstWhere('idRmi', $rmi->id),
                         ];
                     }
 
@@ -1265,7 +1267,7 @@ class InstructoresController extends Controller
 
             // Obtener información del RMI
             $rmi = Rmi::findOrFail($validated['idRmi']);
-            
+
             // Obtener el instructor a través del primer DetalleRmi
             $primerDetalle = DetalleRmi::where('idRmi', $validated['idRmi'])
                 ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
@@ -1335,7 +1337,7 @@ class InstructoresController extends Controller
 
             // Obtener información del RMI
             $rmi = Rmi::findOrFail($validated['idRmi']);
-            
+
             // Obtener el instructor a través del primer DetalleRmi
             $primerDetalle = DetalleRmi::where('idRmi', $validated['idRmi'])
                 ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
@@ -1396,7 +1398,7 @@ class InstructoresController extends Controller
             return response()->json(['message' => 'Error al revertir el informe', 'error' => $e->getMessage()], 500);
         }
     }
-    
+
     public function rechazarInforme(Request $request)
     {
         DB::beginTransaction();
@@ -1410,8 +1412,8 @@ class InstructoresController extends Controller
 
             // Obtener información del RMI
             $rmi = Rmi::findOrFail($validated['idRmi']);
-            $motivo =$validated['motivo'];
-            
+            $motivo = $validated['motivo'];
+
             // Obtener el instructor a través del primer DetalleRmi
             $primerDetalle = DetalleRmi::where('idRmi', $validated['idRmi'])
                 ->whereIn('idHorarioMateria', $validated['idsHorarioMateria'])
@@ -1471,71 +1473,96 @@ class InstructoresController extends Controller
         }
     }
     protected function enviarNotificacionInforme(
-            $remitenteId,
-            $receptorId,
-            $periodo,
-            $motivo = null,
-            $accion = 'APROBADO'
-        ) {
-            switch ($accion) {
-                case 'APROBADO':
-                    $asunto = 'Informe aprobado';
-                    $mensaje = "Su informe del periodo {$periodo} ha sido aprobado.";
-                    break;
+        $remitenteId,
+        $receptorId,
+        $periodo,
+        $motivo = null,
+        $accion = 'APROBADO'
+    ) {
+        switch ($accion) {
+            case 'APROBADO':
+                $asunto = 'Informe aprobado';
+                $mensaje = "Su informe del periodo {$periodo} ha sido aprobado.";
+                break;
 
-                case 'RECHAZADO':
-                    $asunto = 'Informe rechazado';
-                    $mensaje = "Su informe del periodo {$periodo} ha sido rechazado."
-                        . ($motivo ? " Motivo: {$motivo}" : "");
-                    break;
+            case 'RECHAZADO':
+                $asunto = 'Informe rechazado';
+                $mensaje = "Su informe del periodo {$periodo} ha sido rechazado."
+                    . ($motivo ? " Motivo: {$motivo}" : "");
+                break;
 
-                case 'DEVUELTO':
-                    $asunto = 'Informe devuelto a pendiente';
-                    $mensaje = "Su informe del periodo {$periodo} ha sido devuelto a estado PENDIENTE."
-                        . " Por favor revise la plataforma y realice los ajustes necesarios.";
-                    break;
+            case 'DEVUELTO':
+                $asunto = 'Informe devuelto a pendiente';
+                $mensaje = "Su informe del periodo {$periodo} ha sido devuelto a estado PENDIENTE."
+                    . " Por favor revise la plataforma y realice los ajustes necesarios.";
+                break;
 
-                default:
-                    $asunto = 'Actualización de informe';
-                    $mensaje = "El estado de su informe del periodo {$periodo} ha cambiado.";
-                    break;
-            }
-
-            return NotificacionSistema::create([
-                'fecha' => now()->toDateString(),
-                'hora' => now()->toTimeString(),
-                'asunto' => $asunto,
-                'mensaje' => $mensaje,
-                'estado_id' => 1,
-                'idUsuarioReceptor' => $receptorId,
-                'idUsuarioRemitente' => $remitenteId,
-                'idTipoNotificacion' => 1,
-                'idEmpresa' => KeyUtil::idCompany(),
-                'route' => '/rmi'
-            ]);
+            default:
+                $asunto = 'Actualización de informe';
+                $mensaje = "El estado de su informe del periodo {$periodo} ha cambiado.";
+                break;
         }
+
+        return NotificacionSistema::create([
+            'fecha' => now()->toDateString(),
+            'hora' => now()->toTimeString(),
+            'asunto' => $asunto,
+            'mensaje' => $mensaje,
+            'estado_id' => 1,
+            'idUsuarioReceptor' => $receptorId,
+            'idUsuarioRemitente' => $remitenteId,
+            'idTipoNotificacion' => 1,
+            'idEmpresa' => KeyUtil::idCompany(),
+            'route' => '/rmi'
+        ]);
+    }
 
     public function getAllRmiDetailsForAdmin(Request $request)
     {
         try {
-            // Obtener todos los RMI con sus detalles
+            // Obtener todos los RMI con sus detalles y GCs
             $rmiRecords = Rmi::with([
                 'detalles.horarioMateria.gradoMateria.materia',
-                'detalles.horarioMateria.contrato.persona'
+                'detalles.horarioMateria.contrato.persona',
+                'gcs'
             ])->orderBy('periodo', 'desc')->get();
 
             $result = [];
 
             foreach ($rmiRecords as $rmi) {
-                $detallesGrouped = [];
+                // Agrupar detalles por contrato para separar instructores en el mismo periodo
+                $contratosGrouped = [];
 
                 foreach ($rmi->detalles as $detalle) {
                     $horario = $detalle->horarioMateria;
+                    if (!$horario)
+                        continue;
+
                     $contrato = $horario->contrato;
+                    if (!$contrato)
+                        continue;
+
+                    $idContrato = $contrato->id;
                     $persona = $contrato->persona;
+
+                    if (!isset($contratosGrouped[$idContrato])) {
+                        $contratosGrouped[$idContrato] = [
+                            'idRmi' => $rmi->id,
+                            'periodo' => $rmi->periodo,
+                            'estadoRmi' => $rmi->estado,
+                            'instructorNombre' => $persona ? ($persona->nombre1 . ' ' . $persona->apellido1) : 'Sin nombre',
+                            'instructorId' => $persona ? $persona->id : null,
+                            'identificacion' => $persona ? $persona->identificacion : 'S/N',
+                            'emailInstructor' => $persona ? $persona->email : 'S/E',
+                            'idContrato' => $idContrato,
+                            'detalles' => [],
+                            'gc' => null // Se llenará después
+                        ];
+                    }
+
                     $materia = $horario->gradoMateria->materia ?? null;
 
-                    $detallesGrouped[] = [
+                    $contratosGrouped[$idContrato]['detalles'][] = [
                         'idDetalleRmi' => $detalle->id,
                         'idRmi' => $rmi->id,
                         'idHorarioMateria' => $horario->id,
@@ -1545,24 +1572,14 @@ class InstructoresController extends Controller
                         'horaInicial' => $horario->horaInicial,
                         'horaFinal' => $horario->horaFinal,
                         'fechaInicial' => $horario->fechaInicial,
-                        'materia' => $materia?->nombre ?? 'Sin materia'
+                        'materia' => $materia ? ($materia->nombreMateria ?? $materia->nombre ?? 'Sin nombre') : 'Sin materia'
                     ];
                 }
 
-                if (!empty($detallesGrouped)) {
-                    $firstDetalle = $detallesGrouped[0];
-
-                    $result[] = [
-                        'idRmi' => $rmi->id,
-                        'periodo' => $rmi->periodo,
-                        'estadoRmi' => $rmi->estado,
-                        'instructorNombre' => $persona->nombre1 . ' ' . $persona->apellido1,
-                        'instructorId' => $persona->id,
-                        'identificacion' => $persona->identificacion,
-                        'emailInstructor' => $persona->email,
-                        'idContrato' => $contrato->id,
-                        'detalles' => $detallesGrouped
-                    ];
+                // Asignar el GC correspondiente a cada contrato y agregarlo al resultado
+                foreach ($contratosGrouped as $idContrato => $data) {
+                    $data['gc'] = $rmi->gcs->firstWhere('idContrato', $idContrato);
+                    $result[] = $data;
                 }
             }
 
@@ -1768,7 +1785,7 @@ class InstructoresController extends Controller
                             'faseProyecto' => $fase?->descripcionFase,
                             'proyectoFormativo' => $fase?->proyectoFormativo?->nombreProyecto,
                             'actividades' => $fase?->actividades
-                                    ?->map(fn($a) => [
+                                ?->map(fn($a) => [
                                     'id' => $a->id,
                                     'descripcionActividad' => $a->descripcionActividad,
                                 ])->values()->toArray() ?? [],
@@ -1983,7 +2000,7 @@ class InstructoresController extends Controller
                             'faseProyecto' => $fase?->descripcionFase,
                             'proyectoFormativo' => $fase?->proyectoFormativo?->nombreProyecto,
                             'actividades' => $fase?->actividades
-                                    ?->map(fn($a) => [
+                                ?->map(fn($a) => [
                                     'id' => $a->id,
                                     'descripcionActividad' => $a->descripcionActividad,
                                 ])->values()->toArray() ?? [],
