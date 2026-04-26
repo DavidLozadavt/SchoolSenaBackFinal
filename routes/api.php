@@ -135,6 +135,7 @@ use App\Http\Controllers\ambiente_virtual\GruposFichaController;
 use App\Http\Controllers\ambiente_virtual\AsignacionActividadController;
 use App\Http\Controllers\ambiente_virtual\ActividadesAprendizController;
 use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
+use App\Http\Controllers\ambiente_virtual\MaterialApoyoFichaController;
 use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
@@ -1304,6 +1305,12 @@ Route::middleware('auth:api')->group(function () {
     Route::get('grupos-estudiante', [GruposFichaController::class, 'gruposEstudiante']);
     // Actividades asignadas a un estudiante específico (vista instructor)
     Route::get('fichas/{idFicha}/actividades-estudiante', [AsignacionActividadController::class, 'actividadesEstudiante']);
+
+    // Material de apoyo general por ficha (PDF / enlaces), separado del material ligado solo a actividades
+    Route::get('fichas/{idFicha}/materiales-apoyo', [MaterialApoyoFichaController::class, 'index']);
+    Route::post('fichas/{idFicha}/materiales-apoyo', [MaterialApoyoFichaController::class, 'store']);
+    Route::put('fichas/{idFicha}/materiales-apoyo/{id}', [MaterialApoyoFichaController::class, 'update']);
+    Route::delete('fichas/{idFicha}/materiales-apoyo/{id}', [MaterialApoyoFichaController::class, 'destroy']);
 
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
     Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);

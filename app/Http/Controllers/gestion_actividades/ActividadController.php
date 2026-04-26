@@ -20,6 +20,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class ActividadController extends Controller
 {
@@ -1019,6 +1020,30 @@ class ActividadController extends Controller
     {
         try {
             $actividad = Actividad::findOrFail($idActividad);
+            $tabMat = (new MaterialApoyoActividad())->getTable();
+            if ($request->filled('idMaterialApoyo') && Schema::hasColumn($tabMat, 'idFicha')) {
+                $request->validate([
+                    'idMaterialApoyo' => ['required', 'integer', Rule::exists((new MaterialApoyoActividad())->getTable(), 'id')],
+                    'idFicha' => 'required|integer|exists:ficha,id',
+                ]);
+                $mat = MaterialApoyoActividad::findOrFail((int) $request->idMaterialApoyo);
+                if ((int) $mat->idMateria !== (int) $actividad->idMateria) {
+                    return response()->json(['error' => 'El material no pertenece a la misma materia que la actividad'], 422);
+                }
+                if ($mat->idFicha === null || (int) $mat->idFicha !== (int) $request->idFicha) {
+                    return response()->json(['error' => 'Solo se puede asociar material de apoyo general de la ficha actual'], 422);
+                }
+                AsignacionMaterialApoyoActividad::firstOrCreate(
+                    [
+                        'idActividad' => $idActividad,
+                        'idMaterialApoyo' => $mat->id,
+                    ],
+                    []
+                );
+
+                return response()->json($mat, 201);
+            }
+
             $request->validate([
                 'titulo' => 'required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
@@ -1041,13 +1066,17 @@ class ActividadController extends Controller
                 return response()->json(['errors' => ['Se requiere documento PDF o enlace']], 422);
             }
 
-            $material = MaterialApoyoActividad::create([
+            $data = [
                 'titulo' => $request->titulo,
                 'descripcion' => $request->descripcion ?? null,
                 'urlDocumento' => $path,
                 'urlAdicional' => $request->urlAdicional ? trim($request->urlAdicional) : null,
                 'idMateria' => $actividad->idMateria,
-            ]);
+            ];
+            if (Schema::hasColumn($tabMat, 'idFicha')) {
+                $data['idFicha'] = null;
+            }
+            $material = MaterialApoyoActividad::create($data);
 
             AsignacionMaterialApoyoActividad::create([
                 'idActividad' => $idActividad,
@@ -1070,12 +1099,31 @@ class ActividadController extends Controller
                 ->firstOrFail();
             $material = MaterialApoyoActividad::find($idMaterialApoyo);
             $asignacion->delete();
-            if ($material) {
-                if ($material->urlDocumento && Storage::disk('public')->exists($material->urlDocumento)) {
-                    Storage::disk('public')->delete($material->urlDocumento);
-                }
-                $material->delete();
+
+            if (!$material) {
+                return response()->json(['message' => 'Material desvinculado de la actividad']);
             }
+
+            $tabMat = (new MaterialApoyoActividad())->getTable();
+            $tieneIdFicha = Schema::hasColumn($tabMat, 'idFicha');
+            $idFichaMaterial = $tieneIdFicha ? $material->idFicha : null;
+            $sigueEnOtrasActividades = AsignacionMaterialApoyoActividad::where('idMaterialApoyo', $idMaterialApoyo)->exists();
+
+            if ($sigueEnOtrasActividades) {
+                return response()->json(['message' => 'Material desvinculado de la actividad']);
+            }
+
+            if ($tieneIdFicha && $idFichaMaterial !== null) {
+                return response()->json([
+                    'message' => 'Material desvinculado de la actividad. Sigue disponible en el material de apoyo general de la ficha.',
+                ]);
+            }
+
+            if ($material->urlDocumento && Storage::disk('public')->exists($material->urlDocumento)) {
+                Storage::disk('public')->delete($material->urlDocumento);
+            }
+            $material->delete();
+
             return response()->json(['message' => 'Material de apoyo eliminado']);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
