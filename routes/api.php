@@ -1531,6 +1531,9 @@ Route::middleware('auth:api')->group(function () {
     });
 });
 
+// REEMPLAZOS U HORARIOS COMPARTIDOS
 Route::middleware('auth:api')->group(function () {
     Route::post('asignacion-sesion', [AsignacionSesionController::class, 'store']);
+    Route::put('horario/asignar-compartido', [HorarioMateriaController::class, 'assignSharedInstructor']); //asignar instructor secundario a horarios compartidos
+    Route::put('asignacion-sesion/desasignar', [AsignacionSesionController::class, 'desasignarSesiones']);
 });

@@ -100,7 +100,7 @@ class MateriaController extends Controller
                         $rapsFinalizados++;
                     }
                 }
-                
+
                 $estaFinalizada = ($rapsFinalizados >= $totalRaps);
                 if ($totalRaps === 0) $estaFinalizada = false;
 
@@ -392,10 +392,10 @@ class MateriaController extends Controller
                 $q->where('idFicha', $idFicha); // De la ficha seleccionada
             })
             ->with([
-                'materia' => function($q) use ($idPrograma) {
+                'materia' => function ($q) use ($idPrograma) {
                     $q->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
-                      ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
-                      ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa');
+                        ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
+                        ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa');
                 },
                 'horarioMateria' => function ($q) use ($idFicha) {
                     $q->where('idFicha', $idFicha)
@@ -753,23 +753,23 @@ class MateriaController extends Controller
         $idFicha = $request->input('idFicha');
 
         $rapsYaFinalizados = MatriculaAcademica::where('idFicha', $idFicha)
-                ->whereIn('estado', ['FINALIZADO', 'EVALUADO', 'APROBADO'])
-                ->select('idMateria')
-                ->groupBy('idMateria')
-                ->havingRaw('COUNT(*) >= 5')
-                ->pluck('idMateria')->toArray();
-                
-                $raps = MatriculaAcademica::where('idFicha', $idFicha)
-                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
-                        ->whereNotIn('idMateria', $rapsYaFinalizados)
-                        ->whereHas('materia', function ($query) use ($idMateriaPadre) {
-                            $query->where('idMateriaPadre', $idMateriaPadre);
-                        })
-                        ->with('materia')
-                        ->get()
-                        ->pluck('materia')
-                        ->unique('id')
-                        ->values();
+            ->whereIn('estado', ['FINALIZADO', 'EVALUADO', 'APROBADO'])
+            ->select('idMateria')
+            ->groupBy('idMateria')
+            ->havingRaw('COUNT(*) >= 5')
+            ->pluck('idMateria')->toArray();
+
+        $raps = MatriculaAcademica::where('idFicha', $idFicha)
+            ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
+            ->whereNotIn('idMateria', $rapsYaFinalizados)
+            ->whereHas('materia', function ($query) use ($idMateriaPadre) {
+                $query->where('idMateriaPadre', $idMateriaPadre);
+            })
+            ->with('materia')
+            ->get()
+            ->pluck('materia')
+            ->unique('id')
+            ->values();
 
         $materias = $raps->sortBy(function ($materia) {
             $nombre = $materia->nombreMateria;

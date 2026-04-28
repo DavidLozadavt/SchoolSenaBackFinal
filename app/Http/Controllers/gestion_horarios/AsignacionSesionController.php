@@ -52,4 +52,42 @@ class AsignacionSesionController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Eliminar asignación
+     */
+    public function desasignarSesiones(Request $request): JsonResponse
+    {
+        try {
+            $horarioIds = $request->input('horarios');
+            $idContrato = $request->input('idContrato');
+
+            DB::beginTransaction();
+
+            $query = AsignacionSesion::whereIn('idHorarioMateria', $horarioIds);
+            if ($idContrato) {
+                $query->where('idContrato', $idContrato);
+            }
+
+            $asignaciones = $query->get();
+
+            foreach ($asignaciones as $asignacion) {
+                $asignacion->idContrato = null;
+                $asignacion->save();
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Asignación eliminada correctamente'
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Error al eliminar asignación',
+                'error'   => $e->getMessage()
+            ], 500);
+        }
+    }
 }
