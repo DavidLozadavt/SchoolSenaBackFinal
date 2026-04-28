@@ -25,4 +25,9 @@ class Rmi extends Model
             'idHorarioMateria'
         );
     }
+
+    public function gcs()
+    {
+        return $this->hasMany(GC::class, 'idRmi', 'id');
+    }
 }
