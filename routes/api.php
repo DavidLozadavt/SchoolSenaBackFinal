@@ -1453,6 +1453,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('gc/documento/revertir/{id}', [GCController::class, 'revertirDocumento']);
     Route::post('gc/documento/subir', [GCController::class, 'subirDocumento']);
     Route::delete('gc/documento/eliminar/{id}', [GCController::class, 'eliminarDocumento']);
+    Route::get('gc/descargar-zip/{id}', [GCController::class, 'descargarZip']);
 });
 
 //Intructores Comisiones:
