@@ -39,5 +39,9 @@ class SesionMateria extends Model
     return $this->hasMany(Asistencia::class, 'idSesionMateria', 'id');
   }
 
+  public function asignacionSesion(): BelongsTo
+  {
+    return $this->belongsTo(AsignacionSesion::class, 'idAsignacionSesion', 'id');
+  }
 
 }

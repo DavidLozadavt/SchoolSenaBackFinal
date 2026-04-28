@@ -1216,6 +1216,7 @@ class HorarioMateriaController extends Controller
             $materias = HorarioMateria::where('idFicha', $idFicha)
                 ->with('gradoMateria.materia')
                 ->with('contrato.persona')
+                ->with('asignacionSesion.contrato.persona')
                 ->get();
 
             if ($materias->isEmpty()) {
@@ -1232,9 +1233,6 @@ class HorarioMateriaController extends Controller
             return response()->json([
                 'message' => 'Error al consultar las materias por jornada y periodo',
                 'error'   => $e->getMessage(),
-                // útil en desarrollo, quítalo en producción si quieres
-                'line'    => $e->getLine(),
-                'file'    => $e->getFile(),
             ], 500);
         }
     }
@@ -1281,7 +1279,8 @@ class HorarioMateriaController extends Controller
                 'gradoMateria.gradoPrograma.grado',
                 'gradoMateria.gradoPrograma',
                 'dia',
-                'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email'
+                'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email',
+                'asignacionSesion.contrato.persona'
             ])
             ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($q) {
                 $q->whereNotNull('fechaSesion');
@@ -1441,6 +1440,7 @@ class HorarioMateriaController extends Controller
                                                 'fechaFinal' => $h->fechaFinal,
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => $h->contrato->persona ?? null,
+                                                'asignacionSesion' => $h->asignacionSesion ?? [],
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values(),
@@ -1457,6 +1457,7 @@ class HorarioMateriaController extends Controller
                                                 'fechaFinal' => $h->fechaFinal,
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => null,
+                                                'asignacionSesion' => $h->asignacionSesion ?? [],
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values()
