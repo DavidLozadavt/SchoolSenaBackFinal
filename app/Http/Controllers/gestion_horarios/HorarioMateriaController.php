@@ -36,6 +36,7 @@ use App\Models\GradoPrograma;
 use App\Models\Rmi;
 use App\Models\MatriculaAcademica;
 use App\Models\NotificacionSistema;
+use App\Models\AsignacionSesion;
 
 class HorarioMateriaController extends Controller
 {
@@ -83,6 +84,39 @@ class HorarioMateriaController extends Controller
         }
     }
 
+    public function assignSharedInstructor(Request $request): JsonResponse
+    {
+        try {
+            $idContrato = $request->idContrato;
+            $horarioIds = $request->horarios; // Array de IDs de HorarioMateria
+
+            if (empty($idContrato) || empty($horarioIds)) {
+                return response()->json(['message' => 'Faltan datos obligatorios'], 400);
+            }
+
+            // Buscamos las asignaciones de sesión de tipo compartido que tengan idContrato null
+            $asignaciones = AsignacionSesion::whereIn('idHorarioMateria', $horarioIds)
+                ->where('tipoAsignacion', 'HORARIO COMPARTIDO')
+                ->whereNull('idContrato')
+                ->get();
+
+            if ($asignaciones->isEmpty()) {
+                return response()->json(['message' => 'No se encontraron horarios compartidos pendientes de asignación'], 404);
+            }
+
+            foreach ($asignaciones as $asignacion) {
+                $asignacion->update(['idContrato' => $idContrato]);
+            }
+
+            return response()->json(['message' => 'Instructor secundario asignado correctamente'], 200);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Error al asignar instructor secundario',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     /**
      * Create new horarioMateria
      *
@@ -100,6 +134,7 @@ class HorarioMateriaController extends Controller
             $fechaInicio    = $data['fechaInicio'];
             $fechaFin       = $data['fechaFin'];
             $observacion    = $data['observacion'] ?? null;
+            $esCompartido   = $data['esCompartido'] ?? false;
             $horarios       = $data['horarios'] ?? [];
 
             if (empty($horarios)) {
@@ -145,10 +180,32 @@ class HorarioMateriaController extends Controller
                 if ($index === 0 && $horarioBase) {
                     $horarioBase->update($horarioData);
                     $this->generatePastSessions($horarioBase);
+
+                    if ($esCompartido) {
+                        AsignacionSesion::create([
+                            'tipoAsignacion'   => 'HORARIO COMPARTIDO',
+                            'fechaInicio'      => $fechaInicio,
+                            'fechaFin'         => $fechaFin,
+                            'idContrato'       => null,
+                            'idHorarioMateria' => $horarioBase->id,
+                        ]);
+                    }
+
                     $results[] = $horarioBase;
                 } else {
                     $newHorario = HorarioMateria::create($horarioData);
                     $this->generatePastSessions($newHorario);
+
+                    if ($esCompartido) {
+                        AsignacionSesion::create([
+                            'tipoAsignacion'   => 'HORARIO COMPARTIDO',
+                            'fechaInicio'      => $fechaInicio,
+                            'fechaFin'         => $fechaFin,
+                            'idContrato'       => null,
+                            'idHorarioMateria' => $newHorario->id,
+                        ]);
+                    }
+
                     $results[] = $newHorario;
                 }
             }
@@ -1216,6 +1273,7 @@ class HorarioMateriaController extends Controller
             $materias = HorarioMateria::where('idFicha', $idFicha)
                 ->with('gradoMateria.materia')
                 ->with('contrato.persona')
+                ->with('asignacionSesion.contrato.persona')
                 ->get();
 
             if ($materias->isEmpty()) {
@@ -1232,9 +1290,6 @@ class HorarioMateriaController extends Controller
             return response()->json([
                 'message' => 'Error al consultar las materias por jornada y periodo',
                 'error'   => $e->getMessage(),
-                // útil en desarrollo, quítalo en producción si quieres
-                'line'    => $e->getLine(),
-                'file'    => $e->getFile(),
             ], 500);
         }
     }
@@ -1281,7 +1336,8 @@ class HorarioMateriaController extends Controller
                 'gradoMateria.gradoPrograma.grado',
                 'gradoMateria.gradoPrograma',
                 'dia',
-                'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email'
+                'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email',
+                'asignacionSesion.contrato.persona'
             ])
             ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($q) {
                 $q->whereNotNull('fechaSesion');
@@ -1373,7 +1429,7 @@ class HorarioMateriaController extends Controller
 
                             if ($hijosQuery->exists()) {
                                 $horasSum = $hijosQuery->sum('agregarMateriaPrograma.horas');
-                                
+
                                 $ampPadre = AgregarMateriaPrograma::updateOrCreate(
                                     ['idMateria' => $materiaPadre->id, 'idPrograma' => $idPrograma],
                                     ['horas' => $horasSum]
@@ -1441,6 +1497,7 @@ class HorarioMateriaController extends Controller
                                                 'fechaFinal' => $h->fechaFinal,
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => $h->contrato->persona ?? null,
+                                                'asignacionSesion' => $h->asignacionSesion ?? [],
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values(),
@@ -1457,6 +1514,7 @@ class HorarioMateriaController extends Controller
                                                 'fechaFinal' => $h->fechaFinal,
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => null,
+                                                'asignacionSesion' => $h->asignacionSesion ?? [],
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values()
@@ -1642,11 +1700,11 @@ class HorarioMateriaController extends Controller
             }
 
             // INFORMACION PARA ENVIAR EN EL EMAIL Y LA NOTIFICACION
-            
+
             // RAP, Competencia y Trimestre
             $gradoMateria = GradoMateria::with(['materia.padre', 'gradoPrograma.grado'])
                 ->find($idGradoMateria);
-            
+
             $nombreRap = $gradoMateria->materia->nombreMateria ?? 'Materia/RAP';
             $nombreCompetencia = $gradoMateria->materia->padre->nombreMateria ?? 'Competencia';
             $numeroTrimestre = $gradoMateria->gradoPrograma->grado->numeroGrado ?? 'N/A';
@@ -1665,12 +1723,12 @@ class HorarioMateriaController extends Controller
                 $nombreDocente = $instructor->nombre1 . ' ' . $instructor->apellido1;
                 $asunto = "Ha finalizado el RAP: " . $nombreRap;
                 $mensaje = "Hola $nombreDocente,\n\n"
-                         . "Te informamos que el RAP $nombreRap \n perteneciente a la competencia $nombreCompetencia "
-                         . "ha finalizado. \n\n"
-                         . "Ficha: $ficha \n"
-                         . "Trimestre: $numeroTrimestre \n"
-                         . "Por favor evalúa en Sofía Plus y carga los juicios evaluativos.\n\n"
-                         . "Gracias por tu labor.";
+                    . "Te informamos que el RAP $nombreRap \n perteneciente a la competencia $nombreCompetencia "
+                    . "ha finalizado. \n\n"
+                    . "Ficha: $ficha \n"
+                    . "Trimestre: $numeroTrimestre \n"
+                    . "Por favor evalúa en Sofía Plus y carga los juicios evaluativos.\n\n"
+                    . "Gracias por tu labor.";
 
                 \App\Jobs\SendBasicEmail::dispatch($correo, $asunto, $mensaje);
 

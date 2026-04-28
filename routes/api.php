@@ -146,6 +146,7 @@ use App\Http\Controllers\ActividadProyectoController;
 use App\Http\Controllers\CompromisosController;
 use App\Http\Controllers\FaseProyectoController;
 use App\Http\Controllers\FaseProyectoRapController;
+use App\Http\Controllers\gestion_horarios\AsignacionSesionController;
 use App\Http\Controllers\gestion_notificacion\NotificacionesSistemaController;
 use App\Http\Controllers\gestion_pensum\InasistenciaController;
 use App\Http\Controllers\InstructoresController;
@@ -1528,4 +1529,11 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/{id}', [ActividadContratoController::class, 'update']);
         Route::delete('/{id}', [ActividadContratoController::class, 'destroy']);
     });
+});
+
+// REEMPLAZOS U HORARIOS COMPARTIDOS
+Route::middleware('auth:api')->group(function () {
+    Route::post('asignacion-sesion', [AsignacionSesionController::class, 'store']);
+    Route::put('horario/asignar-compartido', [HorarioMateriaController::class, 'assignSharedInstructor']); //asignar instructor secundario a horarios compartidos
+    Route::put('asignacion-sesion/desasignar', [AsignacionSesionController::class, 'desasignarSesiones']);
 });
