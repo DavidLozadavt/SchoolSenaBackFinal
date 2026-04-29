@@ -4,6 +4,9 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+/**
+ * Relación única: actividad ↔ materialApoyoActividad (material propio de la actividad).
+ */
 class AsignacionMaterialApoyoActividad extends Model
 {
     protected $table = 'asignacionMaterialApoyoActividad';

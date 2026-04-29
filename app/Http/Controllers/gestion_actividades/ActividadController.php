@@ -9,8 +9,9 @@ use App\Models\ClasificacionActividad;
 use App\Models\PlaneacionActividad;
 use App\Models\Materia;
 use App\Models\Status;
-use App\Models\MaterialApoyoActividad;
 use App\Models\AsignacionMaterialApoyoActividad;
+use App\Models\MaterialApoyoActividad;
+use App\Models\MaterialApoyoRap;
 use App\Models\Pregunta;
 use App\Models\TipoPregunta;
 use App\Models\Respuesta;
@@ -20,10 +21,116 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\Rule;
 
 class ActividadController extends Controller
 {
+    public function materialApoyoAprendiz(Request $request): JsonResponse
+    {
+        try {
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+            if (!$idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $tablaMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            if (!Schema::hasTable($tablaMa)) {
+                return response()->json([]);
+            }
+            $colFicha = Schema::hasColumn($tablaMa, 'idFicha')
+                ? 'idFicha'
+                : (Schema::hasColumn($tablaMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : null);
+            if (!$colFicha) {
+                return response()->json([]);
+            }
+
+            $fichaIds = DB::table($tablaMa . ' as ma')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->where('m.idPersona', $idPersona)
+                ->whereNotNull('ma.' . $colFicha)
+                ->distinct()
+                ->pluck('ma.' . $colFicha)
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->values();
+
+            if ($fichaIds->isEmpty()) {
+                return response()->json([]);
+            }
+
+            $tablaMaterial = (new MaterialApoyoRap())->getTable();
+            if (! Schema::hasTable($tablaMaterial)) {
+                return response()->json([]);
+            }
+
+            $query = DB::table($tablaMaterial . ' as mar')
+                ->leftJoin('materia as mat', 'mar.idMateria', '=', 'mat.id')
+                ->leftJoin('materia as rap', 'mar.idRap', '=', 'rap.id')
+                ->leftJoin('ficha as f', 'mar.idFicha', '=', 'f.id')
+                ->whereIn('mar.idFicha', $fichaIds->all());
+
+            $idFicha = (int) $request->query('idFicha', 0);
+            $idMateria = (int) $request->query('idMateria', 0);
+            $idRap = (int) $request->query('idRap', 0);
+
+            if ($idFicha > 0) {
+                $query->where('mar.idFicha', $idFicha);
+            }
+            if ($idMateria > 0) {
+                $query->where('mar.idMateria', $idMateria);
+            }
+            if ($idRap > 0) {
+                $query->where('mar.idRap', $idRap);
+            }
+
+            if (Schema::hasColumn($tablaMaterial, 'activo')) {
+                $query->where('mar.activo', true);
+            }
+
+            $rows = $query->select([
+                'mar.id',
+                'mar.titulo',
+                'mar.descripcion',
+                'mar.urlDocumento',
+                'mar.urlAdicional',
+                'mar.idMateria',
+                'mar.idFicha',
+                'mar.idRap',
+                'mar.created_at',
+                'mat.nombreMateria as materiaNombre',
+                'rap.nombreMateria as rapNombre',
+                'f.codigo as fichaCodigo',
+            ])
+                ->orderByDesc('mar.id')
+                ->get();
+
+            $data = $rows->map(function ($row) {
+                $idRapResolved = (int) $row->idRap;
+
+                return [
+                    'id' => (int) $row->id,
+                    'titulo' => $row->titulo,
+                    'descripcion' => $row->descripcion,
+                    'urlDocumento' => $row->urlDocumento,
+                    'urlDocumentoUrl' => $this->publicUrl($row->urlDocumento),
+                    'urlAdicional' => $row->urlAdicional,
+                    'idMateria' => (int) $row->idMateria,
+                    'materiaNombre' => $row->materiaNombre,
+                    'idFicha' => (int) $row->idFicha,
+                    'fichaCodigo' => $row->fichaCodigo,
+                    'idRap' => $idRapResolved > 0 ? $idRapResolved : null,
+                    'rapNombre' => $row->rapNombre ?: $row->materiaNombre,
+                    'legacySinRap' => false,
+                    'created_at' => $row->created_at,
+                ];
+            })->values();
+
+            return response()->json($data);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function actividadesAprendiz(Request $request): JsonResponse
     {
         try {
@@ -43,6 +150,9 @@ class ActividadController extends Controller
             $page = max(1, (int) $request->query('page', 1));
 
             $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            $colFicha = Schema::hasColumn($tableMa, 'idFicha')
+                ? 'idFicha'
+                : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : null);
 
             $query = DB::table('calificacionActividad as ca')
                 ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
@@ -88,6 +198,7 @@ class ActividadController extends Controller
                     'p.apellido1 as autorApellido1',
                     'p.apellido2 as autorApellido2',
                     'p.rutaFoto as autorRutaFoto',
+                    DB::raw($colFicha ? ('ma.' . $colFicha . ' as idFichaContext') : 'NULL as idFichaContext'),
                 ])
                 ->orderBy('ca.id')
                 ->offset(($page - 1) * $perPage)
@@ -135,32 +246,32 @@ class ActividadController extends Controller
                 }
             }
 
-            if ($idsActividad->isNotEmpty()) {
-                $materiales = DB::table('asignacionMaterialApoyoActividad as ama')
-                    ->join('materialApoyoActividad as maa', 'ama.idMaterialApoyo', '=', 'maa.id')
-                    ->whereIn('ama.idActividad', $idsActividad)
-                    ->select([
-                        'ama.idActividad',
-                        'maa.id',
-                        'maa.titulo',
-                        'maa.descripcion',
-                        'maa.urlDocumento',
-                        'maa.urlAdicional',
-                    ])
-                    ->get()
-                    ->groupBy('idActividad');
+            $materialesPorRap = [];
+            $tablaMar = (new MaterialApoyoRap())->getTable();
+            if ($idsActividad->isNotEmpty() && Schema::hasTable($tablaMar)) {
+                $fichaIds = $registros->pluck('idFichaContext')->filter()->map(fn ($v) => (int) $v)->unique()->values();
+                $rapIds = $registros->pluck('idMateria')->filter()->map(fn ($v) => (int) $v)->unique()->values();
 
-                foreach ($materiales as $idActividad => $items) {
-                    $materialesPorActividad[$idActividad] = $items->map(function ($item) {
-                        return [
-                            'id' => $item->id,
-                            'titulo' => $item->titulo,
-                            'descripcion' => $item->descripcion,
-                            'urlDocumento' => $item->urlDocumento,
-                            'urlDocumentoUrl' => $this->publicUrl($item->urlDocumento),
-                            'urlAdicional' => $item->urlAdicional,
+                if ($fichaIds->isNotEmpty() && $rapIds->isNotEmpty()) {
+                    $qMatRap = MaterialApoyoRap::query()
+                        ->whereIn('idFicha', $fichaIds->all())
+                        ->whereIn('idRap', $rapIds->all());
+                    if (Schema::hasColumn($tablaMar, 'activo')) {
+                        $qMatRap->where('activo', true);
+                    }
+                    $materialesRap = $qMatRap->orderByDesc('id')->get();
+
+                    foreach ($materialesRap as $mat) {
+                        $key = ((int) $mat->idFicha) . '_' . ((int) $mat->idRap);
+                        $materialesPorRap[$key][] = [
+                            'id' => (int) $mat->id,
+                            'titulo' => $mat->titulo,
+                            'descripcion' => $mat->descripcion,
+                            'urlDocumento' => $mat->urlDocumento,
+                            'urlDocumentoUrl' => $this->publicUrl($mat->urlDocumento),
+                            'urlAdicional' => $mat->urlAdicional,
                         ];
-                    })->values();
+                    }
                 }
             }
 
@@ -228,7 +339,7 @@ class ActividadController extends Controller
                         'nombreCompleto' => $autor ?: 'Sin asignar',
                         'rutaFotoUrl' => $this->publicUrl($row->autorRutaFoto),
                     ],
-                    'materialesApoyo' => $materialesPorActividad[$row->idActividad] ?? [],
+                    'materialesApoyo' => $materialesPorRap[((int) ($row->idFichaContext ?? 0)) . '_' . ((int) ($row->idMateria ?? 0))] ?? [],
                     'estadoVisual' => $estadoVisual,
                     'fechaVencida' => $fechaVencida,
                     'fechaInactiva' => $fechaInactiva,
@@ -1008,9 +1119,33 @@ class ActividadController extends Controller
     public function materialesApoyo(int $idActividad): JsonResponse
     {
         try {
-            $actividad = Actividad::findOrFail($idActividad);
-            $materiales = $actividad->materialesApoyo()->get();
-            return response()->json($materiales);
+            if (! Schema::hasTable('asignacionMaterialApoyoActividad')) {
+                return response()->json([]);
+            }
+
+            Actividad::findOrFail($idActividad);
+
+            $asigs = AsignacionMaterialApoyoActividad::query()
+                ->where('idActividad', $idActividad)
+                ->whereNotNull('idMaterialApoyo')
+                ->get();
+
+            $out = [];
+            foreach ($asigs as $a) {
+                $m = MaterialApoyoActividad::find($a->idMaterialApoyo);
+                if ($m) {
+                    $out[] = [
+                        'id' => (int) $m->id,
+                        'titulo' => $m->titulo,
+                        'descripcion' => $m->descripcion,
+                        'urlDocumento' => $m->urlDocumento,
+                        'urlDocumentoUrl' => $this->publicUrl($m->urlDocumento),
+                        'urlAdicional' => $m->urlAdicional,
+                    ];
+                }
+            }
+
+            return response()->json($out);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -1020,29 +1155,6 @@ class ActividadController extends Controller
     {
         try {
             $actividad = Actividad::findOrFail($idActividad);
-            $tabMat = (new MaterialApoyoActividad())->getTable();
-            if ($request->filled('idMaterialApoyo') && Schema::hasColumn($tabMat, 'idFicha')) {
-                $request->validate([
-                    'idMaterialApoyo' => ['required', 'integer', Rule::exists((new MaterialApoyoActividad())->getTable(), 'id')],
-                    'idFicha' => 'required|integer|exists:ficha,id',
-                ]);
-                $mat = MaterialApoyoActividad::findOrFail((int) $request->idMaterialApoyo);
-                if ((int) $mat->idMateria !== (int) $actividad->idMateria) {
-                    return response()->json(['error' => 'El material no pertenece a la misma materia que la actividad'], 422);
-                }
-                if ($mat->idFicha === null || (int) $mat->idFicha !== (int) $request->idFicha) {
-                    return response()->json(['error' => 'Solo se puede asociar material de apoyo general de la ficha actual'], 422);
-                }
-                AsignacionMaterialApoyoActividad::firstOrCreate(
-                    [
-                        'idActividad' => $idActividad,
-                        'idMaterialApoyo' => $mat->id,
-                    ],
-                    []
-                );
-
-                return response()->json($mat, 201);
-            }
 
             $request->validate([
                 'titulo' => 'required|string|max:255',
@@ -1055,37 +1167,42 @@ class ActividadController extends Controller
             if ($request->hasFile('documento')) {
                 $file = $request->file('documento');
                 $dir = "actividades/{$idActividad}/material-apoyo";
-                if (!Storage::disk('public')->exists($dir)) {
+                if (! Storage::disk('public')->exists($dir)) {
                     Storage::disk('public')->makeDirectory($dir, 0755, true);
                 }
                 $filename = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
                 $path = $file->storeAs($dir, $filename, 'public');
             }
 
-            if (!$path && empty($request->urlAdicional)) {
+            if (! $path && empty($request->urlAdicional)) {
                 return response()->json(['errors' => ['Se requiere documento PDF o enlace']], 422);
             }
 
-            $data = [
+            $material = MaterialApoyoActividad::create([
                 'titulo' => $request->titulo,
                 'descripcion' => $request->descripcion ?? null,
                 'urlDocumento' => $path,
-                'urlAdicional' => $request->urlAdicional ? trim($request->urlAdicional) : null,
+                'urlAdicional' => $request->urlAdicional ? trim((string) $request->urlAdicional) : null,
                 'idMateria' => $actividad->idMateria,
-            ];
-            if (Schema::hasColumn($tabMat, 'idFicha')) {
-                $data['idFicha'] = null;
-            }
-            $material = MaterialApoyoActividad::create($data);
+            ]);
 
             AsignacionMaterialApoyoActividad::create([
                 'idActividad' => $idActividad,
                 'idMaterialApoyo' => $material->id,
             ]);
 
-            return response()->json($material, 201);
+            return response()->json([
+                'id' => (int) $material->id,
+                'titulo' => $material->titulo,
+                'descripcion' => $material->descripcion,
+                'urlDocumento' => $material->urlDocumento,
+                'urlDocumentoUrl' => $this->publicUrl($material->urlDocumento),
+                'urlAdicional' => $material->urlAdicional,
+            ], 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['error' => 'Material o ficha no encontrado'], 404);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -1094,37 +1211,34 @@ class ActividadController extends Controller
     public function destroyMaterialApoyo(int $idActividad, int $idMaterialApoyo): JsonResponse
     {
         try {
-            $asignacion = AsignacionMaterialApoyoActividad::where('idActividad', $idActividad)
+            if (! Schema::hasTable('asignacionMaterialApoyoActividad')) {
+                return response()->json(['error' => 'No disponible'], 503);
+            }
+
+            Actividad::findOrFail($idActividad);
+
+            $asig = AsignacionMaterialApoyoActividad::query()
+                ->where('idActividad', $idActividad)
                 ->where('idMaterialApoyo', $idMaterialApoyo)
                 ->firstOrFail();
-            $material = MaterialApoyoActividad::find($idMaterialApoyo);
-            $asignacion->delete();
 
-            if (!$material) {
-                return response()->json(['message' => 'Material desvinculado de la actividad']);
+            $idMat = (int) $asig->idMaterialApoyo;
+            $asig->delete();
+
+            $otros = AsignacionMaterialApoyoActividad::where('idMaterialApoyo', $idMat)->count();
+            if ($otros === 0) {
+                $m = MaterialApoyoActividad::find($idMat);
+                if ($m) {
+                    if ($m->urlDocumento && Storage::disk('public')->exists($m->urlDocumento)) {
+                        Storage::disk('public')->delete($m->urlDocumento);
+                    }
+                    $m->delete();
+                }
             }
 
-            $tabMat = (new MaterialApoyoActividad())->getTable();
-            $tieneIdFicha = Schema::hasColumn($tabMat, 'idFicha');
-            $idFichaMaterial = $tieneIdFicha ? $material->idFicha : null;
-            $sigueEnOtrasActividades = AsignacionMaterialApoyoActividad::where('idMaterialApoyo', $idMaterialApoyo)->exists();
-
-            if ($sigueEnOtrasActividades) {
-                return response()->json(['message' => 'Material desvinculado de la actividad']);
-            }
-
-            if ($tieneIdFicha && $idFichaMaterial !== null) {
-                return response()->json([
-                    'message' => 'Material desvinculado de la actividad. Sigue disponible en el material de apoyo general de la ficha.',
-                ]);
-            }
-
-            if ($material->urlDocumento && Storage::disk('public')->exists($material->urlDocumento)) {
-                Storage::disk('public')->delete($material->urlDocumento);
-            }
-            $material->delete();
-
-            return response()->json(['message' => 'Material de apoyo eliminado']);
+            return response()->json(['message' => 'Material de apoyo eliminado de la actividad']);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['error' => 'No encontrado'], 404);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }

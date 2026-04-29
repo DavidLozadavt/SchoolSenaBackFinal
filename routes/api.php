@@ -1269,6 +1269,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
     Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
     Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
+    Route::get('ambiente-virtual/material-apoyo', [ActividadController::class, 'materialApoyoAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta-cuestionario', [ActividadController::class, 'responderCuestionarioAprendiz']);
     Route::get('actividades/{id}', [ActividadController::class, 'show']);
@@ -1307,6 +1308,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('fichas/{idFicha}/actividades-estudiante', [AsignacionActividadController::class, 'actividadesEstudiante']);
 
     // Material de apoyo general por ficha (PDF / enlaces), separado del material ligado solo a actividades
+    Route::get('fichas/{idFicha}/materiales-apoyo/raps', [MaterialApoyoFichaController::class, 'raps']);
     Route::get('fichas/{idFicha}/materiales-apoyo', [MaterialApoyoFichaController::class, 'index']);
     Route::post('fichas/{idFicha}/materiales-apoyo', [MaterialApoyoFichaController::class, 'store']);
     Route::put('fichas/{idFicha}/materiales-apoyo/{id}', [MaterialApoyoFichaController::class, 'update']);
