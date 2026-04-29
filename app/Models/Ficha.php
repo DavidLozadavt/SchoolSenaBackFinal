@@ -82,4 +82,8 @@ class Ficha extends Model
     {
         return $this->hasMany(HorarioMateria::class, 'idFicha', 'id');
     }
+    public function actas()
+    {
+        return $this->hasMany(Acta::class, 'idFicha');
+    }
 }

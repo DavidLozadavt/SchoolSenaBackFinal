@@ -144,6 +144,7 @@ use App\Http\Controllers\ComisionInstructorController;
 use App\Http\Controllers\ActividadInstructorController;
 use App\Http\Controllers\ActividadProyectoController;
 use App\Http\Controllers\CompromisosController;
+use App\Http\Controllers\ActaController;
 use App\Http\Controllers\FaseProyectoController;
 use App\Http\Controllers\FaseProyectoRapController;
 use App\Http\Controllers\gestion_horarios\AsignacionSesionController;
@@ -654,7 +655,7 @@ Route::group([
 
     Route::apiResources([
         'tarifas_arls' => TarifaArlController::class,
-        'vacaciones'   => VacacionController::class,
+        'vacaciones' => VacacionController::class,
         'solicitud_vacaciones' => SolicitudVacacionController::class,
         'observaciones_solicitud_vacac' => ObservacionSolicitudVacacionController::class,
         'tipos_incapacidades' => TipoIncapacidadController::class,
@@ -1414,13 +1415,13 @@ Route::post('anotacionesdisciplinarias/{idMatricula}/matricula', [AnotacionesDis
 Route::put('sanciones/{id}', [SancionesController::class, 'update']);
 
 //compromisos
-Route::get('compromisos_by_anotacion/{idAnotacion}',  [CompromisosController::class, 'commitmentsByAnotation']);
+Route::get('compromisos_by_anotacion/{idAnotacion}', [CompromisosController::class, 'commitmentsByAnotation']);
 Route::post('compromisos', [CompromisosController::class, 'store']);
 Route::post('compromisos/update-cumplido', [CompromisosController::class, 'updateCumplido']);
 
 //sanciones
-Route::get('sanciones_by_anotacion/{idAnotacion}',  [SancionesController::class, 'getPenaltiesforannotations']);
-Route::post('sanciones',  [SancionesController::class, 'store']);
+Route::get('sanciones_by_anotacion/{idAnotacion}', [SancionesController::class, 'getPenaltiesforannotations']);
+Route::post('sanciones', [SancionesController::class, 'store']);
 
 
 //asistencia y inasistencia
@@ -1501,7 +1502,8 @@ Route::get('misAsistenciasEstudiante', [AsistenciaController::class, 'misAsisten
 
 Route::middleware('auth:api')->group(function () {
     Route::apiResource('proyectos-formativos', ProyectoFormativoController::class);
-    Route::post('proyectos-formativos/{proyectoFormativo}/update', 
+    Route::post(
+        'proyectos-formativos/{proyectoFormativo}/update',
         [ProyectoFormativoController::class, 'update']
     );
 });
@@ -1536,4 +1538,12 @@ Route::middleware('auth:api')->group(function () {
     Route::post('asignacion-sesion', [AsignacionSesionController::class, 'store']);
     Route::put('horario/asignar-compartido', [HorarioMateriaController::class, 'assignSharedInstructor']); //asignar instructor secundario a horarios compartidos
     Route::put('asignacion-sesion/desasignar', [AsignacionSesionController::class, 'desasignarSesiones']);
+});
+
+// Rutas para Actas
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('actas', ActaController::class);
+    Route::get('actas/contrato/{idContrato}', [ActaController::class, 'getByContrato']);
+    Route::get('actas/ficha/{idFicha}/aprendices', [ActaController::class, 'getAprendicesByFicha']);
+    Route::get('actas/generar-pdf/{idActa}', [ActaController::class, 'getActaInstructor']);
 });
