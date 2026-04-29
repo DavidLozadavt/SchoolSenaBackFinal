@@ -215,4 +215,14 @@ class Contract extends Model
     {
         return $this->hasMany(ActividadContrato::class, 'idContrato', 'id');
     }
+
+    public function gcs()
+    {
+        return $this->hasMany(GC::class, 'idContrato', 'id');
+    }
+
+    public function asignacionSesion() : HasMany
+    {
+        return $this->hasMany(AsignacionSesion::class, 'idContrato', 'id');
+    }
 }

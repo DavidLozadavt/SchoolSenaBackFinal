@@ -45,6 +45,11 @@ class HorarioMateria extends Model
         return $this->hasMany(SesionMateria::class, 'idHorarioMateria', 'id');
     }
 
+    public function asignacionSesion(): HasMany
+    {
+        return $this->hasMany(AsignacionSesion::class, 'idHorarioMateria', 'id');
+    }
+
     public function detallesRmi(): HasMany
     {
         return $this->hasMany(DetalleRmi::class, 'idHorarioMateria', 'id');
