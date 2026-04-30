@@ -13,17 +13,10 @@ class MaterialApoyoRap extends Model
         'titulo',
         'urlDocumento',
         'urlAdicional',
+        'urlVideo',
         'idMateria',
         'idRap',
-        'idFicha',
-        'idPersona',
-        'activo',
     ];
-
-    public function ficha()
-    {
-        return $this->belongsTo(Ficha::class, 'idFicha');
-    }
 
     public function materia()
     {
@@ -33,10 +26,5 @@ class MaterialApoyoRap extends Model
     public function rap()
     {
         return $this->belongsTo(Materia::class, 'idRap');
-    }
-
-    public function persona()
-    {
-        return $this->belongsTo(Person::class, 'idPersona');
     }
 }
