@@ -1874,6 +1874,24 @@ class FichaController extends Controller
             return [];
         }
 
+        // Buscar el evaluador vía HorarioMateria -> GradoMateria -> MatriculaAcademica -> Persona
+        $evaluador = DB::table('horarioMateria as hm')
+            ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+            ->join('matriculaAcademica as ma', function ($join) {
+                $join->on('hm.idFicha', '=', 'ma.idFicha')
+                     ->on('gm.idMateria', '=', 'ma.idMateria');
+            })
+            ->join('persona as p', 'ma.idEvaluador', '=', 'p.id')
+            ->where('hm.id', $idHorarioMateria)
+            ->whereNotNull('ma.idEvaluador')
+            ->select('p.nombre1', 'p.apellido1', 'p.nombre2', 'p.apellido2')
+            ->first();
+
+        $evaluadorNombre = null;
+        if ($evaluador) {
+            $evaluadorNombre = trim(preg_replace('/\s+/', ' ', "{$evaluador->nombre1} {$evaluador->nombre2} {$evaluador->apellido1} {$evaluador->apellido2}"));
+        }
+
         $sesiones = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
             ->whereNotNull('fechaSesion')
             ->orderBy('fechaSesion', 'asc')
@@ -1889,8 +1907,9 @@ class FichaController extends Controller
                 );
             });
 
-        return $sesiones->map(function ($sesion) {
+        return $sesiones->map(function ($sesion) use ($evaluadorNombre) {
             $fecha = Carbon::parse($sesion->fechaSesion);
+
             return [
                 'id' => $sesion->id,
                 'numeroSesion' => $sesion->numeroSesion,
@@ -1899,6 +1918,7 @@ class FichaController extends Controller
                 'fechaCorta' => $fecha->format('d/m/Y'),
                 'estado' => $sesion->estado,
                 'observacion' => $sesion->observacion,
+                'evaluador_nombre' => $evaluadorNombre,
             ];
         })->toArray();
     }
