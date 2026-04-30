@@ -15,26 +15,19 @@ return new class extends Migration
 
         Schema::create($tableName, function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('idFicha');
-            $table->unsignedBigInteger('idMateria');
-            $table->unsignedBigInteger('idRap');
-            $table->unsignedInteger('idPersona')->nullable();
             $table->text('descripcion')->nullable();
             $table->string('titulo', 255)->nullable();
             $table->string('urlDocumento', 500)->nullable();
             $table->text('urlAdicional')->nullable();
-            $table->boolean('activo')->default(true);
+            $table->text('urlVideo')->nullable();
+            $table->unsignedBigInteger('idMateria');
+            $table->unsignedBigInteger('idRap');
             $table->timestamps();
 
-            $table->foreign('idFicha', 'materialapoyorap_idficha_foreign')
-                ->references('id')->on('ficha');
             $table->foreign('idMateria', 'materialapoyorap_idmateria_foreign')
                 ->references('id')->on('materia');
             $table->foreign('idRap', 'materialapoyorap_idrap_foreign')
                 ->references('id')->on('materia');
-            $table->foreign('idPersona', 'materialapoyorap_idpersona_foreign')
-                ->references('id')->on('persona')
-                ->nullOnDelete();
         });
     }
 
