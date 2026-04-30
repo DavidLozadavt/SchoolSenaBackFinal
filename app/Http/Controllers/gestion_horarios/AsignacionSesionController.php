@@ -7,8 +7,10 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Models\AsignacionSesion;
+use App\Models\DetalleRmi;
 use App\Models\HorarioMateria;
 use App\Models\SesionMateria;
+use App\Models\Rmi;
 
 class AsignacionSesionController extends Controller
 {
@@ -34,6 +36,7 @@ class AsignacionSesionController extends Controller
                 'fechaFin'         => $request->fechaFin,
                 'idContrato'       => $request->idContrato,
                 'idHorarioMateria' => $request->idHorarioMateria,
+                'observacion'      => $request->observacion,
             ]);
 
             DB::commit();

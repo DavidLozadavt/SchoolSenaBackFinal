@@ -12,10 +12,10 @@ class AsignacionSesion extends Model
     use HasFactory;
     protected $table = 'asignacionSesion';
     public $timestamps = false;
-    protected $fillable = ['tipoAsignacion', 'fechaInicio', 'fechaFin', 'idContrato', 'idHorarioMateria'];
+    protected $fillable = ['tipoAsignacion', 'fechaInicio', 'fechaFin', 'idContrato', 'idHorarioMateria', 'observacion'];
 
     // relaciones
-    public function sesion() : HasMany
+    public function sesion(): HasMany
     {
         return $this->hasMany(SesionMateria::class);
     }
