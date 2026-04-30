@@ -86,6 +86,7 @@ class HorarioMateriaController extends Controller
 
     public function assignSharedInstructor(Request $request): JsonResponse
     {
+        DB::beginTransaction();
         try {
             $idContrato = $request->idContrato;
             $horarioIds = $request->horarios; // Array de IDs de HorarioMateria
@@ -108,8 +109,11 @@ class HorarioMateriaController extends Controller
                 $asignacion->update(['idContrato' => $idContrato]);
             }
 
+            DB::commit();
+
             return response()->json(['message' => 'Instructor secundario asignado correctamente'], 200);
         } catch (\Throwable $e) {
+            DB::rollBack();
             return response()->json([
                 'message' => 'Error al asignar instructor secundario',
                 'error' => $e->getMessage()
@@ -136,6 +140,7 @@ class HorarioMateriaController extends Controller
             $observacion    = $data['observacion'] ?? null;
             $esCompartido   = $data['esCompartido'] ?? false;
             $horarios       = $data['horarios'] ?? [];
+            $observacion  = $data['observacion'] ?? null;
 
             if (empty($horarios)) {
                 return response()->json(['message' => 'No se enviaron horarios'], 400);
@@ -188,6 +193,7 @@ class HorarioMateriaController extends Controller
                             'fechaFin'         => $fechaFin,
                             'idContrato'       => null,
                             'idHorarioMateria' => $horarioBase->id,
+                            'observacion'      => $observacion,
                         ]);
                     }
 
@@ -203,6 +209,7 @@ class HorarioMateriaController extends Controller
                             'fechaFin'         => $fechaFin,
                             'idContrato'       => null,
                             'idHorarioMateria' => $newHorario->id,
+                            'observacion'      => $observacion,
                         ]);
                     }
 
@@ -456,6 +463,7 @@ class HorarioMateriaController extends Controller
             $sesionMaterias = $horarioMateria->sesionMaterias()->withCount(['asistencia' => fn($q) => $q->where('asistio', true)])->get();
             $detallesRmi = DetalleRmi::where('idHorarioMateria', $horarioMateria->id)->get();
             $horarios = HorarioMateria::where('idGradoMateria', $horarioMateria->idGradoMateria)->get();
+            $asignacionesSesiones = AsignacionSesion::where('idHorarioMateria', $horarioMateria->id)->get();
 
             if (
                 $sesionMaterias->isEmpty() ||
@@ -466,6 +474,10 @@ class HorarioMateriaController extends Controller
             ) {
                 foreach ($detallesRmi as $detalleRmi) {
                     $detalleRmi->delete();
+                }
+
+                foreach ($asignacionesSesiones as $asignacionSesion) {
+                    $asignacionSesion->delete();
                 }
 
                 if ($horarios->count() == 1) {
