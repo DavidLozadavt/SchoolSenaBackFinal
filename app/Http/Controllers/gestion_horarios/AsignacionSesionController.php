@@ -75,8 +75,7 @@ class AsignacionSesionController extends Controller
             $asignaciones = $query->get();
 
             foreach ($asignaciones as $asignacion) {
-                $asignacion->idContrato = null;
-                $asignacion->save();
+                $asignacion->delete();
             }
 
             DB::commit();
