@@ -33,6 +33,31 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
             }
 
+            $tablaMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            if (!Schema::hasTable($tablaMa)) {
+                return response()->json([]);
+            }
+            $colFicha = Schema::hasColumn($tablaMa, 'idFicha')
+                ? 'idFicha'
+                : (Schema::hasColumn($tablaMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : null);
+            if (!$colFicha) {
+                return response()->json([]);
+            }
+
+            $fichaIds = DB::table($tablaMa . ' as ma')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->where('m.idPersona', $idPersona)
+                ->whereNotNull('ma.' . $colFicha)
+                ->distinct()
+                ->pluck('ma.' . $colFicha)
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->values();
+
+            if ($fichaIds->isEmpty()) {
+                return response()->json([]);
+            }
+
             $tablaMaterial = (new MaterialApoyoRap())->getTable();
             if (! Schema::hasTable($tablaMaterial)) {
                 return response()->json([]);
@@ -40,11 +65,17 @@ class ActividadController extends Controller
 
             $query = DB::table($tablaMaterial . ' as mar')
                 ->leftJoin('materia as mat', 'mar.idMateria', '=', 'mat.id')
-                ->leftJoin('materia as rap', 'mar.idRap', '=', 'rap.id');
+                ->leftJoin('materia as rap', 'mar.idRap', '=', 'rap.id')
+                ->leftJoin('ficha as f', 'mar.idFicha', '=', 'f.id')
+                ->whereIn('mar.idFicha', $fichaIds->all());
 
+            $idFicha = (int) $request->query('idFicha', 0);
             $idMateria = (int) $request->query('idMateria', 0);
             $idRap = (int) $request->query('idRap', 0);
 
+            if ($idFicha > 0) {
+                $query->where('mar.idFicha', $idFicha);
+            }
             if ($idMateria > 0) {
                 $query->where('mar.idMateria', $idMateria);
             }
@@ -59,10 +90,12 @@ class ActividadController extends Controller
                 'mar.urlDocumento',
                 'mar.urlAdicional',
                 'mar.idMateria',
+                'mar.idFicha',
                 'mar.idRap',
                 'mar.created_at',
                 'mat.nombreMateria as materiaNombre',
                 'rap.nombreMateria as rapNombre',
+                'f.codigo as fichaCodigo',
             ];
             if (Schema::hasColumn($tablaMaterial, 'urlVideo')) {
                 $selectCols[] = 'mar.urlVideo';
@@ -90,8 +123,8 @@ class ActividadController extends Controller
                     'urlVideoUrl' => $this->publicUrl($urlVideo),
                     'idMateria' => (int) $row->idMateria,
                     'materiaNombre' => $row->materiaNombre,
-                    'idFicha' => null,
-                    'fichaCodigo' => null,
+                    'idFicha' => (int) $row->idFicha,
+                    'fichaCodigo' => $row->fichaCodigo,
                     'idRap' => $idRapResolved > 0 ? $idRapResolved : null,
                     'rapNombre' => $row->rapNombre ?: $row->materiaNombre,
                     'legacySinRap' => false,
@@ -223,15 +256,17 @@ class ActividadController extends Controller
             $materialesPorRap = [];
             $tablaMar = (new MaterialApoyoRap())->getTable();
             if ($idsActividad->isNotEmpty() && Schema::hasTable($tablaMar)) {
+                $fichaIds = $registros->pluck('idFichaContext')->filter()->map(fn ($v) => (int) $v)->unique()->values();
                 $rapIds = $registros->pluck('idMateria')->filter()->map(fn ($v) => (int) $v)->unique()->values();
 
-                if ($rapIds->isNotEmpty()) {
+                if ($fichaIds->isNotEmpty() && $rapIds->isNotEmpty()) {
                     $qMatRap = MaterialApoyoRap::query()
+                        ->whereIn('idFicha', $fichaIds->all())
                         ->whereIn('idRap', $rapIds->all());
                     $materialesRap = $qMatRap->orderByDesc('id')->get();
 
                     foreach ($materialesRap as $mat) {
-                        $key = (int) $mat->idRap;
+                        $key = ((int) $mat->idFicha) . '_' . ((int) $mat->idRap);
                         $urlVid = Schema::hasColumn($tablaMar, 'urlVideo') ? ($mat->urlVideo ?? null) : null;
                         $materialesPorRap[$key][] = [
                             'id' => (int) $mat->id,
@@ -311,7 +346,7 @@ class ActividadController extends Controller
                         'nombreCompleto' => $autor ?: 'Sin asignar',
                         'rutaFotoUrl' => $this->publicUrl($row->autorRutaFoto),
                     ],
-                    'materialesApoyo' => $materialesPorRap[(int) ($row->idMateria ?? 0)] ?? [],
+                    'materialesApoyo' => $materialesPorRap[((int) ($row->idFichaContext ?? 0)) . '_' . ((int) ($row->idMateria ?? 0))] ?? [],
                     'estadoVisual' => $estadoVisual,
                     'fechaVencida' => $fechaVencida,
                     'fechaInactiva' => $fechaInactiva,
