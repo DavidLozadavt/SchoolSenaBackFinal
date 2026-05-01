@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\ambiente_virtual;
 
 use App\Http\Controllers\Controller;
+use App\Models\Ficha;
 use App\Models\MaterialApoyoRap;
 use App\Models\Materia;
 use Illuminate\Http\JsonResponse;
@@ -10,17 +11,18 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
-/** CRUD de material de apoyo de consulta por RAP (tabla materialapoyorap). */
+/** CRUD de material de apoyo de consulta por ficha + RAP (tabla materialApoyoRap). */
 class MaterialApoyoFichaController extends Controller
 {
     public function index(int $idFicha): JsonResponse
     {
         try {
+            Ficha::findOrFail($idFicha);
             if (! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
                 return response()->json([]);
             }
 
-            $query = MaterialApoyoRap::query();
+            $query = MaterialApoyoRap::query()->where('idFicha', $idFicha);
 
             $idMateria = (int) request()->query('idMateria', 0);
             $idRap = (int) request()->query('idRap', 0);
@@ -42,6 +44,7 @@ class MaterialApoyoFichaController extends Controller
     public function raps(int $idFicha): JsonResponse
     {
         try {
+            Ficha::findOrFail($idFicha);
             $idMateria = (int) request()->query('idMateria', 0);
             if ($idMateria <= 0) {
                 return response()->json([]);
@@ -78,6 +81,7 @@ class MaterialApoyoFichaController extends Controller
     public function store(Request $request, int $idFicha): JsonResponse
     {
         try {
+            Ficha::findOrFail($idFicha);
             if (! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
                 return response()->json(['error' => 'Ejecute migraciones para habilitar material de apoyo por ficha y RAP.'], 503);
             }
@@ -85,12 +89,12 @@ class MaterialApoyoFichaController extends Controller
             $request->validate([
                 'idMateria' => 'required|integer|exists:materia,id',
                 'idRap' => 'required|integer|exists:materia,id',
-                'titulo' => 'nullable|string|max:255',
+                'titulo' => 'required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
                 'documento' => 'nullable|file|mimes:pdf|max:10240',
                 'urlAdicional' => 'nullable|string|max:500',
                 'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
-                'urlVideo' => 'nullable|string|max:65535',
+                'urlVideo' => 'nullable|string|max:500',
             ]);
 
             $materia = Materia::findOrFail((int) $request->idMateria);
@@ -121,6 +125,7 @@ class MaterialApoyoFichaController extends Controller
                 'urlDocumento' => $path,
                 'urlAdicional' => $request->urlAdicional ? trim((string) $request->urlAdicional) : null,
                 'urlVideo' => $urlVideoValue,
+                'idFicha' => $idFicha,
                 'idMateria' => (int) $request->idMateria,
                 'idRap' => (int) $request->idRap,
             ];
@@ -141,15 +146,15 @@ class MaterialApoyoFichaController extends Controller
             if (! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
                 return response()->json(['error' => 'Ejecute migraciones para habilitar material de apoyo por ficha y RAP.'], 503);
             }
-            $material = MaterialApoyoRap::whereKey($id)->firstOrFail();
+            $material = MaterialApoyoRap::where('idFicha', $idFicha)->whereKey($id)->firstOrFail();
 
             $request->validate([
-                'titulo' => 'sometimes|nullable|string|max:255',
+                'titulo' => 'sometimes|required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
                 'documento' => 'nullable|file|mimes:pdf|max:10240',
                 'urlAdicional' => 'nullable|string|max:500',
                 'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
-                'urlVideo' => 'nullable|string|max:65535',
+                'urlVideo' => 'nullable|string|max:500',
                 'idMateria' => 'sometimes|required|integer|exists:materia,id',
                 'idRap' => 'sometimes|required|integer|exists:materia,id',
             ]);
@@ -216,7 +221,7 @@ class MaterialApoyoFichaController extends Controller
             if (! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
                 return response()->json(['error' => 'Ejecute migraciones para habilitar material de apoyo por ficha y RAP.'], 503);
             }
-            $material = MaterialApoyoRap::whereKey($id)->firstOrFail();
+            $material = MaterialApoyoRap::where('idFicha', $idFicha)->whereKey($id)->firstOrFail();
 
             $this->deleteStoredPublicFileIfLocal($material->urlDocumento);
             $this->deleteStoredPublicFileIfLocal($material->urlVideo);
@@ -249,6 +254,7 @@ class MaterialApoyoFichaController extends Controller
             'urlAdicional' => $m->urlAdicional,
             'urlVideo' => $m->urlVideo,
             'urlVideoUrl' => $this->publicUrl($m->urlVideo),
+            'idFicha' => $m->idFicha,
             'idMateria' => $m->idMateria,
             'idRap' => $m->idRap,
             'rap' => $rap,
