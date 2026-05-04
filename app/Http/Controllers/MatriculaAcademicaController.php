@@ -83,21 +83,9 @@ class MatriculaAcademicaController extends Controller
                             'fechaSesion'      => $hoy->toDateString(),
                         ]);
 
-                        $asistenciaData = [];
-                        foreach ($result as $matricula) {
-                            $asistenciaData[] = [
-                                'idSesionMateria'      => $nuevaSesion->id,
-                                'idMatriculaAcademica' => $matricula->id,
-                                'asistio'              => false,
-                                'horaLLegada'          => null,
-                                'created_at'           => $hoy,
-                                'updated_at'           => $hoy,
-                            ];
-                        }
-
-                        if (!empty($asistenciaData)) {
-                            \App\Models\Asistencia::insert($asistenciaData);
-                        }
+                        // Se eliminó la creación automática de inasistencias por defecto aquí.
+                        // Las faltas se generarán automáticamente solo cuando el docente tome asistencia 
+                        // en AsistenciaController::updateAssistance.
                     }
                 }
             }
@@ -431,21 +419,9 @@ class MatriculaAcademicaController extends Controller
                         'fechaSesion' => $hoy->toDateString(),
                     ]);
 
-                    $asistenciaData = [];
-                    foreach ($matriculas as $matricula) {
-                        $asistenciaData[] = [
-                            'idSesionMateria' => $nuevaSesion->id,
-                            'idMatriculaAcademica' => $matricula->id,
-                            'asistio' => false,
-                            'horaLLegada' => null,
-                            'created_at' => $hoy,
-                            'updated_at' => $hoy,
-                        ];
-                    }
-
-                    if (!empty($asistenciaData)) {
-                        \App\Models\Asistencia::insert($asistenciaData);
-                    }
+                    // Se eliminó la creación automática de inasistencias por defecto aquí.
+                    // Las faltas se generarán automáticamente solo cuando el docente tome asistencia 
+                    // en AsistenciaController::updateAssistance.
                 }
             }
         }
