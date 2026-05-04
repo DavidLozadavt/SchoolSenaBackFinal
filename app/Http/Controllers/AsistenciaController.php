@@ -255,7 +255,7 @@ class AsistenciaController extends Controller
         if (!$matriculaAcademica) {
             $matriculaAcademica = MatriculaAcademica::with('ficha')
                 ->where('idMatricula', $idMatricula)
-                ->when($requestMateriaId, function($q) use ($requestMateriaId) {
+                ->when($requestMateriaId, function ($q) use ($requestMateriaId) {
                     return $q->where('idMateria', $requestMateriaId);
                 })
                 ->first();
