@@ -803,9 +803,10 @@ class AsistenciaController extends Controller
                 if ($asistencia->asistio) {
                     $agrupado[$clave]['resumen']['asistio']++;
                 } else {
-                    $agrupado[$clave]['resumen']['falto']++;
                     if ($justificada) {
                         $agrupado[$clave]['resumen']['justificadas']++;
+                    } else {
+                        $agrupado[$clave]['resumen']['falto']++;
                     }
                 }
             }
@@ -857,6 +858,7 @@ class AsistenciaController extends Controller
             $matriculas = \App\Models\MatriculaAcademica::with([
                 'materia.areaConocimiento',
                 'asistencias.sesionMateria',
+                'asistencias.justificacion',
             ])
                 ->whereHas('matricula', function ($query) use ($idPersona) {
                     $query->where('idPersona', $idPersona);
@@ -895,8 +897,13 @@ class AsistenciaController extends Controller
                         $totalAsistencias++;
                         $areasMap[$idArea]['total']++;
                     } elseif ($asistencia->asistio === false) {
-                        $areasMap[$idArea]['inasistencias']++;
-                        $totalInasistencias++;
+                        // Verificar si tiene justificación aprobada
+                        $justificada = $asistencia->justificacion && $asistencia->justificacion->estado === 'APROBADO';
+                        
+                        if (!$justificada) {
+                            $areasMap[$idArea]['inasistencias']++;
+                            $totalInasistencias++;
+                        }
                         $areasMap[$idArea]['total']++;
                     }
                     // Ignorar NULL de acuerdo a la regla de negocio
@@ -1006,6 +1013,7 @@ class AsistenciaController extends Controller
             $matriculas = \App\Models\MatriculaAcademica::with([
                 'materia.areaConocimiento',
                 'asistencias.sesionMateria',
+                'asistencias.justificacion',
             ])
                 ->whereHas('matricula', function ($query) use ($idPersona) {
                     $query->where('idPersona', $idPersona);
@@ -1044,8 +1052,13 @@ class AsistenciaController extends Controller
                         $totalAsistencias++;
                         $areasMap[$idArea]['total']++;
                     } elseif ($asistencia->asistio === false) {
-                        $areasMap[$idArea]['inasistencias']++;
-                        $totalInasistencias++;
+                        // Verificar si tiene justificación aprobada
+                        $justificada = $asistencia->justificacion && $asistencia->justificacion->estado === 'APROBADO';
+                        
+                        if (!$justificada) {
+                            $areasMap[$idArea]['inasistencias']++;
+                            $totalInasistencias++;
+                        }
                         $areasMap[$idArea]['total']++;
                     }
                     // Ignorar NULL de acuerdo a la regla de negocio

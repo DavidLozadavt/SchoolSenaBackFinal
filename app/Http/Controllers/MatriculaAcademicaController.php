@@ -68,25 +68,10 @@ class MatriculaAcademicaController extends Controller
                 }
 
                 if ($horarioMateria) {
-                    // Verificar si ya existe la sesión de hoy para este horario exacto
+                    // Solo verificar si existe, sin crearla. La creación se delega a updateAssistance.
                     $existsSesion = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
                         ->whereDate('fechaSesion', $hoy->toDateString())
                         ->exists();
-
-                    if (!$existsSesion) {
-                        $lastSession = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
-                            ->max('numeroSesion') ?? 0;
-
-                        $nuevaSesion = \App\Models\SesionMateria::create([
-                            'numeroSesion'     => $lastSession + 1,
-                            'idHorarioMateria' => $horarioMateria->id,
-                            'fechaSesion'      => $hoy->toDateString(),
-                        ]);
-
-                        // Se eliminó la creación automática de inasistencias por defecto aquí.
-                        // Las faltas se generarán automáticamente solo cuando el docente tome asistencia 
-                        // en AsistenciaController::updateAssistance.
-                    }
                 }
             }
 
@@ -404,25 +389,10 @@ class MatriculaAcademicaController extends Controller
                 ->first();
 
             if ($horarioMateria) {
-                // Verificar si ya existe la sesión de hoy
+                // Solo verificar si existe, sin crearla
                 $existsSesion = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
                     ->whereDate('fechaSesion', $hoy->toDateString())
                     ->exists();
-
-                if (!$existsSesion) {
-                    $lastSession = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
-                        ->max('numeroSesion') ?? 0;
-                    
-                    $nuevaSesion = \App\Models\SesionMateria::create([
-                        'numeroSesion' => $lastSession + 1,
-                        'idHorarioMateria' => $horarioMateria->id,
-                        'fechaSesion' => $hoy->toDateString(),
-                    ]);
-
-                    // Se eliminó la creación automática de inasistencias por defecto aquí.
-                    // Las faltas se generarán automáticamente solo cuando el docente tome asistencia 
-                    // en AsistenciaController::updateAssistance.
-                }
             }
         }
 
