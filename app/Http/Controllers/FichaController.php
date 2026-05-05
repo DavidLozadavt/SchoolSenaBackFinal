@@ -1165,27 +1165,6 @@ class FichaController extends Controller
                 ->whereNotNull('hm.idDia')
                 ->whereNotNull('hm.horaInicial')
                 ->whereNotNull('hm.horaFinal')
-                ->groupBy([
-                    'f.id',
-                    'f.codigo',
-                    'p.nombrePrograma',
-                    'm.nombreMateria',
-                    'j.nombreJornada',
-                    'd.dia',
-                    'hm.horaInicial',
-                    'hm.horaFinal',
-                    'hm.fechaInicial',
-                    'hm.fechaFinal',
-                    'hm.idDia',
-                    'c.id',
-                    'per.nombre1',
-                    'per.apellido1',
-                    'gp.id',
-                    'g.nombreGrado',
-                    'hm.id',
-                    'hm.idGradoMateria',
-                    'gm.idMateria'
-                ])
                 ->get();
 
             // Procesar resultados para calcular estado, total_sesiones y sesiones_restantes
@@ -1266,24 +1245,15 @@ class FichaController extends Controller
     {
         try {
             // Primero obtener los datos de la clase usando el idHorarioMateria
+            // Consulta base (la que ya les devolvía datos). Sin GROUP BY: hm.id es PK → una fila;
+            // ONLY_FULL_GROUP_BY en prod rompía con groupBy + columnas del SELECT.
             $claseData = DB::table('horarioMateria as hm')
                 ->select([
                     'f.id as ficha_id',
                     'f.codigo as ficha_codigo',
                     'p.nombrePrograma as programa_nombre',
                     'm.nombreMateria as materia_nombre',
-                    'm.idMateriaPadre',
                     'gm.idMateria as idMateria',
-                    DB::raw('COALESCE(
-                        CASE WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m_padre.nombreMateria END,
-                        CASE WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m_sm_padre.nombreMateria END,
-                        m.nombreMateria
-                    ) as competencia_nombre'),
-                    DB::raw('CASE
-                        WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m.nombreMateria
-                        WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m.nombreMateria
-                        ELSE NULL
-                    END as rap_nombre'),
                     'j.nombreJornada as jornada_nombre',
                     'j.nombreJornada as jornada_tipo',
                     'd.dia as dia_semana',
@@ -1309,51 +1279,12 @@ class FichaController extends Controller
                 ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
                 ->join('materia as m', 'gm.idMateria', '=', 'm.id')
-                ->leftJoin('materia as m_padre', 'm.idMateriaPadre', '=', 'm_padre.id')
-                ->leftJoin('seguimientoMateria as sm', function ($join) {
-                    $join->whereRaw(
-                        'sm.id = (SELECT MAX(sm2.id) FROM seguimientoMateria sm2 WHERE sm2.idFicha = f.id AND sm2.idMateria = m.id)'
-                    );
-                })
-                ->leftJoin('materia as m_sm_padre', 'sm.idMateriaPadre', '=', 'm_sm_padre.id')
                 ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
                 ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
                 ->leftJoin('contrato as c', 'hm.idContrato', '=', 'c.id')
                 ->leftJoin('persona as per', 'c.idpersona', '=', 'per.id')
                 ->where('hm.id', $idHorarioMateria)
-                ->groupBy([
-                    'f.id',
-                    'f.codigo',
-                    'p.nombrePrograma',
-                    'm.id',
-                    'm.nombreMateria',
-                    'm.idMateriaPadre',
-                    'gm.idMateria',
-                    'm_padre.id',
-                    'sm.id',
-                    'sm.idMateriaPadre',
-                    'm_sm_padre.id',
-                    'j.nombreJornada',
-                    'j.horaInicial',
-                    'd.dia',
-                    'hm.horaInicial',
-                    'hm.horaFinal',
-                    'hm.fechaInicial',
-                    'hm.fechaFinal',
-                    'hm.idDia',
-                    'c.id',
-                    'per.nombre1',
-                    'per.apellido1',
-                    'gp.id',
-                    'g.nombreGrado',
-                    'g.id',
-                    'hm.id',
-                    'gm.id',
-                    'ap.fechaInicialClases',
-                    'ap.fechaFinalClases',
-                    'ap.id'
-                ])
                 ->first();
 
             if (!$claseData) {
@@ -1408,13 +1339,6 @@ class FichaController extends Controller
             $claseData->sesiones_dadas = $sesionesDadas;
             $claseData->sesiones_restantes = $sesionesRestantes;
             $claseData->sesiones_completadas = $sesionesCompletadas;
-
-            if (!$claseData) {
-                return response()->json([
-                    'message' => 'Clase no encontrada',
-                    'error' => 'No existe una clase con el ID proporcionado'
-                ], 404);
-            }
 
             // Obtener la ficha completa para compatibilidad con el componente
             $ficha = Ficha::with([
