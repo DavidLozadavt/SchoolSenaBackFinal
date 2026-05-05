@@ -1165,27 +1165,6 @@ class FichaController extends Controller
                 ->whereNotNull('hm.idDia')
                 ->whereNotNull('hm.horaInicial')
                 ->whereNotNull('hm.horaFinal')
-                ->groupBy([
-                    'f.id',
-                    'f.codigo',
-                    'p.nombrePrograma',
-                    'm.nombreMateria',
-                    'j.nombreJornada',
-                    'd.dia',
-                    'hm.horaInicial',
-                    'hm.horaFinal',
-                    'hm.fechaInicial',
-                    'hm.fechaFinal',
-                    'hm.idDia',
-                    'c.id',
-                    'per.nombre1',
-                    'per.apellido1',
-                    'gp.id',
-                    'g.nombreGrado',
-                    'hm.id',
-                    'hm.idGradoMateria',
-                    'gm.idMateria'
-                ])
                 ->get();
 
             // Procesar resultados para calcular estado, total_sesiones y sesiones_restantes
@@ -1376,13 +1355,6 @@ class FichaController extends Controller
             $claseData->sesiones_dadas = $sesionesDadas;
             $claseData->sesiones_restantes = $sesionesRestantes;
             $claseData->sesiones_completadas = $sesionesCompletadas;
-
-            if (!$claseData) {
-                return response()->json([
-                    'message' => 'Clase no encontrada',
-                    'error' => 'No existe una clase con el ID proporcionado'
-                ], 404);
-            }
 
             // Obtener la ficha completa para compatibilidad con el componente
             $ficha = Ficha::with([
