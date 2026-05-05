@@ -3,6 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Acta;
+use App\Models\Person;
+use App\Models\Contract;
+use App\Util\KeyUtil;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -91,6 +94,7 @@ class ActaController extends Controller
                 foreach ($validated['asistencias'] as $item) {
                     $acta->asistencias()->create($item);
                 }
+                $this->notificarAsistentes($acta, $validated['asistencias']);
             }
 
             DB::commit();
@@ -212,9 +216,22 @@ class ActaController extends Controller
 
             // Sincronizar Asistencias
             if (isset($validated['asistencias'])) {
+                $existingIds = $acta->asistencias->pluck('idContrato')->toArray();
+                $newAsistencias = [];
+
+                foreach ($validated['asistencias'] as $item) {
+                    if (!in_array($item['idContrato'], $existingIds)) {
+                        $newAsistencias[] = $item;
+                    }
+                }
+
                 $acta->asistencias()->delete();
                 foreach ($validated['asistencias'] as $item) {
                     $acta->asistencias()->create($item);
+                }
+
+                if (!empty($newAsistencias)) {
+                    $this->notificarAsistentes($acta, $newAsistencias);
                 }
             }
 
@@ -329,7 +346,7 @@ class ActaController extends Controller
 
             if ($acta->idFicha) {
                 $inicio = \Carbon\Carbon::parse($acta->fecha)->startOfMonth();
-                $fin    = \Carbon\Carbon::parse($acta->fecha)->endOfMonth();
+                $fin = \Carbon\Carbon::parse($acta->fecha)->endOfMonth();
 
                 $horarios = \App\Models\HorarioMateria::with([
                     'contrato.persona',
@@ -355,8 +372,8 @@ class ActaController extends Controller
                         $materias = $horariosGrupo
                             ->groupBy('idGradoMateria')
                             ->map(function ($horariosGM) use ($inicio, $fin) {
-                                $primero     = $horariosGM->first();
-                                $rap         = $primero->gradoMateria?->materia;
+                                $primero = $horariosGM->first();
+                                $rap = $primero->gradoMateria?->materia;
                                 $competencia = $rap?->padre;
 
                                 $totalHoras = $horariosGM->sum(function ($h) use ($inicio, $fin) {
@@ -365,10 +382,10 @@ class ActaController extends Controller
                                         2
                                     );
 
-                                    $desde  = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                                    $hasta  = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
 
-                                    $idDiaInt        = (int) $h->idDia;
+                                    $idDiaInt = (int) $h->idDia;
                                     $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
                                     $cantidadSesiones = 0;
                                     $cursor = $desde->copy();
@@ -384,20 +401,20 @@ class ActaController extends Controller
                                 });
 
                                 return [
-                                    'idGradoMateria'       => $primero->idGradoMateria,
-                                    'competencia'          => $competencia?->nombreMateria,
+                                    'idGradoMateria' => $primero->idGradoMateria,
+                                    'competencia' => $competencia?->nombreMateria,
                                     'resultadoAprendizaje' => $rap?->nombreMateria,
-                                    'totalHoras'           => $totalHoras,
+                                    'totalHoras' => $totalHoras,
                                 ];
                             })
                             ->values();
 
                         return [
                             'idContrato' => $horariosGrupo->first()->idContrato,
-                            'nombre'     => $persona?->nombre1,
-                            'apellido'   => $persona?->apellido1,
+                            'nombre' => $persona?->nombre1,
+                            'apellido' => $persona?->apellido1,
                             'totalHoras' => $materias->sum('totalHoras'),
-                            'materias'   => $materias,
+                            'materias' => $materias,
                         ];
                     })
                     ->values();
@@ -414,7 +431,7 @@ class ActaController extends Controller
             Log::error('Error al obtener actas por contrato: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Error al filtrar actas por contrato',
-                'error'   => $e->getMessage()
+                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -533,16 +550,15 @@ class ActaController extends Controller
         ]);
 
         try {
-            $acta = Acta::with('asistencias')->findOrFail($idActa);
+            $acta = Acta::with(['asistencias', 'contrato.persona'])->findOrFail($idActa);
 
-            // Verificar si ya está cerrada
-            $isLocked = $acta->asistencias->count() > 0 && $acta->asistencias->every(function ($asistencia) {
-                return $asistencia->aprueba === 'SI';
-            });
+            // ✅ Verificar si ya está cerrada ANTES de cualquier acción
+            $isLocked = $acta->asistencias->count() > 0
+                && $acta->asistencias->every(fn($a) => $a->aprueba === 'SI');
 
             if ($isLocked) {
                 return response()->json([
-                    'message' => 'No se puede modificar el estado de asistencia porque el acta ya ha sido finalizada por todos los asistentes.'
+                    'message' => 'No se puede modificar el estado porque el acta ya fue finalizada por todos los asistentes.'
                 ], 403);
             }
 
@@ -553,15 +569,18 @@ class ActaController extends Controller
                 'observacion' => $validated['observacion'] ?? $asistencia->observacion,
             ]);
 
+            $this->enviarCorreoEstado($acta, $validated['aprueba'], $validated['observacion']);
+
             return response()->json([
                 'message' => 'Asistencia actualizada correctamente',
-                'data' => $asistencia
+                'data' => $asistencia,
             ]);
+
         } catch (\Exception $e) {
             Log::error('Error al actualizar asistencia: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Error al actualizar la asistencia',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -576,10 +595,10 @@ class ActaController extends Controller
 
         if (!empty($validated['periodo'])) {
             $inicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-            $fin    = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
+            $fin = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
         } else {
             $inicio = \Carbon\Carbon::now()->startOfMonth();
-            $fin    = \Carbon\Carbon::now()->endOfMonth();
+            $fin = \Carbon\Carbon::now()->endOfMonth();
         }
 
         $horarios = \App\Models\HorarioMateria::with([
@@ -606,8 +625,8 @@ class ActaController extends Controller
                 $materias = $horariosGrupo
                     ->groupBy('idGradoMateria')
                     ->map(function ($horariosGM) use ($inicio, $fin) {
-                        $primero     = $horariosGM->first();
-                        $rap         = $primero->gradoMateria?->materia;
+                        $primero = $horariosGM->first();
+                        $rap = $primero->gradoMateria?->materia;
                         $competencia = $rap?->padre;
 
                         $totalHoras = $horariosGM->sum(function ($h) use ($inicio, $fin) {
@@ -619,7 +638,7 @@ class ActaController extends Controller
                             $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
                             $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
 
-                            $idDiaInt        = (int) $h->idDia;
+                            $idDiaInt = (int) $h->idDia;
                             $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
                             $cantidadSesiones = 0;
                             $cursor = $desde->copy();
@@ -635,24 +654,79 @@ class ActaController extends Controller
                         });
 
                         return [
-                            'idGradoMateria'       => $primero->idGradoMateria,
-                            'competencia'          => $competencia?->nombreMateria,
+                            'idGradoMateria' => $primero->idGradoMateria,
+                            'competencia' => $competencia?->nombreMateria,
                             'resultadoAprendizaje' => $rap?->nombreMateria,
-                            'totalHoras'           => $totalHoras,
+                            'totalHoras' => $totalHoras,
                         ];
                     })
                     ->values();
 
                 return [
-                    'idContrato'  => $horariosGrupo->first()->idContrato,
-                    'nombre'      => $persona?->nombre1,
-                    'apellido'    => $persona?->apellido1,
-                    'totalHoras'  => $materias->sum('totalHoras'),
-                    'materias'    => $materias,
+                    'idContrato' => $horariosGrupo->first()->idContrato,
+                    'nombre' => $persona?->nombre1,
+                    'apellido' => $persona?->apellido1,
+                    'totalHoras' => $materias->sum('totalHoras'),
+                    'materias' => $materias,
                 ];
             })
             ->values();
 
         return response()->json($instructores);
+    }
+
+
+    private function enviarCorreoEstado(Acta $acta, string $aprueba, ?string $observacion): void
+    {
+        $userConectado = KeyUtil::user();
+        $userRemitente = Person::find($userConectado->idpersona);
+        $userReceptor = optional($acta->contrato->persona);
+
+        $asunto = "Acta {$acta->nombre}";
+
+        if ($aprueba === 'SI') {
+            $detalle = "ha sido APROBADA.\n\nNo se requiere ninguna acción adicional de su parte.";
+        } else {
+            $motivoTexto = $observacion
+                ? "Motivo:\n\n* {$observacion}"
+                : "No se proporcionó un motivo específico.";
+
+            $detalle = "ha sido RECHAZADA.\n\nPor favor revise las observaciones y realice las correcciones necesarias.\n\n{$motivoTexto}";
+        }
+
+        $mensaje = "Estimado(a) {$userReceptor->nombre1} {$userReceptor->apellido1},\n\n"
+            . "Le informamos que el acta {$acta->nombre} {$detalle}\n\n"
+            . "Atentamente,\n"
+            . "{$userRemitente->nombre1} {$userRemitente->apellido1}\n";
+
+        \App\Jobs\SendBasicEmail::dispatch($userReceptor->email, $asunto, $mensaje);
+    }
+
+    private function notificarAsistentes(Acta $acta, array $asistenciasData): void
+    {
+        $userConectado = KeyUtil::user();
+        $userRemitente = Person::find($userConectado->idpersona);
+
+        foreach ($asistenciasData as $asistencia) {
+            $idContrato = $asistencia['idContrato'];
+            $contrato = Contract::with('persona')->find($idContrato);
+
+            if ($contrato && $contrato->persona && $contrato->persona->email) {
+                $userReceptor = $contrato->persona;
+                $asunto = "Asignación a Acta: {$acta->nombre}";
+
+                $mensaje = "Estimado(a) {$userReceptor->nombre1} {$userReceptor->apellido1},\n\n"
+                    . "Le informamos que ha sido registrado como asistente en el acta: \"{$acta->nombre}\".\n\n"
+                    . "Detalles del Acta:\n"
+                    . "- Fecha: {$acta->fecha}\n"
+                    . "- Lugar: " . ($acta->lugar ?? 'No especificado') . "\n"
+                    . "- Hora Inicio: {$acta->horaInicio}\n\n"
+                    . "Por favor, ingrese al sistema para revisar el contenido del acta y confirmar su aprobación.\n\n"
+                    . "Atentamente,\n"
+                    . "{$userRemitente->nombre1} {$userRemitente->apellido1}\n";
+
+                \App\Jobs\SendBasicEmail::dispatch($userReceptor->email, $asunto, $mensaje);
+            }
+        }
     }
 }
