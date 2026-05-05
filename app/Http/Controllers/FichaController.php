@@ -890,6 +890,19 @@ class FichaController extends Controller
                     'f.codigo as ficha_codigo',
                     'p.nombrePrograma as programa_nombre',
                     'm.nombreMateria as materia_nombre',
+                    'm.idMateriaPadre',
+                    // Competencia: padre en materia, o padre vía seguimientoMateria (misma ficha), o la misma materia.
+                    DB::raw('COALESCE(
+                        CASE WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m_padre.nombreMateria END,
+                        CASE WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m_sm_padre.nombreMateria END,
+                        m.nombreMateria
+                    ) as competencia_nombre'),
+                    // RAP: nombre de la fila materia del horario solo si hay competencia padre (materia o seguimiento).
+                    DB::raw('CASE
+                        WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m.nombreMateria
+                        WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m.nombreMateria
+                        ELSE NULL
+                    END as rap_nombre'),
                     'j.nombreJornada as jornada_nombre',
                     'j.nombreJornada as jornada_tipo',
                     'd.dia as dia_semana',
@@ -912,6 +925,13 @@ class FichaController extends Controller
                 ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
                 ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->leftJoin('materia as m_padre', 'm.idMateriaPadre', '=', 'm_padre.id')
+                ->leftJoin('seguimientoMateria as sm', function ($join) {
+                    $join->whereRaw(
+                        'sm.id = (SELECT MAX(sm2.id) FROM seguimientoMateria sm2 WHERE sm2.idFicha = f.id AND sm2.idMateria = m.id)'
+                    );
+                })
+                ->leftJoin('materia as m_sm_padre', 'sm.idMateriaPadre', '=', 'm_sm_padre.id')
                 ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
                 ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
@@ -1252,6 +1272,18 @@ class FichaController extends Controller
                     'f.codigo as ficha_codigo',
                     'p.nombrePrograma as programa_nombre',
                     'm.nombreMateria as materia_nombre',
+                    'm.idMateriaPadre',
+                    'gm.idMateria as idMateria',
+                    DB::raw('COALESCE(
+                        CASE WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m_padre.nombreMateria END,
+                        CASE WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m_sm_padre.nombreMateria END,
+                        m.nombreMateria
+                    ) as competencia_nombre'),
+                    DB::raw('CASE
+                        WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m.nombreMateria
+                        WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m.nombreMateria
+                        ELSE NULL
+                    END as rap_nombre'),
                     'j.nombreJornada as jornada_nombre',
                     'j.nombreJornada as jornada_tipo',
                     'd.dia as dia_semana',
@@ -1277,6 +1309,13 @@ class FichaController extends Controller
                 ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
                 ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->leftJoin('materia as m_padre', 'm.idMateriaPadre', '=', 'm_padre.id')
+                ->leftJoin('seguimientoMateria as sm', function ($join) {
+                    $join->whereRaw(
+                        'sm.id = (SELECT MAX(sm2.id) FROM seguimientoMateria sm2 WHERE sm2.idFicha = f.id AND sm2.idMateria = m.id)'
+                    );
+                })
+                ->leftJoin('materia as m_sm_padre', 'sm.idMateriaPadre', '=', 'm_sm_padre.id')
                 ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
                 ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
@@ -1287,7 +1326,14 @@ class FichaController extends Controller
                     'f.id',
                     'f.codigo',
                     'p.nombrePrograma',
+                    'm.id',
                     'm.nombreMateria',
+                    'm.idMateriaPadre',
+                    'gm.idMateria',
+                    'm_padre.id',
+                    'sm.id',
+                    'sm.idMateriaPadre',
+                    'm_sm_padre.id',
                     'j.nombreJornada',
                     'j.horaInicial',
                     'd.dia',
