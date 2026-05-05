@@ -83,38 +83,72 @@ class AsignacionSesionController extends Controller
             $asignaciones = $query->get();
 
             foreach ($asignaciones as $asignacion) {
-                $idHorarioABorrar = $asignacion->idHorarioMateria;
+                $idHorarioAsig = $asignacion->idHorarioMateria;
                 $idContratoAsig = $asignacion->idContrato;
                 
-                // Verificar si hay asistencias antes de desasignar
-                $horarioCheck = HorarioMateria::find($idHorarioABorrar);
-                if ($horarioCheck) {
-                    $hasAsistencia = $horarioCheck->sesionMaterias()
+                $horario = HorarioMateria::find($idHorarioAsig);
+                if ($horario) {
+                    // Verificar si hay asistencias antes de desasignar
+                    $hasAsistencia = $horario->sesionMaterias()
                         ->whereHas('asistencia', fn($q) => $q->where('asistio', true))
                         ->exists();
+
                     if ($hasAsistencia) {
                         return response()->json([
                             'message' => 'No es posible desasignar este profesor porque ya tiene asistencias registradas en este horario.'
                         ], 422);
                     }
+
+                    // Verificar si el RMI tiene reportes activos
+                    $hasActiveRmi = $horario->detallesRmi()->where(function($q) {
+                        $q->where('estado', '!=', 'PENDIENTE')
+                          ->orWhereNotNull('archivoPago')
+                          ->orWhereNotNull('urlInforme');
+                    })->exists();
+
+                    if ($hasActiveRmi) {
+                        return response()->json([
+                            'message' => 'No es posible desasignar este profesor porque tiene reportes de RMI activos.'
+                        ], 422);
+                    }
+
+                    // Limpiar asignaciones
+                    $asignaciones = AsignacionSesion::where('idHorarioMateria', $idHorarioAsig)->get();
+                    foreach ($asignaciones as $asig) {
+                        $asig->delete();
+                    }
+
+                    // Si es un clon (hay más de un registro para el mismo slot de RAP/Ficha)
+                    $totalEnSlot = HorarioMateria::where('idFicha', $horario->idFicha)
+                        ->where('idGradoMateria', $horario->idGradoMateria)
+                        ->where('idDia', $horario->idDia)
+                        ->where('horaInicial', $horario->horaInicial)
+                        ->where('horaFinal', $horario->horaFinal)
+                        ->where('fechaInicial', $horario->fechaInicial)
+                        ->count();
+
+                    if ($totalEnSlot > 1) {
+                        // Limpiar y borrar el clon
+                        $horario->sesionMaterias()->each(function($sesion) {
+                            $sesion->asistencia()->delete();
+                            $sesion->delete();
+                        });
+                        $horario->detallesRmi()->delete();
+                        $horario->delete();
+                    } else {
+                        // Si es el único, solo quitamos el contrato (vuelve a ser placeholder)
+                        $horario->update([
+                            'idContrato' => null,
+                            'estado'     => 'PENDIENTE'
+                        ]);
+                        // Limpiar sesiones sin asistencia
+                        $horario->sesionMaterias()->whereDoesntHave('asistencia')->delete();
+                        // Limpiar RMIs pendientes
+                        $horario->detallesRmi()->where('estado', 'PENDIENTE')->delete();
+                    }
                 }
                 
                 $asignacion->delete();
-
-                // Si la asignación tenía un contrato, el horario asociado era un duplicado, lo borramos
-                if ($idContratoAsig && $idHorarioABorrar) {
-                    $horarioClon = HorarioMateria::find($idHorarioABorrar);
-                    if ($horarioClon) {
-                        // NO eliminamos el registro, solo quitamos el contrato
-                        $horarioClon->idContrato = null;
-                        $horarioClon->save();
-                        
-                        // Las sesiones se eliminan solo si no tienen asistencias
-                        $horarioClon->sesionMaterias()
-                            ->whereDoesntHave('asistencia')
-                            ->delete();
-                    }
-                }
             }
 
             DB::commit();

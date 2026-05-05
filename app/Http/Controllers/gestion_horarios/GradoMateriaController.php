@@ -352,7 +352,7 @@ class GradoMateriaController extends Controller
             $asignacionPeriodoJornada = Ficha::find($idAsignacionPeriodoJornada);
 
             $isHorarioOcupped = HorarioMateria::where('idGradoMateria', $idGradoMateria)
-                ->where('idAsignacionPeriodoJornada', $idAsignacionPeriodoJornada)
+                ->where('idFicha', $idAsignacionPeriodoJornada)
                 ->where(function ($query) {
                     $query->whereNotNull('idContrato')
                         ->orWhereNotNull('idDia')
@@ -364,8 +364,20 @@ class GradoMateriaController extends Controller
                 return response()->json(['message' => 'No puedes eliminar la materia asignada porque se encuentra en uso con horarios'], 400);
             }
 
-            // Eliminar registros relacionados en la tabla HorarioMateria usando 'idGradoMateria'
-            HorarioMateria::where('idGradoMateria', $idGradoMateria)->delete();
+            // Eliminar registros relacionados en la tabla HorarioMateria usando 'idGradoMateria' e 'idFicha'
+            // También debemos limpiar sesiones y RMIs antes de borrar el horario
+            $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
+                ->where('idFicha', $idAsignacionPeriodoJornada)
+                ->get();
+
+            foreach ($horarios as $h) {
+                $h->sesionMaterias()->each(function($s) {
+                    $s->asistencia()->delete();
+                    $s->delete();
+                });
+                $h->detallesRmi()->delete();
+                $h->delete();
+            }
 
             // Eliminar el documento asociado, si existe
             if (!!($gradoMateria->rutaDocumento)) {
@@ -411,7 +423,7 @@ class GradoMateriaController extends Controller
             foreach ($rap->grados as $grado) {
 
                 $schedule = HorarioMateria::where('idGradoMateria', $grado->id)
-                    ->where('idAsignacionPeriodoJornada', $ficha->id)
+                    ->where('idFicha', $ficha->id)
                     ->first();
 
                 if ($schedule) {
