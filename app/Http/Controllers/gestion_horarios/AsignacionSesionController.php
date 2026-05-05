@@ -39,6 +39,14 @@ class AsignacionSesionController extends Controller
                 'observacion'      => $request->observacion,
             ]);
 
+            // Si se asignó un contrato de una vez, duplicamos el horario para que tenga su propio RMI
+            if ($asignacion->idContrato) {
+                $clon = HorarioMateria::duplicarParaAsignacion($asignacion);
+                if ($clon) {
+                    $asignacion->update(['idHorarioMateria' => $clon->id]);
+                }
+            }
+
             DB::commit();
 
             return response()->json([
@@ -75,7 +83,38 @@ class AsignacionSesionController extends Controller
             $asignaciones = $query->get();
 
             foreach ($asignaciones as $asignacion) {
+                $idHorarioABorrar = $asignacion->idHorarioMateria;
+                $idContratoAsig = $asignacion->idContrato;
+                
+                // Verificar si hay asistencias antes de desasignar
+                $horarioCheck = HorarioMateria::find($idHorarioABorrar);
+                if ($horarioCheck) {
+                    $hasAsistencia = $horarioCheck->sesionMaterias()
+                        ->whereHas('asistencia', fn($q) => $q->where('asistio', true))
+                        ->exists();
+                    if ($hasAsistencia) {
+                        return response()->json([
+                            'message' => 'No es posible desasignar este profesor porque ya tiene asistencias registradas en este horario.'
+                        ], 422);
+                    }
+                }
+                
                 $asignacion->delete();
+
+                // Si la asignación tenía un contrato, el horario asociado era un duplicado, lo borramos
+                if ($idContratoAsig && $idHorarioABorrar) {
+                    $horarioClon = HorarioMateria::find($idHorarioABorrar);
+                    if ($horarioClon) {
+                        // NO eliminamos el registro, solo quitamos el contrato
+                        $horarioClon->idContrato = null;
+                        $horarioClon->save();
+                        
+                        // Las sesiones se eliminan solo si no tienen asistencias
+                        $horarioClon->sesionMaterias()
+                            ->whereDoesntHave('asistencia')
+                            ->delete();
+                    }
+                }
             }
 
             DB::commit();

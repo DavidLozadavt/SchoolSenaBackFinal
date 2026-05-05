@@ -12,6 +12,7 @@ use App\Models\Contrato;
 use App\Models\GradoMateria;
 use Illuminate\Http\Request;
 use App\Models\SesionMateria;
+use App\Models\AsignacionSesion;
 use App\Models\HorarioMateria;
 use App\Models\Materia;
 use App\Traits\CalculateEndDate;
@@ -36,7 +37,6 @@ use App\Models\GradoPrograma;
 use App\Models\Rmi;
 use App\Models\MatriculaAcademica;
 use App\Models\NotificacionSistema;
-use App\Models\AsignacionSesion;
 
 class HorarioMateriaController extends Controller
 {
@@ -107,6 +107,12 @@ class HorarioMateriaController extends Controller
 
             foreach ($asignaciones as $asignacion) {
                 $asignacion->update(['idContrato' => $idContrato]);
+                
+                // Duplicar el horario para el segundo profe
+                $clon = HorarioMateria::duplicarParaAsignacion($asignacion);
+                if ($clon) {
+                    $asignacion->update(['idHorarioMateria' => $clon->id]);
+                }
             }
 
             DB::commit();
@@ -460,43 +466,51 @@ class HorarioMateriaController extends Controller
         try {
             $horarioMateria = HorarioMateria::findOrFail($id);
 
-            $sesionMaterias = $horarioMateria->sesionMaterias()->withCount(['asistencia' => fn($q) => $q->where('asistio', true)])->get();
-            $detallesRmi = DetalleRmi::where('idHorarioMateria', $horarioMateria->id)->get();
-            $horarios = HorarioMateria::where('idGradoMateria', $horarioMateria->idGradoMateria)->get();
-            $asignacionesSesiones = AsignacionSesion::where('idHorarioMateria', $horarioMateria->id)->get();
+            // Buscar todos los horarios que correspondan al mismo slot (incluyendo compartidos/duplicados)
+            // Usamos idFicha que es la columna correcta en la DB
+            $horariosRelacionados = HorarioMateria::where('idFicha', $horarioMateria->idFicha)
+                ->where('idGradoMateria', $horarioMateria->idGradoMateria)
+                ->where('idDia', $horarioMateria->idDia)
+                ->where('horaInicial', $horarioMateria->horaInicial)
+                ->where('horaFinal', $horarioMateria->horaFinal)
+                ->where('fechaInicial', $horarioMateria->fechaInicial)
+                ->get();
 
-            if (
-                $sesionMaterias->isEmpty() ||
-                $sesionMaterias->every(
-                    fn($sesion): bool =>
-                    $sesion->asistencia_count == 0
-                )
-            ) {
-                foreach ($detallesRmi as $detalleRmi) {
-                    $detalleRmi->delete();
+            // Verificar si alguno de los horarios en este slot tiene asistencias
+            foreach ($horariosRelacionados as $hr) {
+                $hasAsistencia = $hr->sesionMaterias()->whereHas('asistencia', fn($q) => $q->where('asistio', true))->exists();
+                if ($hasAsistencia) {
+                    return response()->json([
+                        'message' => 'No es posible eliminar este horario porque tiene asistencias registradas en este slot.'
+                    ], 422);
                 }
+            }
 
-                foreach ($asignacionesSesiones as $asignacionSesion) {
-                    $asignacionSesion->delete();
-                }
+            foreach ($horariosRelacionados as $hr) {
+                // NO eliminamos RMI (nunca en la hpta vida), se quedan amarrados al horarioMateria
+                
+                // Eliminamos la vinculación de la sesión especial (compartido/reemplazo)
+                AsignacionSesion::where('idHorarioMateria', $hr->id)->delete();
+                
+                // Verificar cuántos horarios quedan para este RAP (gradoMateria)
+                $totalHorariosRap = HorarioMateria::where('idGradoMateria', $hr->idGradoMateria)->count();
+                
+                // Seteamos el contrato a null para que quede disponible (placeholder)
+                $hr->idContrato = null;
+                $hr->save();
 
-                if ($horarios->count() == 1) {
-                    $horarioMateria->sesionMaterias()->delete();
-                    $horarioMateria->idDia = null;
-                    $horarioMateria->idContrato = null;
-                    $horarioMateria->idInfraestructura = null;
-                    $horarioMateria->fechaFinal = null;
-                    $horarioMateria->horaInicial = null;
-                    $horarioMateria->horaFinal = null;
-                    $horarioMateria->save();
-                } else {
-                    $horarioMateria->sesionMaterias()->delete();
-                    $horarioMateria->delete();
+                // Las sesiones se eliminan solo si no tienen asistencias
+                $hr->sesionMaterias()->whereDoesntHave('asistencia')->delete();
+                
+                if ($totalHorariosRap == 1) {
+                    // Si es el último registro del RAP, limpiamos el slot por completo
+                    $hr->idDia = null;
+                    $hr->idInfraestructura = null;
+                    $hr->fechaFinal = null;
+                    $hr->horaInicial = null;
+                    $hr->horaFinal = null;
+                    $hr->save();
                 }
-            } else {
-                return response()->json([
-                    'message' => 'No es posible eliminar este horario porque tiene asistencias registradas.'
-                ], 422);
             }
 
             DB::commit();
