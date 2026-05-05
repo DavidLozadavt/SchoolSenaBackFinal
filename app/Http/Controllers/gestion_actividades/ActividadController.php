@@ -400,6 +400,8 @@ class ActividadController extends Controller
              */
             $idMateriaClase = $request->query('id_materia_clase');
             $idPrograma = $request->query('id_programa');
+            $idMateriaExacta = (int) $request->query('idMateria', 0);
+            $idRapExacto = (int) $request->query('idRap', 0);
             $materiaIdsFilter = null;
 
             if ($idMateriaClase !== null && $idMateriaClase !== '') {
@@ -469,7 +471,7 @@ class ActividadController extends Controller
              * Sin id_materia_clase ni id_programa no se debe exponer el banco completo de la empresa
              * (riesgo de mezclar programas/RAPs). El cliente debe acotar contexto.
              */
-            if ($materiaIdsFilter === null) {
+            if ($materiaIdsFilter === null && $idMateriaExacta <= 0 && $idRapExacto <= 0) {
                 return response()->json([]);
             }
 
@@ -479,6 +481,14 @@ class ActividadController extends Controller
                 } else {
                     $query->whereRaw('1 = 0');
                 }
+            }
+
+            // Filtro estricto por materia/RAP (si llega en el request).
+            // En este módulo el RAP se modela en materia.id (actividad.idMateria).
+            if ($idRapExacto > 0) {
+                $query->where('idMateria', $idRapExacto);
+            } elseif ($idMateriaExacta > 0) {
+                $query->where('idMateria', $idMateriaExacta);
             }
 
             $actividades = $query->orderBy('id', 'asc')->get();
@@ -1050,6 +1060,24 @@ class ActividadController extends Controller
                 }
             }
 
+            // Filtro estricto por materia/RAP cuando el cliente lo envía explícitamente.
+            $idMateriaExacta = (int) $request->query('idMateria', 0);
+            $idRapExacto = (int) $request->query('idRap', 0);
+            if ($items->isNotEmpty() && ($idMateriaExacta > 0 || $idRapExacto > 0)) {
+                $idMateriaFiltro = $idRapExacto > 0 ? $idRapExacto : $idMateriaExacta;
+                $items = $items->filter(function ($item) use ($idMateriaFiltro) {
+                    $idM = (int) ($item->idMateria ?? (isset($item->actividad) ? ($item->actividad->idMateria ?? 0) : 0));
+                    return $idM > 0 && $idM === $idMateriaFiltro;
+                })->values();
+            }
+
+            // Evita filas repetidas de la misma actividad (posibles duplicados históricos en planeación).
+            if ($items->isNotEmpty()) {
+                $items = $items->unique(function ($item) {
+                    return (int) ($item->idActividad ?? (isset($item->actividad) ? ($item->actividad->id ?? 0) : 0));
+                })->values();
+            }
+
             // Enriquecer con fechaInicial/fechaFinal y fechaVencida desde calificacionActividad
             // Usar MAX(fechaFinal) y MIN(fechaInicial) por actividad para respetar ampliaciones
             // y evitar inconsistencias cuando hay múltiples calificaciones por actividad
@@ -1103,7 +1131,11 @@ class ActividadController extends Controller
             }
             $validated['idPlaneacion'] = (int) $idPlaneacion;
 
-            $item = PlaneacionActividad::create($validated);
+            $item = PlaneacionActividad::firstOrCreate([
+                'idActividad' => $validated['idActividad'],
+                'idMateria' => $validated['idMateria'],
+                'idPlaneacion' => $validated['idPlaneacion'],
+            ]);
             return response()->json($item, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
