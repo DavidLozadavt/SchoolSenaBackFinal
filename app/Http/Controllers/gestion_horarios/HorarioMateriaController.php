@@ -467,7 +467,6 @@ class HorarioMateriaController extends Controller
             $horarioMateria = HorarioMateria::findOrFail($id);
 
             // Buscar todos los horarios que correspondan al mismo slot (incluyendo compartidos/duplicados)
-            // Usamos idFicha que es la columna correcta en la DB
             $horariosRelacionados = HorarioMateria::where('idFicha', $horarioMateria->idFicha)
                 ->where('idGradoMateria', $horarioMateria->idGradoMateria)
                 ->where('idDia', $horarioMateria->idDia)
@@ -476,40 +475,62 @@ class HorarioMateriaController extends Controller
                 ->where('fechaInicial', $horarioMateria->fechaInicial)
                 ->get();
 
-            // Verificar si alguno de los horarios en este slot tiene asistencias
+            // Verificar si alguno de los horarios en este slot tiene asistencias o RMIs con datos
             foreach ($horariosRelacionados as $hr) {
+                // Verificar asistencia real (donde alguien asistió)
                 $hasAsistencia = $hr->sesionMaterias()->whereHas('asistencia', fn($q) => $q->where('asistio', true))->exists();
                 if ($hasAsistencia) {
                     return response()->json([
-                        'message' => 'No es posible eliminar este horario porque tiene asistencias registradas en este slot.'
+                        'message' => 'No es posible eliminar este horario porque tiene asistencias registradas en este bloque.'
+                    ], 422);
+                }
+
+                // Verificar si el RMI tiene reportes activos o archivos subidos
+                $hasActiveRmi = $hr->detallesRmi()->where(function($q) {
+                    $q->where('estado', '!=', 'PENDIENTE')
+                      ->orWhereNotNull('archivoPago')
+                      ->orWhereNotNull('urlInforme')
+                      ->orWhereNotNull('numeroPlanilla');
+                })->exists();
+
+                if ($hasActiveRmi) {
+                    return response()->json([
+                        'message' => 'No es posible eliminar este horario porque tiene reportes de RMI activos o archivos asociados.'
                     ], 422);
                 }
             }
 
             foreach ($horariosRelacionados as $hr) {
-                // NO eliminamos RMI (nunca en la hpta vida), se quedan amarrados al horarioMateria
-                
-                // Eliminamos la vinculación de la sesión especial (compartido/reemplazo)
+                // 1. Eliminar vinculaciones de sesiones especiales (compartido/reemplazo)
                 AsignacionSesion::where('idHorarioMateria', $hr->id)->delete();
-                
-                // Verificar cuántos horarios quedan para este RAP (gradoMateria)
-                $totalHorariosRap = HorarioMateria::where('idGradoMateria', $hr->idGradoMateria)->count();
-                
-                // Seteamos el contrato a null para que quede disponible (placeholder)
-                $hr->idContrato = null;
-                $hr->save();
 
-                // Las sesiones se eliminan solo si no tienen asistencias
-                $hr->sesionMaterias()->whereDoesntHave('asistencia')->delete();
-                
-                if ($totalHorariosRap == 1) {
-                    // Si es el último registro del RAP, limpiamos el slot por completo
-                    $hr->idDia = null;
-                    $hr->idInfraestructura = null;
-                    $hr->fechaFinal = null;
-                    $hr->horaInicial = null;
-                    $hr->horaFinal = null;
-                    $hr->save();
+                // 2. Eliminar sesiones y sus asistencias (solo si no tienen asistencias reales, ya validado)
+                $hr->sesionMaterias()->each(function($sesion) {
+                    $sesion->asistencia()->delete();
+                    $sesion->delete();
+                });
+
+                // 3. Eliminar detalles RMI (solo si están pendientes, ya validado)
+                $hr->detallesRmi()->delete();
+
+                // 4. Decidir si borrar el registro o dejarlo como placeholder
+                $totalRecordsForRap = HorarioMateria::where('idGradoMateria', $hr->idGradoMateria)->count();
+
+                if ($totalRecordsForRap > 1) {
+                    // Si hay otros horarios para este RAP (otros días u otros clones), borramos este registro físico
+                    $hr->delete();
+                } else {
+                    // Si es el último registro del RAP, lo limpiamos para que quede como slot disponible (placeholder)
+                    $hr->update([
+                        'idDia'             => null,
+                        'idInfraestructura' => null,
+                        'idContrato'        => null,
+                        'fechaFinal'        => null,
+                        'horaInicial'       => null,
+                        'horaFinal'         => null,
+                        'observacion'       => null,
+                        'estado'            => EstadoHorarioMateria::PENDIENTE
+                    ]);
                 }
             }
 
@@ -518,7 +539,10 @@ class HorarioMateriaController extends Controller
             return response()->json(null, 204);
         } catch (Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Ocurrio un error al eliminar el horario' . $e], 500);
+            return response()->json([
+                'message' => 'Ocurrio un error al eliminar el horario',
+                'error'   => $e->getMessage()
+            ], 500);
         }
     }
 
