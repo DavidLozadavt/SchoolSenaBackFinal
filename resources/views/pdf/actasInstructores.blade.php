@@ -63,7 +63,6 @@
         }
 
         .gray {
-            background-color: #e6e6e6;
             font-weight: bold;
         }
 
@@ -180,12 +179,95 @@
                 @endif
             </td>
         </tr>
+        {{-- Fila para instructores con sus competencias --}}
+        <tr>
+            <td colspan="3">
+                <p style="margin: 0 0 6px 0;">
+                    Los resultados que se orientarán en el mes de
+                    <strong>{{ \Carbon\Carbon::parse($acta->fecha)->translatedFormat('F') }}</strong> son:
+                </p>
+
+                <table class="tabla-actividades" style="width:100%; font-size:10px;">
+                    <tr>
+                        <th class="gray" style="width:18%; text-align:center;">Instructor</th>
+                        <th class="gray" style="width:32%; text-align:center;">Competencia</th>
+                        <th class="gray" style="width:35%; text-align:center;">Resultado</th>
+                        <th class="gray" style="width:15%; text-align:center;">Horas dedicadas</th>
+                    </tr>
+
+                    @foreach ($instructores as $instructor)
+                        @foreach ($instructor['materias'] as $index => $materia)
+                            <tr>
+                                {{-- Nombre solo en la primera fila del instructor --}}
+                                @if ($index === 0)
+                                    <td rowspan="{{ count($instructor['materias']) }}" style="vertical-align:top;">
+                                        {{ $instructor['nombre'] }} {{ $instructor['apellido'] }}
+                                    </td>
+                                @endif
+                                <td>{{ $materia['competencia'] ?? '—' }}</td>
+                                <td>{{ $materia['resultadoAprendizaje'] ?? '—' }}</td>
+                                <td style="text-align:center;">{{ $materia['totalHoras'] }}</td>
+                            </tr>
+                        @endforeach
+                    @endforeach
+                </table>
+            </td>
+        </tr>
 
     </table>
+    <table class="header-table">
 
-    <div class="spacer"></div>
+        <table class="header-table">
+            {{-- Título sección asistentes --}}
+            <tr>
+                <td colspan="5" class="acta" style="text-align:center; font-size:11px;">
+                    DE: ASISTENTES Y APROBACIÓN DECISIONES
+                </td>
+            </tr>
 
-    <script type="text/php">
+            {{-- Encabezados --}}
+            <tr>
+                <td class="gray" style="width:25%; text-align:center;">NOMBRE</td>
+                <td class="gray" style="width:20%; text-align:center;">DEPENDENCIA/<br>EMPRESA</td>
+                <td class="gray" style="width:12%; text-align:center;">APRUEBA<br>(SI/NO)</td>
+                <td class="gray" style="width:28%; text-align:center;">OBSERVACIÓN</td>
+                <td class="gray" style="width:15%; text-align:center;">FIRMA O<br>PARTICIPACIÓN<br>VIRTUAL</td>
+            </tr>
+
+            {{-- Filas de asistentes --}}
+            @forelse ($acta->asistencias as $asistencia)
+                @php
+                    $persona = $asistencia->contrato?->persona;
+                    $nombre = $persona
+                        ? trim(
+                            collect([$persona->nombre1, $persona->nombre2, $persona->apellido1, $persona->apellido2])
+                                ->filter()
+                                ->implode(' '),
+                        )
+                        : '—';
+                @endphp
+                <tr>
+                    <td style="height:35px;">{{ $nombre }}</td>
+                    <td style="text-align:center;">{{ $asistencia->dependencia ?? '' }}</td>
+                    <td style="text-align:center;">{{ $asistencia->aprueba ?? '' }}</td>
+                    <td>{{ $asistencia->observacion ?? '' }}</td>
+                    <td style="text-align: center;">
+                        @if ($persona?->firmaDigital && $asistencia->aprueba === 'SI')
+                            <img src="{{ storage_path('app/public/firmas/' . basename($persona->firmaDigital)) }}"
+                                style="height: 70px; max-width: 250px; object-fit: contain;" />
+                        @endif
+                    </td>
+                </tr>
+            @empty
+                <tr>
+                    <td colspan="5" style="text-align:center; color:#999;">Sin asistentes registrados</td>
+                </tr>
+            @endforelse
+        </table>
+
+        <div class="spacer"></div>
+
+        <script type="text/php">
     if (isset($pdf)) {
         $font        = $fontMetrics->getFont("Arial", "normal");
         $anchoPagina = $pdf->get_width();

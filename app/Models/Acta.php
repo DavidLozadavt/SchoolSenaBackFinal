@@ -74,4 +74,9 @@ class Acta extends Model
     {
         return $this->hasMany(ObjetivoActa::class, 'idacta');
     }
+
+    public function asistencias()
+    {
+        return $this->hasMany(AsistenciaActa::class, 'idActa');
+    }
 }
