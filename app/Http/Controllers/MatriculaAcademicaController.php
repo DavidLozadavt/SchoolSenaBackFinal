@@ -68,37 +68,10 @@ class MatriculaAcademicaController extends Controller
                 }
 
                 if ($horarioMateria) {
-                    // Verificar si ya existe la sesión de hoy para este horario exacto
+                    // Solo verificar si existe, sin crearla. La creación se delega a updateAssistance.
                     $existsSesion = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
                         ->whereDate('fechaSesion', $hoy->toDateString())
                         ->exists();
-
-                    if (!$existsSesion) {
-                        $lastSession = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
-                            ->max('numeroSesion') ?? 0;
-
-                        $nuevaSesion = \App\Models\SesionMateria::create([
-                            'numeroSesion'     => $lastSession + 1,
-                            'idHorarioMateria' => $horarioMateria->id,
-                            'fechaSesion'      => $hoy->toDateString(),
-                        ]);
-
-                        $asistenciaData = [];
-                        foreach ($result as $matricula) {
-                            $asistenciaData[] = [
-                                'idSesionMateria'      => $nuevaSesion->id,
-                                'idMatriculaAcademica' => $matricula->id,
-                                'asistio'              => false,
-                                'horaLLegada'          => null,
-                                'created_at'           => $hoy,
-                                'updated_at'           => $hoy,
-                            ];
-                        }
-
-                        if (!empty($asistenciaData)) {
-                            \App\Models\Asistencia::insert($asistenciaData);
-                        }
-                    }
                 }
             }
 
@@ -416,37 +389,10 @@ class MatriculaAcademicaController extends Controller
                 ->first();
 
             if ($horarioMateria) {
-                // Verificar si ya existe la sesión de hoy
+                // Solo verificar si existe, sin crearla
                 $existsSesion = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
                     ->whereDate('fechaSesion', $hoy->toDateString())
                     ->exists();
-
-                if (!$existsSesion) {
-                    $lastSession = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
-                        ->max('numeroSesion') ?? 0;
-                    
-                    $nuevaSesion = \App\Models\SesionMateria::create([
-                        'numeroSesion' => $lastSession + 1,
-                        'idHorarioMateria' => $horarioMateria->id,
-                        'fechaSesion' => $hoy->toDateString(),
-                    ]);
-
-                    $asistenciaData = [];
-                    foreach ($matriculas as $matricula) {
-                        $asistenciaData[] = [
-                            'idSesionMateria' => $nuevaSesion->id,
-                            'idMatriculaAcademica' => $matricula->id,
-                            'asistio' => false,
-                            'horaLLegada' => null,
-                            'created_at' => $hoy,
-                            'updated_at' => $hoy,
-                        ];
-                    }
-
-                    if (!empty($asistenciaData)) {
-                        \App\Models\Asistencia::insert($asistenciaData);
-                    }
-                }
             }
         }
 

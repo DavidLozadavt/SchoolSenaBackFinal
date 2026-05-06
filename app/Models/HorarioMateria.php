@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Models\AsignacionSesion;
 
 class HorarioMateria extends Model
 {
@@ -85,5 +86,49 @@ class HorarioMateria extends Model
 
             $cursor->addMonth();
         }
+    }
+
+    /**
+     * Duplica un horario para una asignación compartida.
+     * Esto permite que el instructor secundario tenga su propio registro
+     * para el seguimiento de RMI y sesiones.
+     */
+    public static function duplicarParaAsignacion(AsignacionSesion $asignacion)
+    {
+        $original = self::find($asignacion->idHorarioMateria);
+        if (!$original) return null;
+
+        // Intentar reciclar un horario existente para este mismo slot que no tenga contrato (placeholder)
+        // Esto evita crear múltiples duplicados para el mismo bloque compartido
+        $clon = self::where('idFicha', $original->idFicha)
+            ->where('idGradoMateria', $original->idGradoMateria)
+            ->where('idDia', $original->idDia)
+            ->where('horaInicial', $original->horaInicial)
+            ->where('horaFinal', $original->horaFinal)
+            ->where('fechaInicial', $original->fechaInicial)
+            ->whereNull('idContrato')
+            ->where('id', '!=', $original->id)
+            ->first();
+
+        if (!$clon) {
+            // Si no hay ninguno para reciclar, lo replicamos del original
+            $clon = $original->replicate();
+        }
+
+        $clon->idContrato = $asignacion->idContrato;
+        $clon->fechaInicial = $asignacion->fechaInicio;
+        $clon->fechaFinal = $asignacion->fechaFin;
+        $clon->estado = 'ASIGNADO';
+        
+        if ($asignacion->observacion) {
+            $clon->observacion = $asignacion->observacion;
+        }
+        
+        $clon->save();
+
+        // Generar RMIs para el nuevo contrato en este horario
+        self::generarRmis($clon);
+
+        return $clon;
     }
 }

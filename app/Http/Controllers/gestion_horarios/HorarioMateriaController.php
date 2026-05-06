@@ -12,6 +12,7 @@ use App\Models\Contrato;
 use App\Models\GradoMateria;
 use Illuminate\Http\Request;
 use App\Models\SesionMateria;
+use App\Models\AsignacionSesion;
 use App\Models\HorarioMateria;
 use App\Models\Materia;
 use App\Traits\CalculateEndDate;
@@ -36,7 +37,6 @@ use App\Models\GradoPrograma;
 use App\Models\Rmi;
 use App\Models\MatriculaAcademica;
 use App\Models\NotificacionSistema;
-use App\Models\AsignacionSesion;
 
 class HorarioMateriaController extends Controller
 {
@@ -86,6 +86,7 @@ class HorarioMateriaController extends Controller
 
     public function assignSharedInstructor(Request $request): JsonResponse
     {
+        DB::beginTransaction();
         try {
             $idContrato = $request->idContrato;
             $horarioIds = $request->horarios; // Array de IDs de HorarioMateria
@@ -106,10 +107,19 @@ class HorarioMateriaController extends Controller
 
             foreach ($asignaciones as $asignacion) {
                 $asignacion->update(['idContrato' => $idContrato]);
+                
+                // Duplicar el horario para el segundo profe
+                $clon = HorarioMateria::duplicarParaAsignacion($asignacion);
+                if ($clon) {
+                    $asignacion->update(['idHorarioMateria' => $clon->id]);
+                }
             }
+
+            DB::commit();
 
             return response()->json(['message' => 'Instructor secundario asignado correctamente'], 200);
         } catch (\Throwable $e) {
+            DB::rollBack();
             return response()->json([
                 'message' => 'Error al asignar instructor secundario',
                 'error' => $e->getMessage()
@@ -136,6 +146,7 @@ class HorarioMateriaController extends Controller
             $observacion    = $data['observacion'] ?? null;
             $esCompartido   = $data['esCompartido'] ?? false;
             $horarios       = $data['horarios'] ?? [];
+            $observacion  = $data['observacion'] ?? null;
 
             if (empty($horarios)) {
                 return response()->json(['message' => 'No se enviaron horarios'], 400);
@@ -188,6 +199,7 @@ class HorarioMateriaController extends Controller
                             'fechaFin'         => $fechaFin,
                             'idContrato'       => null,
                             'idHorarioMateria' => $horarioBase->id,
+                            'observacion'      => $observacion,
                         ]);
                     }
 
@@ -203,6 +215,7 @@ class HorarioMateriaController extends Controller
                             'fechaFin'         => $fechaFin,
                             'idContrato'       => null,
                             'idHorarioMateria' => $newHorario->id,
+                            'observacion'      => $observacion,
                         ]);
                     }
 
@@ -453,38 +466,72 @@ class HorarioMateriaController extends Controller
         try {
             $horarioMateria = HorarioMateria::findOrFail($id);
 
-            $sesionMaterias = $horarioMateria->sesionMaterias()->withCount(['asistencia' => fn($q) => $q->where('asistio', true)])->get();
-            $detallesRmi = DetalleRmi::where('idHorarioMateria', $horarioMateria->id)->get();
-            $horarios = HorarioMateria::where('idGradoMateria', $horarioMateria->idGradoMateria)->get();
+            // Buscar todos los horarios que correspondan al mismo slot (incluyendo compartidos/duplicados)
+            $horariosRelacionados = HorarioMateria::where('idFicha', $horarioMateria->idFicha)
+                ->where('idGradoMateria', $horarioMateria->idGradoMateria)
+                ->where('idDia', $horarioMateria->idDia)
+                ->where('horaInicial', $horarioMateria->horaInicial)
+                ->where('horaFinal', $horarioMateria->horaFinal)
+                ->where('fechaInicial', $horarioMateria->fechaInicial)
+                ->get();
 
-            if (
-                $sesionMaterias->isEmpty() ||
-                $sesionMaterias->every(
-                    fn($sesion): bool =>
-                    $sesion->asistencia_count == 0
-                )
-            ) {
-                foreach ($detallesRmi as $detalleRmi) {
-                    $detalleRmi->delete();
+            // Verificar si alguno de los horarios en este slot tiene asistencias o RMIs con datos
+            foreach ($horariosRelacionados as $hr) {
+                // Verificar asistencia real (donde alguien asistió)
+                $hasAsistencia = $hr->sesionMaterias()->whereHas('asistencia', fn($q) => $q->where('asistio', true))->exists();
+                if ($hasAsistencia) {
+                    return response()->json([
+                        'message' => 'No es posible eliminar este horario porque tiene asistencias registradas en este bloque.'
+                    ], 422);
                 }
 
-                if ($horarios->count() == 1) {
-                    $horarioMateria->sesionMaterias()->delete();
-                    $horarioMateria->idDia = null;
-                    $horarioMateria->idContrato = null;
-                    $horarioMateria->idInfraestructura = null;
-                    $horarioMateria->fechaFinal = null;
-                    $horarioMateria->horaInicial = null;
-                    $horarioMateria->horaFinal = null;
-                    $horarioMateria->save();
+                // Verificar si el RMI tiene reportes activos o archivos subidos
+                $hasActiveRmi = $hr->detallesRmi()->where(function($q) {
+                    $q->where('estado', '!=', 'PENDIENTE')
+                      ->orWhereNotNull('archivoPago')
+                      ->orWhereNotNull('urlInforme')
+                      ->orWhereNotNull('numeroPlanilla');
+                })->exists();
+
+                if ($hasActiveRmi) {
+                    return response()->json([
+                        'message' => 'No es posible eliminar este horario porque tiene reportes de RMI activos o archivos asociados.'
+                    ], 422);
+                }
+            }
+
+            foreach ($horariosRelacionados as $hr) {
+                // 1. Eliminar vinculaciones de sesiones especiales (compartido/reemplazo)
+                AsignacionSesion::where('idHorarioMateria', $hr->id)->delete();
+
+                // 2. Eliminar sesiones y sus asistencias (solo si no tienen asistencias reales, ya validado)
+                $hr->sesionMaterias()->each(function($sesion) {
+                    $sesion->asistencia()->delete();
+                    $sesion->delete();
+                });
+
+                // 3. Eliminar detalles RMI (solo si están pendientes, ya validado)
+                $hr->detallesRmi()->delete();
+
+                // 4. Decidir si borrar el registro o dejarlo como placeholder
+                $totalRecordsForRap = HorarioMateria::where('idGradoMateria', $hr->idGradoMateria)->count();
+
+                if ($totalRecordsForRap > 1) {
+                    // Si hay otros horarios para este RAP (otros días u otros clones), borramos este registro físico
+                    $hr->delete();
                 } else {
-                    $horarioMateria->sesionMaterias()->delete();
-                    $horarioMateria->delete();
+                    // Si es el último registro del RAP, lo limpiamos para que quede como slot disponible (placeholder)
+                    $hr->update([
+                        'idDia'             => null,
+                        'idInfraestructura' => null,
+                        'idContrato'        => null,
+                        'fechaFinal'        => null,
+                        'horaInicial'       => null,
+                        'horaFinal'         => null,
+                        'observacion'       => null,
+                        'estado'            => EstadoHorarioMateria::PENDIENTE
+                    ]);
                 }
-            } else {
-                return response()->json([
-                    'message' => 'No es posible eliminar este horario porque tiene asistencias registradas.'
-                ], 422);
             }
 
             DB::commit();
@@ -492,7 +539,10 @@ class HorarioMateriaController extends Controller
             return response()->json(null, 204);
         } catch (Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Ocurrio un error al eliminar el horario' . $e], 500);
+            return response()->json([
+                'message' => 'Ocurrio un error al eliminar el horario',
+                'error'   => $e->getMessage()
+            ], 500);
         }
     }
 
