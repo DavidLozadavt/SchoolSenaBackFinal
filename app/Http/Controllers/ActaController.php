@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Acta;
 use App\Models\Person;
 use App\Models\Contract;
+use App\Models\NotificacionSistema;
+use App\Models\User;
 use App\Util\KeyUtil;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
@@ -562,20 +564,29 @@ class ActaController extends Controller
                 ], 403);
             }
 
-            $asistencia = $acta->asistencias()->where('id', $idAsistencia)->firstOrFail();
+            //logica para enviar la notificacion del aplicativo
+            $userRemitente = KeyUtil::user();
+            $infoRemitente = User::where('idpersona', $userRemitente->idpersona)->with('persona')->firstOrFail();
+            $userReceptor = User::where('idpersona', $acta->contrato->persona->id)->firstOrFail();
 
-            $asistencia->update([
-                'aprueba' => $validated['aprueba'],
-                'observacion' => $validated['observacion'] ?? $asistencia->observacion,
-            ]);
+            DB::transaction(function () use ($acta, $validated, $userRemitente, $infoRemitente, $userReceptor, $idAsistencia) {
+                $asistencia = $acta->asistencias()->where('id', $idAsistencia)->firstOrFail();
+
+                $asistencia->update([
+                    'aprueba' => $validated['aprueba'],
+                    'observacion' => $validated['observacion'] ?? $asistencia->observacion,
+                ]);
+
+                $this->enviarNotificacionActa($userRemitente, $userReceptor, $infoRemitente, $acta, $validated['aprueba']);
+            });
+
+
 
             $this->enviarCorreoEstado($acta, $validated['aprueba'], $validated['observacion']);
 
             return response()->json([
-                'message' => 'Asistencia actualizada correctamente',
-                'data' => $asistencia,
+                'message' => 'Asistencia actualizada correctamente'
             ]);
-
         } catch (\Exception $e) {
             Log::error('Error al actualizar asistencia: ' . $e->getMessage());
             return response()->json([
@@ -728,5 +739,34 @@ class ActaController extends Controller
                 \App\Jobs\SendBasicEmail::dispatch($userReceptor->email, $asunto, $mensaje);
             }
         }
+    }
+    protected function enviarNotificacionActa(
+        $remitente,
+        $receptor,
+        $infoRemitente,
+        $acta,
+        $aprueba = 'SI'
+    ) {
+        $textos = [
+            'SI' => ['asunto' => 'Acta aprobada', 'accion' => 'aprobado'],
+            'NO' => ['asunto' => 'Acta rechazada', 'accion' => 'rechazada'],
+        ];
+
+        $nombre = "{$infoRemitente->persona->nombre1} {$infoRemitente->persona->apellido1}";
+        $asunto  = $textos[$aprueba]['asunto'];
+        $mensaje = "El acta {$acta} ha sido {$textos[$aprueba]['accion']} por {$nombre}.";
+
+        return NotificacionSistema::create([
+            'fecha' => now()->toDateString(),
+            'hora' => now()->toTimeString(),
+            'asunto' => $asunto,
+            'mensaje' => $mensaje,
+            'estado_id' => 1,
+            'idUsuarioReceptor' => $receptor->id,
+            'idUsuarioRemitente' => $remitente->id,
+            'idTipoNotificacion' => 1,
+            'idEmpresa' => KeyUtil::idCompany(),
+            'route' => '/actas'
+        ]);
     }
 }
