@@ -147,7 +147,7 @@ class GradoProgramaController extends Controller
                 ->pluck('idMateria')->toArray();
                 
                 $raps = MatriculaAcademica::where('idFicha', $datos['idFicha'])
-                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
+                        ->whereNotIn('estado', ['APROBADO', 'EVALUADO', 'FINALIZADO'])
                         ->whereNotIn('idMateria', $rapsYaFinalizados)
                         ->whereHas('materia', function ($query) use ($materiaPadre) {
                             $query->where('idMateriaPadre', $materiaPadre->id);
@@ -199,19 +199,12 @@ class GradoProgramaController extends Controller
 
             foreach ($datos['materias'] as $nueva) {
 
-                // verificar si la materia ya existe en el trimestre y no repetirla
-                $gradoMateriaExistente = GradoMateria::where([
+                // Obtener o crear la relación GradoMateria (Competencia - Trimestre)
+                // Se usa firstOrCreate porque el GradoMateria es compartido entre fichas del mismo programa
+                $newGradoMateria = GradoMateria::firstOrCreate([
                     'idGradoPrograma' => $datos['idGradoPrograma'],
                     'idMateria' => $nueva['id']
-                ])->first();
-
-                if ($gradoMateriaExistente) {
-                    continue;
-                }
-
-                $newGradoMateria = GradoMateria::create([
-                    'idGradoPrograma' => $datos['idGradoPrograma'],
-                    'idMateria' => $nueva['id'],
+                ], [
                     'estado' => 'PENDIENTE'
                 ]);
 
@@ -242,9 +235,11 @@ class GradoProgramaController extends Controller
                         ->values();
 
                 foreach ($raps as $rap) {
-                    $gradoMateriaRap = GradoMateria::create([
+                    // Obtener o crear la relación GradoMateria para el RAP
+                    $gradoMateriaRap = GradoMateria::firstOrCreate([
                         'idGradoPrograma' => $datos['idGradoPrograma'],
-                        'idMateria' => $rap->id,
+                        'idMateria' => $rap->id
+                    ], [
                         'estado' => 'PENDIENTE'
                     ]);
 
