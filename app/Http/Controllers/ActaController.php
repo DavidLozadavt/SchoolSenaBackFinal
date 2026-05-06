@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Acta;
+use App\Models\Ficha;
 use App\Models\Person;
 use App\Models\Contract;
 use App\Models\NotificacionSistema;
@@ -24,7 +25,7 @@ class ActaController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $actas = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])->get();
+            $actas = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])->get();
             return response()->json($actas);
         } catch (\Exception $e) {
             Log::error('Error al listar actas: ' . $e->getMessage());
@@ -65,6 +66,12 @@ class ActaController extends Controller
             'asistencias.*.dependencia' => 'required|string',
             'asistencias.*.aprueba' => 'required|in:SI,NO',
             'asistencias.*.observacion' => 'nullable|string',
+            'conclusiones' => 'nullable|array',
+            'conclusiones.*.conclusion' => 'required|string',
+            'compromisos' => 'nullable|array',
+            'compromisos.*.actividad' => 'required|string',
+            'compromisos.*.fecha' => 'required|date',
+            'compromisos.*.responsable' => 'required|string',
         ]);
 
         DB::beginTransaction();
@@ -90,11 +97,23 @@ class ActaController extends Controller
                 $this->notificarAsistentes($acta, $validated['asistencias']);
             }
 
+            if (!empty($validated['conclusiones'])) {
+                foreach ($validated['conclusiones'] as $item) {
+                    $acta->conclusiones()->create($item);
+                }
+            }
+
+            if (!empty($validated['compromisos'])) {
+                foreach ($validated['compromisos'] as $item) {
+                    $acta->compromisos()->create($item);
+                }
+            }
+
             DB::commit();
 
             return response()->json([
                 'message' => 'Acta creada correctamente con todos sus detalles',
-                'data' => $acta->load(['agenda', 'objetivos', 'asistencias'])
+                'data' => $acta->load(['agenda', 'objetivos', 'asistencias', 'conclusiones', 'compromisos'])
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -115,7 +134,7 @@ class ActaController extends Controller
     public function show($id): JsonResponse
     {
         try {
-            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])->findOrFail($id);
+            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])->findOrFail($id);
             return response()->json($acta);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -161,6 +180,12 @@ class ActaController extends Controller
             'asistencias.*.dependencia' => 'required|string',
             'asistencias.*.aprueba' => 'required|in:SI,NO',
             'asistencias.*.observacion' => 'nullable|string',
+            'conclusiones' => 'nullable|array',
+            'conclusiones.*.conclusion' => 'required|string',
+            'compromisos' => 'nullable|array',
+            'compromisos.*.actividad' => 'required|string',
+            'compromisos.*.fecha' => 'required|date',
+            'compromisos.*.responsable' => 'required|string',
         ]);
 
         DB::beginTransaction();
@@ -217,11 +242,27 @@ class ActaController extends Controller
                 }
             }
 
+            // Sincronizar Conclusiones
+            if (isset($validated['conclusiones'])) {
+                $acta->conclusiones()->delete();
+                foreach ($validated['conclusiones'] as $item) {
+                    $acta->conclusiones()->create($item);
+                }
+            }
+
+            // Sincronizar Compromisos
+            if (isset($validated['compromisos'])) {
+                $acta->compromisos()->delete();
+                foreach ($validated['compromisos'] as $item) {
+                    $acta->compromisos()->create($item);
+                }
+            }
+
             DB::commit();
 
             return response()->json([
                 'message' => 'Acta actualizada correctamente',
-                'data' => $acta->load(['agenda', 'objetivos', 'asistencias'])
+                'data' => $acta->load(['agenda', 'objetivos', 'asistencias', 'conclusiones', 'compromisos'])
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             DB::rollBack();
@@ -274,115 +315,12 @@ class ActaController extends Controller
     {
         try {
             $actas = Acta::where('idContrato', $idContrato)
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])
                 ->get();
 
             return response()->json($actas);
         } catch (\Exception $e) {
             Log::error('Error al filtrar actas por contrato: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error al filtrar actas por contrato',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-
-    public function getActaInstructor($id)
-    {
-        try {
-            $acta = Acta::where('id', $id)
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
-                ->first();
-
-            // Calcular instructores con sus materias usando la fecha del acta como periodo
-            $instructores = collect();
-
-            if ($acta->idFicha) {
-                $inicio = \Carbon\Carbon::parse($acta->fecha)->startOfMonth();
-                $fin = \Carbon\Carbon::parse($acta->fecha)->endOfMonth();
-
-                $horarios = \App\Models\HorarioMateria::with([
-                    'contrato.persona',
-                    'gradoMateria.materia.padre',
-                ])
-                    ->where('idFicha', $acta->idFicha)
-                    ->where('estado', 'ASIGNADO')
-                    ->where(function ($q) use ($inicio, $fin) {
-                        $q->whereBetween('fechaInicial', [$inicio, $fin])
-                            ->orWhereBetween('fechaFinal', [$inicio, $fin])
-                            ->orWhere(function ($q2) use ($inicio, $fin) {
-                                $q2->where('fechaInicial', '<=', $inicio)
-                                    ->where('fechaFinal', '>=', $fin);
-                            });
-                    })
-                    ->get();
-
-                $instructores = $horarios
-                    ->groupBy('idContrato')
-                    ->map(function ($horariosGrupo) use ($inicio, $fin) {
-                        $persona = $horariosGrupo->first()->contrato?->persona;
-
-                        $materias = $horariosGrupo
-                            ->groupBy('idGradoMateria')
-                            ->map(function ($horariosGM) use ($inicio, $fin) {
-                                $primero = $horariosGM->first();
-                                $rap = $primero->gradoMateria?->materia;
-                                $competencia = $rap?->padre;
-
-                                $totalHoras = $horariosGM->sum(function ($h) use ($inicio, $fin) {
-                                    $duracionSesion = round(
-                                        (strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600,
-                                        2
-                                    );
-
-                                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-
-                                    $idDiaInt = (int) $h->idDia;
-                                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-                                    $cantidadSesiones = 0;
-                                    $cursor = $desde->copy();
-
-                                    while ($cursor->lte($hasta)) {
-                                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                                            $cantidadSesiones++;
-                                        }
-                                        $cursor->addDay();
-                                    }
-
-                                    return round($duracionSesion * $cantidadSesiones, 2);
-                                });
-
-                                return [
-                                    'idGradoMateria' => $primero->idGradoMateria,
-                                    'competencia' => $competencia?->nombreMateria,
-                                    'resultadoAprendizaje' => $rap?->nombreMateria,
-                                    'totalHoras' => $totalHoras,
-                                ];
-                            })
-                            ->values();
-
-                        return [
-                            'idContrato' => $horariosGrupo->first()->idContrato,
-                            'nombre' => $persona?->nombre1,
-                            'apellido' => $persona?->apellido1,
-                            'totalHoras' => $materias->sum('totalHoras'),
-                            'materias' => $materias,
-                        ];
-                    })
-                    ->values();
-            }
-
-            $pdf = Pdf::loadView('pdf.actasInstructores', compact('acta', 'instructores'))
-                ->setPaper('letter')
-                ->setOption('isPhpEnabled', true)
-                ->setOption('isHtml5ParserEnabled', true)
-                ->setOption('isFontSubsettingEnabled', true);
-
-            return $pdf->stream('actasInstructor.pdf');
-        } catch (\Exception $e) {
-            Log::error('Error al obtener actas por contrato: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Error al filtrar actas por contrato',
                 'error' => $e->getMessage()
@@ -475,7 +413,7 @@ class ActaController extends Controller
             $actas = Acta::whereHas('asistencias', function ($query) use ($idContrato) {
                 $query->where('idContrato', $idContrato);
             })
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])
                 ->get();
 
             return response()->json($actas);
@@ -726,7 +664,7 @@ class ActaController extends Controller
         ];
 
         $nombre = "{$infoRemitente->persona->nombre1} {$infoRemitente->persona->apellido1}";
-        $asunto  = $textos[$aprueba]['asunto'];
+        $asunto = $textos[$aprueba]['asunto'];
         $mensaje = "El acta {$acta->nombre} ha sido {$textos[$aprueba]['accion']} por {$nombre}.";
 
         return NotificacionSistema::create([
@@ -741,5 +679,110 @@ class ActaController extends Controller
             'idEmpresa' => KeyUtil::idCompany(),
             'route' => '/actas'
         ]);
+    }
+
+    public function getActaInstructor($id)
+    {
+        try {
+            $acta = Acta::where('id', $id)
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])
+                ->first();
+
+            // Calcular instructores con sus materias usando la fecha del acta como periodo
+            $instructores = collect();
+
+            // logica para obtener la ficha 
+            $ficha = Ficha::where('id', $acta->idFicha)->first();
+
+            if ($acta->idFicha) {
+                $inicio = \Carbon\Carbon::parse($acta->fecha)->startOfMonth();
+                $fin = \Carbon\Carbon::parse($acta->fecha)->endOfMonth();
+
+                $horarios = \App\Models\HorarioMateria::with([
+                    'contrato.persona',
+                    'gradoMateria.materia.padre',
+                ])
+                    ->where('idFicha', $acta->idFicha)
+                    ->where('estado', 'ASIGNADO')
+                    ->where(function ($q) use ($inicio, $fin) {
+                        $q->whereBetween('fechaInicial', [$inicio, $fin])
+                            ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                            ->orWhere(function ($q2) use ($inicio, $fin) {
+                                $q2->where('fechaInicial', '<=', $inicio)
+                                    ->where('fechaFinal', '>=', $fin);
+                            });
+                    })
+                    ->get();
+
+                $instructores = $horarios
+                    ->groupBy('idContrato')
+                    ->map(function ($horariosGrupo) use ($inicio, $fin) {
+                        $persona = $horariosGrupo->first()->contrato?->persona;
+
+                        $materias = $horariosGrupo
+                            ->groupBy('idGradoMateria')
+                            ->map(function ($horariosGM) use ($inicio, $fin) {
+                                $primero = $horariosGM->first();
+                                $rap = $primero->gradoMateria?->materia;
+                                $competencia = $rap?->padre;
+
+                                $totalHoras = $horariosGM->sum(function ($h) use ($inicio, $fin) {
+                                    $duracionSesion = round(
+                                        (strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600,
+                                        2
+                                    );
+
+                                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+
+                                    $idDiaInt = (int) $h->idDia;
+                                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
+                                    $cantidadSesiones = 0;
+                                    $cursor = $desde->copy();
+
+                                    while ($cursor->lte($hasta)) {
+                                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
+                                            $cantidadSesiones++;
+                                        }
+                                        $cursor->addDay();
+                                    }
+
+                                    return round($duracionSesion * $cantidadSesiones, 2);
+                                });
+
+                                return [
+                                    'idGradoMateria' => $primero->idGradoMateria,
+                                    'competencia' => $competencia?->nombreMateria,
+                                    'resultadoAprendizaje' => $rap?->nombreMateria,
+                                    'totalHoras' => $totalHoras,
+                                ];
+                            })
+                            ->values();
+
+                        return [
+                            'idContrato' => $horariosGrupo->first()->idContrato,
+                            'nombre' => $persona?->nombre1,
+                            'apellido' => $persona?->apellido1,
+                            'totalHoras' => $materias->sum('totalHoras'),
+                            'materias' => $materias,
+                        ];
+                    })
+                    ->values();
+            }
+
+            $pdf = Pdf::loadView('pdf.actasInstructores', compact('acta', 'instructores'))
+                ->setPaper('letter')
+                ->setOption('isPhpEnabled', true)
+                ->setOption('isHtml5ParserEnabled', true)
+                ->setOption('isFontSubsettingEnabled', true);
+
+            return $pdf->stream('actasInstructor.pdf');
+        } catch (\Exception $e) {
+            Log::error('Error al obtener actas por contrato: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Error al filtrar actas por contrato',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }
