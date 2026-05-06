@@ -15,11 +15,6 @@ class AsignacionSesion extends Model
     protected $fillable = ['tipoAsignacion', 'fechaInicio', 'fechaFin', 'idContrato', 'idHorarioMateria', 'observacion'];
 
     // relaciones
-    public function sesion(): HasMany
-    {
-        return $this->hasMany(SesionMateria::class);
-    }
-
     public function contrato(): BelongsTo
     {
         return $this->belongsTo(Contract::class, 'idContrato', 'id');
