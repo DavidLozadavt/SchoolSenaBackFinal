@@ -1283,6 +1283,8 @@ Route::middleware('auth:api')->group(function () {
     Route::get('estados', [ActividadController::class, 'estados']);
     Route::get('planeacion/ficha/{id}', [ActividadController::class, 'planeacionPorFicha']);
     Route::get('planeacionactividades/ficha/{id}', [ActividadController::class, 'planeacionActividadesPorFicha']);
+    Route::get('fichas/{idFicha}/raps-horario-actividades', [ActividadController::class, 'rapsHorarioFicha']);
+    Route::put('actividades/{id}/mover-rap', [ActividadController::class, 'moverActividadRap']);
     Route::post('planeacionactividades', [ActividadController::class, 'asignarPlaneacionActividad']);
     Route::delete('planeacionactividades/{id}', [ActividadController::class, 'quitarPlaneacionActividad']);
 

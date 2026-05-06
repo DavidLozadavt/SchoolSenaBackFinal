@@ -21,9 +21,13 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class ActividadController extends Controller
 {
+    /** Rechazo mover RAP cuando el destino no es de la misma ficha o la actividad no pertenece a esa ficha. */
+    private const ERROR_MOVER_RAP_FICHA_DISTINTA = 'No puedes mover esta actividad a un RAP de otra ficha.';
+
     public function materialApoyoAprendiz(Request $request): JsonResponse
     {
         try {
@@ -1149,10 +1153,288 @@ class ActividadController extends Controller
         try {
             $item = PlaneacionActividad::findOrFail($id);
             $item->delete();
-            return response()->json(['message' => 'Actividad quitada de la planeaci?n']);
+            return response()->json(['message' => 'Actividad quitada de la planeación']);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Lista RAP/materías únicamente desde horarios de esta ficha (`horarioMateria.idFicha`).
+     * No incluye RAPs de otras fichas.
+     */
+    public function rapsHorarioFicha(Request $request, int $idFicha): JsonResponse
+    {
+        try {
+            \App\Models\Ficha::query()->findOrFail($idFicha);
+
+            if (! Schema::hasTable('horarioMateria') || ! Schema::hasTable('gradoMateria')) {
+                return response()->json([]);
+            }
+
+            $rows = DB::table('horarioMateria as hm')
+                ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->where('hm.idFicha', $idFicha)
+                ->select('m.id', 'm.nombreMateria', 'm.codigo')
+                ->distinct()
+                ->orderBy('m.nombreMateria');
+
+            return response()->json($rows->get()->values());
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Mueve una actividad existente a otro RAP (en este modelo el RAP es `actividades.idMateria`).
+     * No crea registros nuevos ni duplica la actividad; actualiza `planeacionActividades` cuando aplica la misma planeación que la clase.
+     */
+    public function moverActividadRap(Request $request, int $idActividad): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'idFicha' => 'required|integer|exists:ficha,id',
+                'id_horario_materia' => 'sometimes|nullable|integer',
+                'idRapDestino' => 'sometimes|nullable|exists:materia,id',
+                'idMateriaDestino' => 'sometimes|nullable|exists:materia,id',
+            ]);
+
+            $idMateriaDestino = isset($validated['idRapDestino']) ? (int) $validated['idRapDestino'] : ((int) ($validated['idMateriaDestino'] ?? 0));
+            if ($idMateriaDestino <= 0) {
+                throw ValidationException::withMessages([
+                    'idRapDestino' => ['Debe enviar idRapDestino o idMateriaDestino válido.'],
+                ]);
+            }
+
+            $idCompany = KeyUtil::idCompany();
+            $actividad = Actividad::query()->findOrFail($idActividad);
+
+            if ((int) ($actividad->idCompany ?? 0) !== (int) $idCompany) {
+                return response()->json(['error' => 'No autorizado para modificar esta actividad'], 403);
+            }
+
+            $idFicha = (int) $validated['idFicha'];
+            $idHm = isset($validated['id_horario_materia']) ? (int) $validated['id_horario_materia'] : 0;
+
+            if ($idHm > 0 && Schema::hasTable('horarioMateria')) {
+                $hmPerteneceFicha = DB::table('horarioMateria')
+                    ->where('id', $idHm)
+                    ->where('idFicha', $idFicha)
+                    ->exists();
+                if (! $hmPerteneceFicha) {
+                    return response()->json(['error' => self::ERROR_MOVER_RAP_FICHA_DISTINTA], 422);
+                }
+            }
+
+            if (! self::actividadPerteneceOFichaContextoMovimiento($idActividad, $idFicha)) {
+                return response()->json(['error' => self::ERROR_MOVER_RAP_FICHA_DISTINTA], 422);
+            }
+
+            if (! self::materiaEnHorariosDeFicha($idFicha, $idMateriaDestino)) {
+                return response()->json(['error' => self::ERROR_MOVER_RAP_FICHA_DISTINTA], 422);
+            }
+
+            $idPlaneacion = self::resolverIdPlaneacionPorFichaYHorario($idFicha, $idHm > 0 ? $idHm : null);
+
+            $idOrigen = (int) ($actividad->idMateria ?? 0);
+            if ($idOrigen === $idMateriaDestino) {
+                throw ValidationException::withMessages([
+                    'idRapDestino' => ['El RAP destino debe ser distinto del RAP actual.'],
+                ]);
+            }
+
+            DB::transaction(function () use ($actividad, $idActividad, $idOrigen, $idMateriaDestino, $idPlaneacion) {
+                $actividad->idMateria = $idMateriaDestino;
+                $actividad->save();
+
+                if (Schema::hasTable('planeacionActividades')) {
+                    $planeaciones = $idPlaneacion ? [$idPlaneacion] : PlaneacionActividad::query()
+                        ->where('idActividad', $idActividad)
+                        ->where('idMateria', $idOrigen)
+                        ->distinct()
+                        ->pluck('idPlaneacion')
+                        ->map(fn ($p) => (int) $p)
+                        ->filter(fn ($p) => $p > 0)
+                        ->values()
+                        ->all();
+
+                    foreach ($planeaciones as $pid) {
+                        $rows = PlaneacionActividad::query()
+                            ->where('idActividad', $idActividad)
+                            ->where('idPlaneacion', $pid)
+                            ->get();
+
+                        $withOld = $rows->filter(fn ($r) => (int) ($r->idMateria ?? 0) === $idOrigen)->values();
+                        $withNew = $rows->filter(fn ($r) => (int) ($r->idMateria ?? 0) === $idMateriaDestino)->values();
+
+                        if ($withNew->isNotEmpty()) {
+                            foreach ($withOld as $stale) {
+                                $stale->delete();
+                            }
+                        } elseif ($withOld->isNotEmpty()) {
+                            $first = $withOld->first();
+                            $first->idMateria = $idMateriaDestino;
+                            $first->save();
+                            foreach ($withOld->slice(1) as $dup) {
+                                $dup->delete();
+                            }
+                        }
+                    }
+                }
+            });
+
+            return response()->json([
+                'message' => 'Actividad movida correctamente al RAP seleccionado.',
+                'idActividad' => $actividad->id,
+                'idMateria' => $idMateriaDestino,
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Impide mover usando idFicha de una clase cuando la actividad solo existe en planeación/asignaciones de otra ficha,
+     * salvo actividad de banco (sin planeacionActividades ni calificacionActividad en BD).
+     */
+    private static function actividadPerteneceOFichaContextoMovimiento(int $idActividad, int $idFicha): bool
+    {
+        if (self::tieneCalificacionActividadEnFicha($idActividad, $idFicha)) {
+            return true;
+        }
+
+        $idsPlanesFicha = self::idsPlaneacionesDeContratosHorariosDeFicha($idFicha);
+        if ($idsPlanesFicha !== [] && Schema::hasTable('planeacionActividades')) {
+            if (PlaneacionActividad::query()
+                ->where('idActividad', $idActividad)
+                ->whereIn('idPlaneacion', $idsPlanesFicha)
+                ->exists()) {
+                return true;
+            }
+        }
+
+        $algoPlaneacionGlobal = Schema::hasTable('planeacionActividades')
+            && PlaneacionActividad::query()->where('idActividad', $idActividad)->exists();
+        $algoCalificacionGlobal = Schema::hasTable('calificacionActividad')
+            && DB::table('calificacionActividad')->where('idActividad', $idActividad)->exists();
+
+        return ! $algoPlaneacionGlobal && ! $algoCalificacionGlobal;
+    }
+
+    /** @return list<int> */
+    private static function idsPlaneacionesDeContratosHorariosDeFicha(int $idFicha): array
+    {
+        if (! Schema::hasTable('planeacion') || ! Schema::hasTable('horarioMateria')) {
+            return [];
+        }
+        if (! Schema::hasColumn('horarioMateria', 'idContrato') || ! Schema::hasColumn('planeacion', 'idContrato')) {
+            return [];
+        }
+
+        $idsContrato = DB::table('horarioMateria')
+            ->where('idFicha', $idFicha)
+            ->whereNotNull('idContrato')
+            ->distinct()
+            ->pluck('idContrato');
+        if ($idsContrato->isEmpty()) {
+            return [];
+        }
+
+        return DB::table('planeacion')
+            ->whereIn('idContrato', $idsContrato->all())
+            ->pluck('id')
+            ->map(fn ($pid) => (int) $pid)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private static function tieneCalificacionActividadEnFicha(int $idActividad, int $idFicha): bool
+    {
+        if (! Schema::hasTable('calificacionActividad')) {
+            return false;
+        }
+
+        [$tableMa, $colFicha] = self::resolverTablaYColumnaFichaMatriculaAcademica();
+        if (! $colFicha) {
+            return false;
+        }
+
+        return DB::table('calificacionActividad as ca')
+            ->join($tableMa.' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+            ->where('ca.idActividad', $idActividad)
+            ->where('ma.'.$colFicha, $idFicha)
+            ->exists();
+    }
+
+    /** @return array{0:string,1:?string} [tabla, columna_ficha|null] */
+    private static function resolverTablaYColumnaFichaMatriculaAcademica(): array
+    {
+        $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : null;
+        if (! $tableMa && Schema::hasTable('matriculaacademica')) {
+            $tableMa = 'matriculaacademica';
+        }
+        if (! $tableMa) {
+            return ['matriculaAcademica', null];
+        }
+        $colFicha = Schema::hasColumn($tableMa, 'idFicha')
+            ? 'idFicha'
+            : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : null);
+
+        return [$tableMa, $colFicha];
+    }
+
+    /** @internal */
+    private static function materiaEnHorariosDeFicha(int $idFicha, int $idMateria): bool
+    {
+        if (! Schema::hasTable('horarioMateria') || ! Schema::hasTable('gradoMateria')) {
+            return false;
+        }
+
+        return DB::table('horarioMateria as hm')
+            ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+            ->where('hm.idFicha', $idFicha)
+            ->where('gm.idMateria', $idMateria)
+            ->exists();
+    }
+
+    /** Replica la detección de planeación en `planeacionActividadesPorFicha`. */
+    private static function resolverIdPlaneacionPorFichaYHorario(int $idFicha, ?int $idHorarioMateria): ?int
+    {
+        if (! Schema::hasTable('planeacion')) {
+            return null;
+        }
+
+        $idContrato = null;
+        if (Schema::hasTable('horarioMateria') && Schema::hasColumn('horarioMateria', 'idContrato')) {
+            $horario = null;
+            if ($idHorarioMateria !== null && $idHorarioMateria > 0) {
+                $horario = DB::table('horarioMateria')
+                    ->where('id', $idHorarioMateria)
+                    ->where('idFicha', $idFicha)
+                    ->whereNotNull('idContrato')
+                    ->first();
+            }
+            if (! $horario) {
+                $horario = DB::table('horarioMateria')
+                    ->where('idFicha', $idFicha)
+                    ->whereNotNull('idContrato')
+                    ->orderBy('id')
+                    ->first();
+            }
+            $idContrato = $horario->idContrato ?? null;
+        }
+
+        if (! $idContrato || ! Schema::hasColumn('planeacion', 'idContrato')) {
+            return null;
+        }
+
+        $planeacion = DB::table('planeacion')->where('idContrato', $idContrato)->first();
+
+        return $planeacion ? (int) $planeacion->id : null;
     }
 
     public function materialesApoyo(int $idActividad): JsonResponse
