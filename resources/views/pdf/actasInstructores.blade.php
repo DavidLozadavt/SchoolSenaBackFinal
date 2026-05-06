@@ -213,7 +213,67 @@
                 </table>
             </td>
         </tr>
+    </table>
+    <table class="header-table">
+        <tr>
+            <td colspan="5" class="acta" style="text-align:center; font-size:11px;">
+                CONCLUSIONES
+            </td>
+        </tr>
+        <tr>
+            <td colspan="5">
+                {{-- Filas de las conclusiones --}}
+                @forelse ($acta->conclusiones as $conclusion)
+                    @if ($loop->first)
+                        <ul style="margin: 2px 0 2px 15px; padding-left: 15px;">
+                    @endif
 
+                    <li class="left">
+                        {{ $conclusion->conclusion }}
+                    </li>
+
+                    @if ($loop->last)
+                        </ul>
+                    @endif
+                @empty
+                    <p class="left" style="margin: 2px 0 2px 15px;">
+                        Sin conclusiones registradas
+                    </p>
+                @endforelse
+            </td>
+        </tr>
+    </table>
+    <table class="header-table" style="width: 100%; table-layout: fixed; word-wrap: break-word;">
+        <tr>
+            <td colspan="4" class="acta" style="text-align:center; font-size:11px;">
+                ESTABLECIMIENTO Y ACEPTACIÓN DE COMPROMISOS
+            </td>
+        </tr>
+        <tr>
+            <td class="gray" style="width:30%; text-align:center;">ACTIVIDAD / DECISIÓN</td>
+            <td class="gray" style="width:20%; text-align:center;">FECHA</td>
+            <td class="gray" style="width:30%; text-align:center;">RESPONSABLE</td>
+            <td class="gray" style="width:20%; text-align:center;">FIRMA O PARTICIPACIÓN VIRTUAL</td>
+        </tr>
+        @forelse ($acta->compromisos as $compromiso)
+            <tr>
+                <td style="height:35px; padding: 5px;">{{ $compromiso->actividad }}</td>
+                <td style="text-align:center; padding: 5px;">
+                    {{ $compromiso->fecha ? \Carbon\Carbon::parse($compromiso->fecha)->format('d/m/Y') : '' }}
+                </td>
+                <td style="text-align:center; padding: 5px;">{{ $compromiso->responsable ?? '' }}</td>
+                <td style="text-align: center; padding: 5px;">
+                    @if ($compromiso?->firma)
+                        <img src="{{ storage_path('app/public/firmas/' . basename($compromiso->firma)) }}"
+                            style="height: 70px; max-width: 250px; object-fit: contain;" />
+                    @endif
+                </td>
+            </tr>
+        @empty
+            <tr>
+                <td colspan="4" style="text-align:center; color:#999;">Sin compromisos registrados</td>
+            </tr>
+        @endforelse
     </table>
     <table class="header-table">
 
