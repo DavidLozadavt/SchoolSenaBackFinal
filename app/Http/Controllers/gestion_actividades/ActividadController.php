@@ -172,6 +172,7 @@ class ActividadController extends Controller
                 ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
                 ->leftJoin('area_conocimiento as ac', 'mat.idAreaConocimiento', '=', 'ac.id')
                 ->leftJoin('persona as p', 'a.idPersona', '=', 'p.id')
+                ->leftJoin('persona as p_inst', 'ca.idPersona', '=', 'p_inst.id')
                 ->where('m.idPersona', $idPersona);
 
             $total = (clone $query)->count();
@@ -209,6 +210,7 @@ class ActividadController extends Controller
                     'p.apellido1 as autorApellido1',
                     'p.apellido2 as autorApellido2',
                     'p.rutaFoto as autorRutaFoto',
+                    'p_inst.rutaFoto as instructorPersonaRutaFoto',
                     DB::raw($colFicha ? ('ma.' . $colFicha . ' as idFichaContext') : 'NULL as idFichaContext'),
                 ])
                 ->orderBy('ca.id')
@@ -297,6 +299,10 @@ class ActividadController extends Controller
                     $row->autorApellido2,
                 ])));
 
+                $autRuta = trim((string) ($row->autorRutaFoto ?? ''));
+                $instRuta = trim((string) ($row->instructorPersonaRutaFoto ?? ''));
+                $rutaFotoPersonaCruda = $autRuta !== '' ? trim((string) $row->autorRutaFoto) : ($instRuta !== '' ? trim((string) $row->instructorPersonaRutaFoto) : null);
+
                 // Estado calculado solo por: fecha inicio, fecha límite y hora actual
                 $now = now();
                 $fechaVencida = false;
@@ -348,7 +354,8 @@ class ActividadController extends Controller
                     ],
                     'autor' => [
                         'nombreCompleto' => $autor ?: 'Sin asignar',
-                        'rutaFotoUrl' => $this->publicUrl($row->autorRutaFoto),
+                        /** Misma regla que App\Models\Person::getRutaFotoUrl (url()), no solo Storage::url sobre /storage/… */
+                        'rutaFotoUrl' => $this->resolvePersonaPublicFotoUrl($rutaFotoPersonaCruda),
                     ],
                     'materialesApoyo' => $materialesPorRap[((int) ($row->idFichaContext ?? 0)) . '_' . ((int) ($row->idMateria ?? 0))] ?? [],
                     'estadoVisual' => $estadoVisual,
@@ -1785,6 +1792,27 @@ class ActividadController extends Controller
         }
 
         return Storage::disk('public')->url($path);
+    }
+
+    /**
+     * Foto `persona.rutaFoto`: en BD suele guardarse como "/storage/persona/..."; Person usa {@see url()},
+     * mientras que {@see publicUrl()} con Storage puede generar URL incorrecta o duplicar prefijos.
+     */
+    private function resolvePersonaPublicFotoUrl(?string $path): ?string
+    {
+        if ($path === null) {
+            return null;
+        }
+        $path = trim($path);
+        if ($path === '' || strcasecmp($path, 'null') === 0) {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        return url($path);
     }
 
     /**
