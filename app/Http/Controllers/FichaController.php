@@ -1977,22 +1977,45 @@ class FichaController extends Controller
 
             $idPersona = (int) $user->idpersona;
 
+            // Estados que consideramos “vigentes” para ver horario (case/whitespace-safe).
+            // Mantener alineado con otros módulos (GruposFichaController / AsignacionActividadController).
+            $estadosVigentes = ['ACTIVO', 'EN CURSO', 'CURSANDO', 'MATRICULADO', 'EN FORMACION'];
+
+            // 1) Fuente primaria: matrícula con ficha directa (algunos entornos llenan m.idFicha).
             $matriculas = DB::table('matricula as m')
                 ->where('m.idPersona', $idPersona)
-                ->whereIn('m.estado', ['ACTIVO', 'EN CURSO', 'CURSANDO', 'MATRICULADO', 'EN FORMACION'])
+                ->whereIn(DB::raw('UPPER(TRIM(m.estado))'), $estadosVigentes)
                 ->whereNotNull('m.idFicha')
                 ->select('m.idFicha', 'm.estado', 'm.id')
                 ->distinct()
                 ->get();
 
-            if ($matriculas->isEmpty()) {
+            $idsFichas = $matriculas->pluck('idFicha')->map(fn($v) => (int) $v)->filter()->unique()->values()->toArray();
+
+            // 2) Fallback: si no hay m.idFicha, derivar fichas desde matriculaAcademica.
+            // Esto cubre aprendices que sí están matriculados en una ficha, pero su ficha solo está reflejada en el módulo académico.
+            if ($idsFichas === []) {
+                $idsFichas = DB::table('matriculaAcademica as ma')
+                    ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                    ->where('m.idPersona', $idPersona)
+                    ->whereIn(DB::raw('UPPER(TRIM(m.estado))'), $estadosVigentes)
+                    ->whereNotNull('ma.idFicha')
+                    ->select('ma.idFicha')
+                    ->distinct()
+                    ->pluck('ma.idFicha')
+                    ->map(fn($v) => (int) $v)
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->toArray();
+            }
+
+            if ($idsFichas === []) {
                 return response()->json([
                     'message' => 'El estudiante no tiene matrículas activas con fichas asignadas',
                     'data'    => []
                 ], 200);
             }
-
-            $idsFichas = $matriculas->pluck('idFicha')->map(fn($v) => (int) $v)->toArray();
 
             $clases = DB::table('horarioMateria as hm')
                 ->select([
@@ -2035,7 +2058,7 @@ class FichaController extends Controller
 
             if ($clases->isEmpty()) {
                 return response()->json([
-                    'message' => 'El estudiante no tiene clases asignadas',
+                    'message' => 'El estudiante tiene ficha asignada, pero no hay horarios registrados para esta ficha',
                     'data'    => []
                 ], 200);
             }
