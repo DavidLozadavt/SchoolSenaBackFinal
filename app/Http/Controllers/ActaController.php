@@ -668,27 +668,48 @@ class ActaController extends Controller
     private function notificarAsistentes(Acta $acta, array $asistenciasData): void
     {
         $userConectado = KeyUtil::user();
-        $userRemitente = Person::find($userConectado->idpersona);
+        $userRemitente = User::where('idpersona', $userConectado->idpersona)->first();
+        $personaRemitente = Person::find($userConectado->idpersona);
 
         foreach ($asistenciasData as $asistencia) {
             $idContrato = $asistencia['idContrato'];
             $contrato = Contract::with('persona')->find($idContrato);
 
-            if ($contrato && $contrato->persona && $contrato->persona->email) {
-                $userReceptor = $contrato->persona;
-                $asunto = "Asignación a Acta: {$acta->nombre}";
+            if ($contrato && $contrato->persona) {
+                $userReceptorPersona = $contrato->persona;
 
-                $mensaje = "Estimado(a) {$userReceptor->nombre1} {$userReceptor->apellido1},\n\n"
-                    . "Le informamos que ha sido registrado como asistente en el acta: \"{$acta->nombre}\".\n\n"
-                    . "Detalles del Acta:\n"
-                    . "- Fecha: {$acta->fecha}\n"
-                    . "- Lugar: " . ($acta->lugar ?? 'No especificado') . "\n"
-                    . "- Hora Inicio: {$acta->horaInicio}\n\n"
-                    . "Por favor, ingrese al sistema para revisar el contenido del acta y confirmar su aprobación.\n\n"
-                    . "Atentamente,\n"
-                    . "{$userRemitente->nombre1} {$userRemitente->apellido1}\n";
+                // Correo electrónico
+                if ($userReceptorPersona->email) {
+                    $asunto = "Asignación a Acta: {$acta->nombre}";
+                    $mensaje = "Estimado(a) {$userReceptorPersona->nombre1} {$userReceptorPersona->apellido1},\n\n"
+                        . "Le informamos que ha sido registrado como asistente en el acta: \"{$acta->nombre}\".\n\n"
+                        . "Detalles del Acta:\n"
+                        . "- Fecha: {$acta->fecha}\n"
+                        . "- Lugar: " . ($acta->lugar ?? 'No especificado') . "\n"
+                        . "- Hora Inicio: {$acta->horaInicio}\n\n"
+                        . "Por favor, ingrese al sistema para revisar el contenido del acta y confirmar su aprobación.\n\n"
+                        . "Atentamente,\n"
+                        . "{$personaRemitente->nombre1} {$personaRemitente->apellido1}\n";
 
-                \App\Jobs\SendBasicEmail::dispatch($userReceptor->email, $asunto, $mensaje);
+                    \App\Jobs\SendBasicEmail::dispatch($userReceptorPersona->email, $asunto, $mensaje);
+                }
+
+                // Notificación en el aplicativo
+                $userReceptor = User::where('idpersona', $userReceptorPersona->id)->first();
+                if ($userReceptor && $userRemitente) {
+                    NotificacionSistema::create([
+                        'fecha' => now()->toDateString(),
+                        'hora' => now()->toTimeString(),
+                        'asunto' => "Nueva asignación de acta",
+                        'mensaje' => "Ha sido asignado como asistente al acta: {$acta->nombre}",
+                        'estado_id' => 1,
+                        'idUsuarioReceptor' => $userReceptor->id,
+                        'idUsuarioRemitente' => $userRemitente->id,
+                        'idTipoNotificacion' => 1,
+                        'idEmpresa' => KeyUtil::idCompany(),
+                        'route' => '/actas'
+                    ]);
+                }
             }
         }
     }
@@ -706,7 +727,7 @@ class ActaController extends Controller
 
         $nombre = "{$infoRemitente->persona->nombre1} {$infoRemitente->persona->apellido1}";
         $asunto  = $textos[$aprueba]['asunto'];
-        $mensaje = "El acta {$acta} ha sido {$textos[$aprueba]['accion']} por {$nombre}.";
+        $mensaje = "El acta {$acta->nombre} ha sido {$textos[$aprueba]['accion']} por {$nombre}.";
 
         return NotificacionSistema::create([
             'fecha' => now()->toDateString(),
