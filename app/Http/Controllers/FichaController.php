@@ -17,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -883,9 +884,22 @@ class FichaController extends Controller
                     ], 400);
                 }
             }
+
+            $tieneAsignacionSesion = Schema::hasTable('asignacionSesion');
+
+            $selectFechas = $tieneAsignacionSesion
+                ? [
+                    DB::raw('COALESCE(asig.fechaInicio, hm.fechaInicial) as fechaInicial'),
+                    DB::raw('COALESCE(asig.fechaFin, hm.fechaFinal) as fechaFinal'),
+                ]
+                : [
+                    DB::raw('hm.fechaInicial as fechaInicial'),
+                    DB::raw('hm.fechaFinal as fechaFinal'),
+                ];
+
             // Grano: una fila por horarioMateria.id (PK). Sin GROUP BY amplio que duplique hm.id.
-            $clases = DB::table('horarioMateria as hm')
-                ->select([
+            $qb = DB::table('horarioMateria as hm')
+                ->select(array_merge([
                     'f.id as ficha_id',
                     'f.codigo as ficha_codigo',
                     'p.nombrePrograma as programa_nombre',
@@ -908,8 +922,7 @@ class FichaController extends Controller
                     'd.dia as dia_semana',
                     'hm.horaInicial',
                     'hm.horaFinal',
-                    DB::raw('COALESCE(asig.fechaInicio, hm.fechaInicial) as fechaInicial'),
-                    DB::raw('COALESCE(asig.fechaFin, hm.fechaFinal) as fechaFinal'),
+                ], $selectFechas, [
                     'hm.idDia',
                     'c.id as contrato_id',
                     DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
@@ -918,7 +931,8 @@ class FichaController extends Controller
                     'hm.id as idHorarioMateria',
                     'hm.idGradoMateria as idGradoMateria',
                     'gm.idMateria as idMateria',
-                ])
+                ]));
+            $qb = $qb
                 ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
                 ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
                 ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
@@ -934,18 +948,25 @@ class FichaController extends Controller
                 ->leftJoin('materia as m_sm_padre', 'sm.idMateriaPadre', '=', 'm_sm_padre.id')
                 ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
                 ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
-                ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
-                ->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
-                $join->on('hm.id', '=', 'asig.idHorarioMateria')
-                ->where('asig.idContrato', '=', $idInstructor);
-                })
+                ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id');
+
+            if ($tieneAsignacionSesion) {
+                $qb->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
+                    $join->on('hm.id', '=', 'asig.idHorarioMateria')
+                        ->where('asig.idContrato', '=', $idInstructor);
+                });
+            }
+
+            $clases = $qb
                 ->join('contrato as c', function ($join) use ($idInstructor) {
-                $join->on('c.id', '=', DB::raw((int)$idInstructor));
+                    $join->on('c.id', '=', DB::raw((int) $idInstructor));
                 })
                 ->join('persona as per', 'c.idpersona', '=', 'per.id')
-                ->where(function ($query) use ($idInstructor) {
-                    $query->where('hm.idContrato', $idInstructor)
-                    ->orWhereNotNull('asig.id');
+                ->where(function ($query) use ($idInstructor, $tieneAsignacionSesion) {
+                    $query->where('hm.idContrato', $idInstructor);
+                    if ($tieneAsignacionSesion) {
+                        $query->orWhereNotNull('asig.id');
+                    }
                 })
                 ->whereNotNull('hm.idDia')
                 ->whereNotNull('hm.horaInicial')
