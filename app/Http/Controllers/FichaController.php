@@ -908,8 +908,8 @@ class FichaController extends Controller
                     'd.dia as dia_semana',
                     'hm.horaInicial',
                     'hm.horaFinal',
-                    'hm.fechaInicial as fechaInicial',
-                    'hm.fechaFinal as fechaFinal',
+                    DB::raw('COALESCE(asig.fechaInicio, hm.fechaInicial) as fechaInicial'),
+                    DB::raw('COALESCE(asig.fechaFin, hm.fechaFinal) as fechaFinal'),
                     'hm.idDia',
                     'c.id as contrato_id',
                     DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
@@ -935,9 +935,18 @@ class FichaController extends Controller
                 ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
                 ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
-                ->join('contrato as c', 'hm.idContrato', '=', 'c.id')
+                ->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
+                $join->on('hm.id', '=', 'asig.idHorarioMateria')
+                ->where('asig.idContrato', '=', $idInstructor);
+                })
+                ->join('contrato as c', function ($join) use ($idInstructor) {
+                $join->on('c.id', '=', DB::raw((int)$idInstructor));
+                })
                 ->join('persona as per', 'c.idpersona', '=', 'per.id')
-                ->where('c.id', $idInstructor)
+                ->where(function ($query) use ($idInstructor) {
+                    $query->where('hm.idContrato', $idInstructor)
+                    ->orWhereNotNull('asig.id');
+                })
                 ->whereNotNull('hm.idDia')
                 ->whereNotNull('hm.horaInicial')
                 ->whereNotNull('hm.horaFinal')
