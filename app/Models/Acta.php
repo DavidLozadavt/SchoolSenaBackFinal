@@ -60,11 +60,6 @@ class Acta extends Model
         return $this->belongsTo(Contract::class, 'idContrato');
     }
 
-    public function novedades()
-    {
-        return $this->hasMany(NovedadesActa::class, 'idacta');
-    }
-
     public function agenda()
     {
         return $this->hasMany(AgendaActa::class, 'idacta');

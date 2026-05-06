@@ -24,7 +24,7 @@ class ActaController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $actas = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'novedades', 'agenda', 'objetivos', 'asistencias.contrato.persona'])->get();
+            $actas = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])->get();
             return response()->json($actas);
         } catch (\Exception $e) {
             Log::error('Error al listar actas: ' . $e->getMessage());
@@ -60,9 +60,6 @@ class ActaController extends Controller
             'agenda.*.punto' => 'required|string',
             'objetivos' => 'nullable|array',
             'objetivos.*.objetivo' => 'required|string',
-            'novedades' => 'nullable|array',
-            'novedades.*.idmatriculaAcademica' => 'required|exists:matriculaAcademica,id',
-            'novedades.*.observacion' => 'required|string',
             'asistencias' => 'nullable|array',
             'asistencias.*.idContrato' => 'required|exists:contrato,id',
             'asistencias.*.dependencia' => 'required|string',
@@ -86,12 +83,6 @@ class ActaController extends Controller
                 }
             }
 
-            if (!empty($validated['novedades'])) {
-                foreach ($validated['novedades'] as $item) {
-                    $acta->novedades()->create($item);
-                }
-            }
-
             if (!empty($validated['asistencias'])) {
                 foreach ($validated['asistencias'] as $item) {
                     $acta->asistencias()->create($item);
@@ -103,7 +94,7 @@ class ActaController extends Controller
 
             return response()->json([
                 'message' => 'Acta creada correctamente con todos sus detalles',
-                'data' => $acta->load(['agenda', 'objetivos', 'novedades', 'asistencias'])
+                'data' => $acta->load(['agenda', 'objetivos', 'asistencias'])
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -124,7 +115,7 @@ class ActaController extends Controller
     public function show($id): JsonResponse
     {
         try {
-            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'novedades.matriculaAcademica.matricula.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])->findOrFail($id);
+            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])->findOrFail($id);
             return response()->json($acta);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -165,9 +156,6 @@ class ActaController extends Controller
             'agenda.*.punto' => 'required|string',
             'objetivos' => 'nullable|array',
             'objetivos.*.objetivo' => 'required|string',
-            'novedades' => 'nullable|array',
-            'novedades.*.idmatriculaAcademica' => 'required|exists:matriculaAcademica,id',
-            'novedades.*.observacion' => 'required|string',
             'asistencias' => 'nullable|array',
             'asistencias.*.idContrato' => 'required|exists:contrato,id',
             'asistencias.*.dependencia' => 'required|string',
@@ -208,14 +196,6 @@ class ActaController extends Controller
                 }
             }
 
-            // Sincronizar Novedades
-            if (isset($validated['novedades'])) {
-                $acta->novedades()->delete();
-                foreach ($validated['novedades'] as $item) {
-                    $acta->novedades()->create($item);
-                }
-            }
-
             // Sincronizar Asistencias
             if (isset($validated['asistencias'])) {
                 $existingIds = $acta->asistencias->pluck('idContrato')->toArray();
@@ -241,7 +221,7 @@ class ActaController extends Controller
 
             return response()->json([
                 'message' => 'Acta actualizada correctamente',
-                'data' => $acta->load(['agenda', 'objetivos', 'novedades', 'asistencias'])
+                'data' => $acta->load(['agenda', 'objetivos', 'asistencias'])
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             DB::rollBack();
@@ -294,7 +274,7 @@ class ActaController extends Controller
     {
         try {
             $actas = Acta::where('idContrato', $idContrato)
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'novedades', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
                 ->get();
 
             return response()->json($actas);
@@ -307,40 +287,12 @@ class ActaController extends Controller
         }
     }
 
-    /**
-     * Get apprentices by idFicha for novedades.
-     *
-     * @param int $idFicha
-     * @return JsonResponse
-     */
-    public function getAprendicesByFicha($idFicha): JsonResponse
-    {
-        try {
-            $aprendices = \App\Models\MatriculaAcademica::where('idFicha', $idFicha)
-                ->with(['matricula.person'])
-                ->get()
-                ->map(function ($ma) {
-                    return [
-                        'id' => $ma->id,
-                        'nombre' => $ma->matricula->person->nombre1 . ' ' . $ma->matricula->person->apellido1,
-                        'identificacion' => $ma->matricula->person->identificacion,
-                    ];
-                });
 
-            return response()->json($aprendices);
-        } catch (\Exception $e) {
-            Log::error('Error al obtener aprendices por ficha: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error al obtener los aprendices',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
     public function getActaInstructor($id)
     {
         try {
             $acta = Acta::where('id', $id)
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'novedades.matriculaAcademica.matricula.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
                 ->first();
 
             // Calcular instructores con sus materias usando la fecha del acta como periodo
@@ -523,7 +475,7 @@ class ActaController extends Controller
             $actas = Acta::whereHas('asistencias', function ($query) use ($idContrato) {
                 $query->where('idContrato', $idContrato);
             })
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'novedades', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona'])
                 ->get();
 
             return response()->json($actas);

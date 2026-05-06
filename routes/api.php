@@ -1545,7 +1545,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('actas/contrato/{idContrato}', [ActaController::class, 'getByContrato']);
     Route::get('actas/asistente/{idContrato}', [ActaController::class, 'getActasByAsistente']);
     Route::put('actas/{idActa}/asistencias/{idAsistencia}', [ActaController::class, 'updateAsistenciaStatus']);
-    Route::get('actas/ficha/{idFicha}/aprendices', [ActaController::class, 'getAprendicesByFicha']);
+
     Route::get('actas/ficha/{idFicha}/instructores', [ActaController::class, 'getInstructoresByFicha']);
     Route::get('actas/generar-pdf/{idActa}', [ActaController::class, 'getActaInstructor']);
     Route::get('actas/ficha-data', [ActaController::class, 'getFichaData']);
