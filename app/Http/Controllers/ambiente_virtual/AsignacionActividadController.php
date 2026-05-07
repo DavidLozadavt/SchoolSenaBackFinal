@@ -588,11 +588,21 @@ class AsignacionActividadController extends Controller
             if ($idPersona === null || isset($vistos[$idPersona])) continue;
             $vistos[$idPersona] = true;
             $p = $personas[$idPersona] ?? null;
+            $nombreCompleto = $p
+                ? trim(implode(' ', array_filter([
+                    $p->nombre1 ?? null,
+                    $p->nombre2 ?? null,
+                    $p->apellido1 ?? null,
+                    $p->apellido2 ?? null,
+                ])))
+                : '';
             $result[] = [
                 'id' => $m->idMatricula,
                 'idMatriculaAcademica' => $m->id,
                 'idMateria' => $m->idMateria,
                 'nombre' => $p ? trim(($p->nombre1 ?? '') . ' ' . ($p->apellido1 ?? '')) : 'N/A',
+                'nombreCompleto' => $nombreCompleto !== '' ? $nombreCompleto : null,
+                'identificacion' => $p ? (string) ($p->identificacion ?? '') : null,
                 'rutaFoto' => $p->rutaFoto ?? null,
             ];
         }
