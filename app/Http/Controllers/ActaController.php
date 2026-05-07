@@ -25,7 +25,7 @@ class ActaController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $actas = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])->get();
+            $actas = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos'])->get();
             return response()->json($actas);
         } catch (\Exception $e) {
             Log::error('Error al listar actas: ' . $e->getMessage());
@@ -134,7 +134,7 @@ class ActaController extends Controller
     public function show($id): JsonResponse
     {
         try {
-            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])->findOrFail($id);
+            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos'])->findOrFail($id);
             return response()->json($acta);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -315,7 +315,7 @@ class ActaController extends Controller
     {
         try {
             $actas = Acta::where('idContrato', $idContrato)
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos'])
                 ->get();
 
             return response()->json($actas);
@@ -413,7 +413,7 @@ class ActaController extends Controller
             $actas = Acta::whereHas('asistencias', function ($query) use ($idContrato) {
                 $query->where('idContrato', $idContrato);
             })
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos'])
                 ->get();
 
             return response()->json($actas);
@@ -684,7 +684,7 @@ class ActaController extends Controller
     public function getActaInstructor($id)
     {
         try {
-            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'conclusiones', 'compromisos'])->findOrFail($id);
+            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.centroFormacion', 'conclusiones', 'compromisos'])->findOrFail($id);
 
             // Calcular instructores con sus materias usando la fecha del acta como periodo
             $instructores = collect();

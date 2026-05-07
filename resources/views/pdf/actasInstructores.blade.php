@@ -325,7 +325,8 @@
             </tr>
         @empty
             <tr>
-                <td colspan="2" style="text-align:center; color:#999;">No se encontraron registros de aprendices para esta ficha.</td>
+                <td colspan="2" style="text-align:center; color:#999;">No se encontraron registros de aprendices para esta
+                    ficha.</td>
             </tr>
         @endforelse
     </table>
@@ -344,13 +345,13 @@
                         <ul style="margin: 2px 0 2px 15px; padding-left: 15px;">
                     @endif
 
-                    <li class="left">
-                        {{ $conclusion->conclusion }}
-                    </li>
+                        <li class="left">
+                            {{ $conclusion->conclusion }}
+                        </li>
 
-                    @if ($loop->last)
-                        </ul>
-                    @endif
+                        @if ($loop->last)
+                            </ul>
+                        @endif
                 @empty
                     <p class="left" style="margin: 2px 0 2px 15px;">
                         Sin conclusiones registradas
@@ -424,7 +425,7 @@
                 @endphp
                 <tr>
                     <td style="height:35px;">{{ $nombre }}</td>
-                    <td style="text-align:center;">{{ $asistencia->dependencia ?? '' }}</td>
+                    <td style="text-align:center;">{{ $asistencia->contrato?->centroFormacion?->nombre ?? '' }}</td>
                     <td style="text-align:center;">{{ $asistencia->aprueba ?? '' }}</td>
                     <td>{{ $asistencia->observacion ?? '' }}</td>
                     <td style="text-align: center;">
