@@ -110,6 +110,21 @@ class GradoProgramaController extends Controller
                 ->where('numeroGrado', $datos['numeroGrado'])
                 ->firstOrFail();
 
+            // buscamos todos lo horarios de la ficha con estado PENDIENTE y ASIGNADO
+            $horarios = HorarioMateria::where('idFicha', $datos['idFicha'])
+                ->where('estado', 'PENDIENTE')
+                ->orWhere('estado', 'ASIGNADO')
+                ->get();
+            
+            // si existen horarios los actualizamos a estado INTERRUMPIDO
+            if ($horarios->isNotEmpty()) {
+                foreach ($horarios as $horario) {
+                    $horario->update([
+                        'estado' => 'INTERRUMPIDO'
+                    ]);
+                }
+            }
+
             $gradoPrograma = GradoPrograma::updateOrCreate(
                 [
                     'idPrograma' => $datos['idPrograma'],
