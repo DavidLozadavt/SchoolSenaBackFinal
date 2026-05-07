@@ -179,6 +179,98 @@
                 @endif
             </td>
         </tr>
+        {{-- DESARROLLO DE LA REUNIÓN --}}
+        <tr>
+            <td colspan="3">
+                <p style="font-weight:bold; text-align:center; margin:4px 0;">DESARROLLO DE LA REUNIÓN</p>
+
+                {{-- Calendario --}}
+                <table style="margin: 6px auto; border-collapse: collapse; font-size:9px;">
+                    <tr>
+                        <td colspan="7" style="text-align:center; font-weight:bold; padding:3px;">
+                            Días de formación - {{ \Carbon\Carbon::parse($acta->fecha)->translatedFormat('F') }}
+                        </td>
+                    </tr>
+                    <tr>
+                        @foreach (['L', 'M', 'M', 'J', 'V', 'S', 'D'] as $cabecera)
+                            <td
+                                style="width:22px; height:18px; text-align:center; font-weight:bold; border:1px solid #ccc; background:#f0f0f0;">
+                                {{ $cabecera }}
+                            </td>
+                        @endforeach
+                    </tr>
+
+                    @php
+                        $inicioMes = \Carbon\Carbon::parse($acta->fecha)->startOfMonth();
+                        $finMes = \Carbon\Carbon::parse($acta->fecha)->endOfMonth();
+                        // dayOfWeek: 0=dom,1=lun...6=sab → queremos empezar en lunes
+                        // Desplazamiento: lunes=1 → offset 0, martes=2→1 ... domingo=0→6
+                        $primerDia = $inicioMes->copy();
+                        $offsetInicio = $primerDia->dayOfWeek === 0 ? 6 : $primerDia->dayOfWeek - 1;
+                        $totalDias = $finMes->day;
+                        $celda = 0;
+                        $totalCeldas = $offsetInicio + $totalDias;
+                        $filas = ceil($totalCeldas / 7);
+                    @endphp
+
+                    @for ($fila = 0; $fila < $filas; $fila++)
+                        <tr>
+                            @for ($col = 0; $col < 7; $col++)
+                                @php
+                                    $numeroCelda = $fila * 7 + $col;
+                                    $dia = $numeroCelda - $offsetInicio + 1;
+                                    $esValido = $dia >= 1 && $dia <= $totalDias;
+                                    $coloresDia = $esValido ? $calendario[$dia]['colores'] ?? [] : [];
+                                    $hayClase = count($coloresDia) > 0;
+                                    // Si hay más de un color, fondo degradado; si hay uno, ese color; si no hay, blanco
+                                    if ($hayClase && count($coloresDia) === 1) {
+                                        $bgStyle = 'background-color:' . $coloresDia[0] . ';';
+                                        $textColor = 'color:#fff;';
+                                    } elseif ($hayClase) {
+                                        // Dividir celda con múltiples colores usando background linear-gradient
+                                        $step = round(100 / count($coloresDia));
+                                        $gradientParts = [];
+                                        foreach ($coloresDia as $i => $c) {
+                                            $from = $i * $step;
+                                            $to = ($i + 1) * $step;
+                                            $gradientParts[] = "$c {$from}% {$to}%";
+                                        }
+                                        $bgStyle =
+                                            'background: linear-gradient(90deg, ' .
+                                            implode(', ', $gradientParts) .
+                                            ');';
+                                        $textColor = 'color:#fff;';
+                                    } else {
+                                        $bgStyle = 'background-color:#fff;';
+                                        $textColor = 'color:#000;';
+                                    }
+                                @endphp
+                                <td
+                                    style="width:22px; height:20px; text-align:center; border:1px solid #ccc; font-weight:bold; {{ $bgStyle }} {{ $textColor }}">
+                                    {{ $esValido ? $dia : '' }}
+                                </td>
+                            @endfor
+                        </tr>
+                    @endfor
+                </table>
+
+                {{-- Leyenda de instructores con color --}}
+                <table style="margin: 6px auto; border-collapse: collapse; font-size:9px;">
+                    @foreach ($instructoresConColor as $inst)
+                        <tr>
+                            <td
+                                style="width:16px; height:14px; background-color:{{ $inst['color'] }}; border:1px solid #ccc;">
+                            </td>
+                            <td style="padding-left:5px;">{{ $inst['nombre'] }} {{ $inst['apellido'] }}</td>
+                        </tr>
+                    @endforeach
+                </table>
+
+                <p style="margin: 6px 0 2px 0;">
+                    <strong>Fase actual:</strong> Fase de ejecución.
+                </p>
+            </td>
+        </tr>
         {{-- Fila para instructores con sus competencias --}}
         <tr>
             <td colspan="3">
@@ -214,6 +306,30 @@
             </td>
         </tr>
     </table>
+
+    {{-- Nueva sección de Novedades de Estudiantes --}}
+    <table class="header-table" style="margin-top: 10px;">
+        <tr>
+            <td colspan="2" class="acta" style="text-align:center; font-size:11px;">
+                NOVEDADES DE ESTUDIANTES (Estados en Ficha)
+            </td>
+        </tr>
+        <tr>
+            <td class="gray" style="width:70%; text-align:center;">Nombre del Aprendiz</td>
+            <td class="gray" style="width:30%; text-align:center;">Estado Actual</td>
+        </tr>
+        @forelse ($novedades as $novedad)
+            <tr>
+                <td>{{ $novedad['nombre'] }}</td>
+                <td style="text-align:center;">{{ $novedad['estado'] }}</td>
+            </tr>
+        @empty
+            <tr>
+                <td colspan="2" style="text-align:center; color:#999;">No se encontraron registros de aprendices para esta ficha.</td>
+            </tr>
+        @endforelse
+    </table>
+
     <table class="header-table">
         <tr>
             <td colspan="5" class="acta" style="text-align:center; font-size:11px;">
