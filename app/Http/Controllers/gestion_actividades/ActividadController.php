@@ -21,6 +21,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class ActividadController extends Controller
@@ -593,10 +594,58 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
             }
 
-            $validated = $request->validate([
+            $validator = Validator::make($request->all(), [
                 'comentarioEstudiante' => 'nullable|string|max:3000',
-                'archivo' => 'nullable|file|mimes:pdf,doc,docx,png,jpg,jpeg,zip,rar|max:10240',
+                'archivo' => 'nullable|file|max:10240',
             ]);
+
+            $validator->after(function ($v) use ($request) {
+                if (! $request->hasFile('archivo')) {
+                    return;
+                }
+
+                $file = $request->file('archivo');
+                if (! $file) {
+                    return;
+                }
+
+                $allowedExtensions = ['pdf', 'doc', 'docx', 'png', 'jpg', 'jpeg', 'zip', 'rar', 'sql'];
+                $ext = strtolower((string) $file->getClientOriginalExtension());
+
+                if ($ext === '' || ! in_array($ext, $allowedExtensions, true)) {
+                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, PNG, JPG, JPEG, ZIP, RAR, SQL.');
+                    return;
+                }
+
+                if ($ext === 'sql') {
+                    $mime = strtolower((string) ($file->getMimeType() ?? ''));
+                    $allowedSqlMimes = [
+                        'text/plain',
+                        'text/x-sql',
+                        'application/sql',
+                        'application/x-sql',
+                        'application/octet-stream',
+                    ];
+
+                    // MIME vacío: permitido SOLO si la extensión ya es .sql
+                    if ($mime !== '' && ! in_array($mime, $allowedSqlMimes, true)) {
+                        $v->errors()->add('archivo', 'El archivo SQL no tiene un tipo válido.');
+                    }
+
+                    return;
+                }
+
+                // Para los demás tipos, mantenemos la validación segura por "mimes" (sin sql).
+                $secondary = Validator::make(['archivo' => $file], [
+                    'archivo' => 'mimes:pdf,doc,docx,png,jpg,jpeg,zip,rar',
+                ]);
+
+                if ($secondary->fails()) {
+                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, PNG, JPG, JPEG, ZIP, RAR, SQL.');
+                }
+            });
+
+            $validated = $validator->validate();
 
             $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
 

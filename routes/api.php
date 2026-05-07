@@ -1327,6 +1327,7 @@ Route::middleware('auth:api')->group(function () {
     //calificaciones por ficha, materia e instructor (evaluador)
     // Calificaciones de actividades (ambiente virtual)
     Route::get('actividades/{idActividad}/fichas/{idFicha}/aprendices', [CalificacionActividadController::class, 'listarPorActividad']);
+    Route::get('calificacion-actividad/{idCalificacionActividad}/descargar-archivo', [CalificacionActividadController::class, 'descargarArchivo']);
     Route::post('calificacion-actividad/calificar', [CalificacionActividadController::class, 'calificarIndividual']);
     Route::post('calificacion-actividad/ampliar', [CalificacionActividadController::class, 'ampliar']);
     Route::post('calificaciones/individual', [CalificacionActividadController::class, 'calificarIndividual']);

@@ -8,12 +8,65 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * E3: Calificación de actividades individual o por grupo con réplica.
  */
 class CalificacionActividadController extends Controller
 {
+    /**
+     * Descargar el archivo de entrega (forzar attachment).
+     * Autorización mínima: el instructor que asignó (ca.idPersona).
+     */
+    public function descargarArchivo(int $idCalificacionActividad)
+    {
+        try {
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json(['error' => 'Tabla no disponible'], 500);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona ?? null;
+            if (!$idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $row = DB::table('calificacionActividad')
+                ->where('id', $idCalificacionActividad)
+                ->select('id', 'archivo', 'idPersona')
+                ->first();
+
+            if (!$row) {
+                return response()->json(['error' => 'Entrega no encontrada'], 404);
+            }
+
+            if ((int) $row->idPersona !== (int) $idPersona) {
+                return response()->json(['error' => 'No tienes permiso para descargar este archivo'], 403);
+            }
+
+            $archivo = trim((string) ($row->archivo ?? ''));
+            if ($archivo === '') {
+                return response()->json(['error' => 'La entrega no tiene archivo adjunto'], 404);
+            }
+
+            if (!Storage::disk('public')->exists($archivo)) {
+                return response()->json(['error' => 'Archivo no encontrado'], 404);
+            }
+
+            $fileName = basename($archivo);
+            $absolutePath = Storage::disk('public')->path($archivo);
+            $mime = Storage::disk('public')->mimeType($archivo) ?: 'application/octet-stream';
+
+            return response()->download($absolutePath, $fileName, [
+                'Content-Type' => $mime,
+                'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
+                'Access-Control-Expose-Headers' => 'Content-Disposition',
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
     /**
      * E3-HU1: Calificar actividad de forma individual por aprendiz.
      * Actividades con evidencia: solo se permite calificar si el aprendiz adjuntó evidencia (archivo o comentario).
