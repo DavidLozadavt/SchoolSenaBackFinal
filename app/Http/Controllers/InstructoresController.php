@@ -868,14 +868,19 @@ class InstructoresController extends Controller
             $persona = $user?->persona;
 
             if (!$persona) {
-                return response()->json(['fichas' => [], 'message' => 'Sin persona asociada'], 200);
+                return response()->json([
+                    'fichas' => [],
+                    'message' => 'Sin persona asociada'
+                ], 200);
             }
 
-            // Contrato activo del instructor
             $contrato = $persona->contracts()->latest()->first();
 
             if (!$contrato) {
-                return response()->json(['fichas' => [], 'message' => 'Sin contrato activo'], 200);
+                return response()->json([
+                    'fichas' => [],
+                    'message' => 'Sin contrato activo'
+                ], 200);
             }
 
             $inicio = \Carbon\Carbon::now()->startOfMonth();
@@ -901,22 +906,41 @@ class InstructoresController extends Controller
                 $ficha = $grupo->first()->ficha;
                 $programa = $ficha?->asignacion?->programa;
 
-                // Resultados planos (un registro por horario)
                 $resultados = $grupo->map(function ($h) use ($inicio, $fin) {
                     $rap = $h->gradoMateria?->materia;
                     $competencia = $rap?->padre;
-                    $durSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
 
-                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                    $horaInicial = \Carbon\Carbon::parse($h->horaInicial);
+                    $horaFinal = \Carbon\Carbon::parse($h->horaFinal);
 
-                    $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                    $durSesion = round(
+                        max(0, $horaInicial->diffInMinutes($horaFinal)) / 60,
+                        2
+                    );
+
+                    $fechaInicialHorario = \Carbon\Carbon::parse($h->fechaInicial)->startOfDay();
+                    $fechaFinalHorario = \Carbon\Carbon::parse($h->fechaFinal)->endOfDay();
+
+                    $desde = $fechaInicialHorario->greaterThan($inicio)
+                        ? $fechaInicialHorario->copy()
+                        : $inicio->copy();
+
+                    $hasta = $fechaFinalHorario->lessThan($fin)
+                        ? $fechaFinalHorario->copy()
+                        : $fin->copy();
+                    $idDia = (int) $h->idDia;
+                    $diaSemanaCarbon = $idDia === 7 ? 0 : $idDia;
                     $cantSesiones = 0;
-                    $cursor = $desde->copy();
-                    while ($cursor->lte($hasta)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
-                            $cantSesiones++;
-                        $cursor->addDay();
+                    if ($idDia >= 1 && $idDia <= 7 && $desde->lte($hasta)) {
+                        $cursor = $desde->copy()->startOfDay();
+                        $limite = $hasta->copy()->endOfDay();
+
+                        while ($cursor->lte($limite)) {
+                            if ((int) $cursor->dayOfWeek === $diaSemanaCarbon) {
+                                $cantSesiones++;
+                            }
+                            $cursor->addDay();
+                        }
                     }
 
                     return [
@@ -927,13 +951,12 @@ class InstructoresController extends Controller
                         'horaFinal' => $h->horaFinal,
                         'fechaInicial' => $h->fechaInicial,
                         'fechaFinal' => $h->fechaFinal,
-                        'idDia' => $h->idDia,
+                        'idDia' => $idDia,
                         'duracionSesion' => $durSesion,
                         'cantidadSesiones' => $cantSesiones,
                         'duracionHoras' => round($durSesion * $cantSesiones, 2),
                     ];
                 })->values();
-
                 return [
                     'idFicha' => $ficha?->id,
                     'codigoFicha' => $ficha?->codigo,
@@ -942,10 +965,13 @@ class InstructoresController extends Controller
                     'resultados' => $resultados,
                 ];
             })->values();
-
-            return response()->json(['fichas' => $fichas]);
+            return response()->json([
+                'fichas' => $fichas
+            ]);
         } catch (\Throwable $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            return response()->json([
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
