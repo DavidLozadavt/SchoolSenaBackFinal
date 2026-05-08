@@ -305,31 +305,53 @@
                 </table>
             </td>
         </tr>
-    </table>
 
-    {{-- Nueva sección de Novedades de Estudiantes --}}
-    <table class="header-table" style="margin-top: 10px;">
+        {{-- Estudiantes EN FORMACION --}}
         <tr>
-            <td colspan="2" class="acta" style="text-align:center; font-size:11px;">
-                NOVEDADES DE ESTUDIANTES (Estados en Ficha)
+            <td colspan="3" class="acta" style="text-align:center; font-size:11px;">
+                APRENDICES EN FORMACIÓN ({{ $enFormacion->count() }})
             </td>
         </tr>
         <tr>
-            <td class="gray" style="width:70%; text-align:center;">Nombre del Aprendiz</td>
-            <td class="gray" style="width:30%; text-align:center;">Estado Actual</td>
+            <td class="gray" style="width:60%; text-align:center;">Nombre</td>
+            <td class="gray" style="width:20%; text-align:center;">Identificación</td>
+            <td class="gray" style="width:20%; text-align:center;">Estado</td>
         </tr>
-        @forelse ($novedades as $novedad)
+        @forelse ($enFormacion as $item)
             <tr>
-                <td>{{ $novedad['nombre'] }}</td>
-                <td style="text-align:center;">{{ $novedad['estado'] }}</td>
+                <td>{{ $item['nombre'] }}</td>
+                <td style="text-align:center;">{{ $item['identificacion'] }}</td>
+                <td style="text-align:center;">{{ $item['estado'] }}</td>
             </tr>
         @empty
             <tr>
-                <td colspan="2" style="text-align:center; color:#999;">No se encontraron registros de aprendices para esta
-                    ficha.</td>
+                <td colspan="3" style="text-align:center; color:#999;">Sin aprendices en formación</td>
             </tr>
         @endforelse
+
+        {{-- Aprendices con OTRAS NOVEDADES --}}
+        @if ($conNovedad->count() > 0)
+            <tr>
+                <td colspan="3" class="acta" style="text-align:center; font-size:11px; background:#fff3cd;">
+                    APRENDICES CON NOVEDAD ({{ $conNovedad->count() }})
+                </td>
+            </tr>
+            <tr>
+                <td class="gray" style="text-align:center;">Nombre</td>
+                <td class="gray" style="text-align:center;">Identificación</td>
+                <td class="gray" style="text-align:center;">Estado</td>
+            </tr>
+            @foreach ($conNovedad as $item)
+                <tr>
+                    <td>{{ $item['nombre'] }}</td>
+                    <td style="text-align:center;">{{ $item['identificacion'] }}</td>
+                    <td style="text-align:center; color:#c0392b; font-weight:bold;">{{ $item['estado'] }}</td>
+                </tr>
+            @endforeach
+        @endif
+
     </table>
+
 
     <table class="header-table">
         <tr>
@@ -345,13 +367,13 @@
                         <ul style="margin: 2px 0 2px 15px; padding-left: 15px;">
                     @endif
 
-                        <li class="left">
-                            {{ $conclusion->conclusion }}
-                        </li>
+                    <li class="left">
+                        {{ $conclusion->conclusion }}
+                    </li>
 
-                        @if ($loop->last)
-                            </ul>
-                        @endif
+                    @if ($loop->last)
+                        </ul>
+                    @endif
                 @empty
                     <p class="left" style="margin: 2px 0 2px 15px;">
                         Sin conclusiones registradas

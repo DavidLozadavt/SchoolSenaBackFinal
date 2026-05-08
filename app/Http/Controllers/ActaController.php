@@ -833,25 +833,31 @@ class ActaController extends Controller
             if ($acta->idFicha) {
                 $novedades = \App\Models\MatriculaAcademica::with(['matricula.person'])
                     ->where('idFicha', $acta->idFicha)
+                    ->whereNull('idGradoMateria') // registro general de la ficha, no por materia
                     ->get()
-                    ->groupBy('idMatricula')
-                    ->map(function ($maGroup) {
-                        $ma = $maGroup->first();
+                    ->map(function ($ma) {
                         $persona = $ma->matricula?->person;
                         $nombreCompleto = $persona
                             ? trim("{$persona->nombre1} {$persona->nombre2} {$persona->apellido1} {$persona->apellido2}")
                             : 'Estudiante no encontrado';
 
                         return [
-                            'nombre' => $nombreCompleto,
-                            'estado' => $ma->estado ?? 'SIN ESTADO',
+                            'nombre'          => $nombreCompleto,
+                            'estado'          => $ma->estado ?? 'SIN ESTADO',
+                            'identificacion'  => $persona?->identificacion ?? '—',
+                            'enFormacion'     => $ma->estado === 'EN FORMACION',
                         ];
                     })
-                    ->values()
-                    ->sortBy('nombre');
+                    ->sortBy('enFormacion') // Priorizar estados que NO sean 'EN FORMACION'
+                    ->unique('identificacion') // Agrupar/Unificar por alumno para evitar repetidos
+                    ->sortBy('nombre')
+                    ->values();
             }
 
-            $pdf = Pdf::loadView('pdf.actasInstructores', compact('acta', 'instructoresConColor', 'instructores', 'calendario', 'novedades'))
+            $enFormacion  = $novedades->where('enFormacion', true)->values();
+            $conNovedad   = $novedades->where('enFormacion', false)->values();
+
+            $pdf = Pdf::loadView('pdf.actasInstructores', compact('acta', 'instructoresConColor', 'instructores', 'calendario', 'enFormacion', 'conNovedad'))
                 ->setPaper('letter')
                 ->setOption('isPhpEnabled', true)
                 ->setOption('isHtml5ParserEnabled', true)
