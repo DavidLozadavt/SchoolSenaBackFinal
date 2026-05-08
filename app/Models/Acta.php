@@ -84,4 +84,9 @@ class Acta extends Model
     {
         return $this->hasMany(CompromisoActa::class, 'idacta');
     }
+
+    public function anexos()
+    {
+        return $this->hasMany(AnexoActa::class, 'idacta');
+    }
 }

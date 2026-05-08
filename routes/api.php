@@ -153,6 +153,7 @@ use App\Http\Controllers\gestion_pensum\InasistenciaController;
 use App\Http\Controllers\InstructoresController;
 use App\Http\Controllers\ProyectoFormativoController;
 use App\Http\Controllers\SancionesController;
+use App\Http\Controllers\AnexoActaController;
 
 /*
 |--------------------------------------------------------------------------
@@ -1553,5 +1554,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('actas/ficha/{idFicha}/instructores', [ActaController::class, 'getInstructoresByFicha']);
     Route::get('actas/generar-pdf/{idActa}', [ActaController::class, 'getActaInstructor']);
     Route::get('actas/ficha-data', [ActaController::class, 'getFichaData']);
+    Route::post('actas/anexos/upload', [AnexoActaController::class, 'upload']);
+    Route::delete('actas/anexos/{id}', [AnexoActaController::class, 'destroy']);
     Route::apiResource('actas', ActaController::class);
 });

@@ -25,7 +25,7 @@ class ActaController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $actas = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos'])->get();
+            $actas = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos', 'anexos'])->get();
             return response()->json($actas);
         } catch (\Exception $e) {
             Log::error('Error al listar actas: ' . $e->getMessage());
@@ -72,6 +72,10 @@ class ActaController extends Controller
             'compromisos.*.actividad' => 'required|string',
             'compromisos.*.fecha' => 'required|date',
             'compromisos.*.responsable' => 'required|string',
+            'anexos' => 'nullable|array',
+            'anexos.*.nombre' => 'required|string',
+            'anexos.*.archivo' => 'required|string',
+            'anexos.*.descripcion' => 'nullable|string',
         ]);
 
         DB::beginTransaction();
@@ -109,11 +113,17 @@ class ActaController extends Controller
                 }
             }
 
+            if (!empty($validated['anexos'])) {
+                foreach ($validated['anexos'] as $item) {
+                    $acta->anexos()->create($item);
+                }
+            }
+
             DB::commit();
 
             return response()->json([
                 'message' => 'Acta creada correctamente con todos sus detalles',
-                'data' => $acta->load(['agenda', 'objetivos', 'asistencias', 'conclusiones', 'compromisos'])
+                'data' => $acta->load(['agenda', 'objetivos', 'asistencias', 'conclusiones', 'compromisos', 'anexos'])
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -134,7 +144,7 @@ class ActaController extends Controller
     public function show($id): JsonResponse
     {
         try {
-            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos'])->findOrFail($id);
+            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos', 'anexos'])->findOrFail($id);
             return response()->json($acta);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -186,6 +196,10 @@ class ActaController extends Controller
             'compromisos.*.actividad' => 'required|string',
             'compromisos.*.fecha' => 'required|date',
             'compromisos.*.responsable' => 'required|string',
+            'anexos' => 'nullable|array',
+            'anexos.*.nombre' => 'required|string',
+            'anexos.*.archivo' => 'required|string',
+            'anexos.*.descripcion' => 'nullable|string',
         ]);
 
         DB::beginTransaction();
@@ -258,11 +272,19 @@ class ActaController extends Controller
                 }
             }
 
+            // Sincronizar Anexos
+            if (isset($validated['anexos'])) {
+                $acta->anexos()->delete();
+                foreach ($validated['anexos'] as $item) {
+                    $acta->anexos()->create($item);
+                }
+            }
+
             DB::commit();
 
             return response()->json([
                 'message' => 'Acta actualizada correctamente',
-                'data' => $acta->load(['agenda', 'objetivos', 'asistencias', 'conclusiones', 'compromisos'])
+                'data' => $acta->load(['agenda', 'objetivos', 'asistencias', 'conclusiones', 'compromisos', 'anexos'])
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             DB::rollBack();
@@ -315,7 +337,7 @@ class ActaController extends Controller
     {
         try {
             $actas = Acta::where('idContrato', $idContrato)
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos', 'anexos'])
                 ->get();
 
             return response()->json($actas);
@@ -413,7 +435,7 @@ class ActaController extends Controller
             $actas = Acta::whereHas('asistencias', function ($query) use ($idContrato) {
                 $query->where('idContrato', $idContrato);
             })
-                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos'])
+                ->with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.empresa', 'conclusiones', 'compromisos', 'anexos'])
                 ->get();
 
             return response()->json($actas);
@@ -684,7 +706,7 @@ class ActaController extends Controller
     public function getActaInstructor($id)
     {
         try {
-            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.centroFormacion', 'conclusiones', 'compromisos'])->findOrFail($id);
+            $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.centroFormacion', 'conclusiones', 'compromisos', 'anexos'])->findOrFail($id);
 
             // Calcular instructores con sus materias usando la fecha del acta como periodo
             $instructores = collect();

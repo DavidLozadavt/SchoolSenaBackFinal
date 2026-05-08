@@ -99,6 +99,13 @@
             overflow-wrap: break-word;
             white-space: normal;
         }
+
+        .anexo-img {
+            max-width: 100%;
+            max-height: 600px;
+            margin-top: 10px;
+            border: 1px solid #ccc;
+        }
     </style>
 </head>
 
@@ -414,55 +421,111 @@
             </tr>
         @endforelse
     </table>
-    <table class="header-table">
+    <table class="header-table" style="margin-top: 10px;">
+        {{-- Título sección asistentes --}}
+        <tr>
+            <td colspan="5" class="acta" style="text-align:center; font-size:11px;">
+                DE: ASISTENTES Y APROBACIÓN DECISIONES
+            </td>
+        </tr>
 
-        <table class="header-table">
-            {{-- Título sección asistentes --}}
+        {{-- Encabezados --}}
+        <tr>
+            <td class="gray" style="width:25%; text-align:center;">NOMBRE</td>
+            <td class="gray" style="width:20%; text-align:center;">DEPENDENCIA/<br>EMPRESA</td>
+            <td class="gray" style="width:12%; text-align:center;">APRUEBA<br>(SI/NO)</td>
+            <td class="gray" style="width:28%; text-align:center;">OBSERVACIÓN</td>
+            <td class="gray" style="width:15%; text-align:center;">FIRMA O<br>PARTICIPACIÓN<br>VIRTUAL</td>
+        </tr>
+
+        {{-- Filas de asistentes --}}
+        @forelse ($acta->asistencias as $asistencia)
+            @php
+                $persona = $asistencia->contrato?->persona;
+                $nombre = $persona
+                    ? trim(
+                        collect([$persona->nombre1, $persona->nombre2, $persona->apellido1, $persona->apellido2])
+                            ->filter()
+                            ->implode(' '),
+                    )
+                    : '—';
+            @endphp
             <tr>
-                <td colspan="5" class="acta" style="text-align:center; font-size:11px;">
-                    DE: ASISTENTES Y APROBACIÓN DECISIONES
+                <td style="height:35px;">{{ $nombre }}</td>
+                <td style="text-align:center;">{{ $asistencia->contrato?->centroFormacion?->nombre ?? '' }}</td>
+                <td style="text-align:center;">{{ $asistencia->aprueba ?? '' }}</td>
+                <td>{{ $asistencia->observacion ?? '' }}</td>
+                <td style="text-align: center;">
+                    @if ($persona?->firmaDigital && $asistencia->aprueba === 'SI')
+                        <img src="{{ storage_path('app/public/firmas/' . basename($persona->firmaDigital)) }}"
+                            style="height: 70px; max-width: 250px; object-fit: contain;" />
+                    @endif
                 </td>
             </tr>
-
-            {{-- Encabezados --}}
+        @empty
             <tr>
-                <td class="gray" style="width:25%; text-align:center;">NOMBRE</td>
-                <td class="gray" style="width:20%; text-align:center;">DEPENDENCIA/<br>EMPRESA</td>
-                <td class="gray" style="width:12%; text-align:center;">APRUEBA<br>(SI/NO)</td>
-                <td class="gray" style="width:28%; text-align:center;">OBSERVACIÓN</td>
-                <td class="gray" style="width:15%; text-align:center;">FIRMA O<br>PARTICIPACIÓN<br>VIRTUAL</td>
+                <td colspan="5" style="text-align:center; color:#999;">Sin asistentes registrados</td>
             </tr>
+        @endforelse
+        <tr>
+            <td colspan="5" style="padding: 10px; font-size: 9px; text-align: justify;">
+                De acuerdo con La Ley 1581 de 2012, Protección de Datos Personales, el Servicio Nacional de Aprendizaje
+                SENA, se compromete a garantizar la seguridad y protección de los datos personales que se encuentran
+                almacenados en este documento, y les dará el tratamiento correspondiente en cumplimiento de lo
+                establecido legalmente.
+            </td>
+        </tr>
+    </table>
 
-            {{-- Filas de asistentes --}}
-            @forelse ($acta->asistencias as $asistencia)
+    {{-- SECCIÓN DE ANEXOS --}}
+    <table class="header-table" style="margin-top: 10px;">
+        <tr>
+            <td colspan="2" class="acta" style="text-align:center; font-size:11px;">
+                ANEXOS
+            </td>
+        </tr>
+        <tr>
+            <td class="gray" style="width:40%; text-align:center;">NOMBRE DEL ARCHIVO</td>
+            <td class="gray" style="width:60%; text-align:center;">DESCRIPCIÓN</td>
+        </tr>
+        @forelse ($acta->anexos as $anexo)
+            <tr>
+                <td style="padding: 5px;">{{ $anexo->nombre }}</td>
+                <td style="padding: 5px;">{{ $anexo->descripcion ?? 'Sin descripción' }}</td>
+            </tr>
+        @empty
+            <tr>
+                <td colspan="2" style="text-align:center; color:#999; padding: 5px;">Sin anexos registrados</td>
+            </tr>
+        @endforelse
+    </table>
+
+    {{-- Renderizar imágenes anexas en páginas nuevas --}}
+    @foreach ($acta->anexos as $anexo)
+        @php
+            $extension = strtolower(pathinfo($anexo->archivo, PATHINFO_EXTENSION));
+            $esImagen = in_array($extension, ['png', 'jpg', 'jpeg']);
+        @endphp
+        @if ($esImagen)
+            <div class="page-break"></div>
+            <div class="center" style="margin-top: 20px;">
+                <h3 class="label">ANEXO: {{ $anexo->nombre }}</h3>
                 @php
-                    $persona = $asistencia->contrato?->persona;
-                    $nombre = $persona
-                        ? trim(
-                            collect([$persona->nombre1, $persona->nombre2, $persona->apellido1, $persona->apellido2])
-                                ->filter()
-                                ->implode(' '),
-                        )
-                        : '—';
+                    // El path guardado es 'public/documentos/anexos_acta/...'
+                    // Necesitamos el path absoluto para DomPDF
+                    $pathAbsoluto = storage_path('app/' . $anexo->archivo);
                 @endphp
-                <tr>
-                    <td style="height:35px;">{{ $nombre }}</td>
-                    <td style="text-align:center;">{{ $asistencia->contrato?->centroFormacion?->nombre ?? '' }}</td>
-                    <td style="text-align:center;">{{ $asistencia->aprueba ?? '' }}</td>
-                    <td>{{ $asistencia->observacion ?? '' }}</td>
-                    <td style="text-align: center;">
-                        @if ($persona?->firmaDigital && $asistencia->aprueba === 'SI')
-                            <img src="{{ storage_path('app/public/firmas/' . basename($persona->firmaDigital)) }}"
-                                style="height: 70px; max-width: 250px; object-fit: contain;" />
-                        @endif
-                    </td>
-                </tr>
-            @empty
-                <tr>
-                    <td colspan="5" style="text-align:center; color:#999;">Sin asistentes registrados</td>
-                </tr>
-            @endforelse
-        </table>
+                @if (file_exists($pathAbsoluto))
+                    <img src="{{ $pathAbsoluto }}" class="anexo-img">
+                @else
+                    <p style="color: red;">Archivo no encontrado en: {{ $pathAbsoluto }}</p>
+                @endif
+                @if ($anexo->descripcion)
+                    <p style="margin-top: 10px; font-style: italic;">{{ $anexo->descripcion }}</p>
+                @endif
+            </div>
+        @endif
+    @endforeach
 
         <div class="spacer"></div>
 
