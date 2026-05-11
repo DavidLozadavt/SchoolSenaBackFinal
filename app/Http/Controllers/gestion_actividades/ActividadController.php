@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\gestion_actividades;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Models\Actividad;
 use App\Models\TipoActividad;
 use App\Models\ClasificacionActividad;
@@ -214,7 +215,7 @@ class ActividadController extends Controller
                     'p_inst.rutaFoto as instructorPersonaRutaFoto',
                     DB::raw($colFicha ? ('ma.' . $colFicha . ' as idFichaContext') : 'NULL as idFichaContext'),
                 ])
-                ->orderBy('ca.id')
+                ->orderByDesc('ca.id')
                 ->offset(($page - 1) * $perPage)
                 ->limit($perPage)
                 ->get();
@@ -304,13 +305,14 @@ class ActividadController extends Controller
                 $instRuta = trim((string) ($row->instructorPersonaRutaFoto ?? ''));
                 $rutaFotoPersonaCruda = $autRuta !== '' ? trim((string) $row->autorRutaFoto) : ($instRuta !== '' ? trim((string) $row->instructorPersonaRutaFoto) : null);
 
-                // Estado calculado solo por: fecha inicio, fecha límite y hora actual
-                $now = now();
+                // Estado calculado solo por: fecha inicio, fecha límite y hora actual (`fechaFinal` = límite individual en calificacionActividad).
+                $tz = config('app.timezone');
+                $now = now($tz);
                 $fechaVencida = false;
                 $fechaInactiva = false;
                 if ($row->fechaFinal) {
                     try {
-                        $fechaFinal = \Carbon\Carbon::parse($row->fechaFinal);
+                        $fechaFinal = \Carbon\Carbon::parse((string) $row->fechaFinal, $tz);
                         $fechaVencida = $now->greaterThan($fechaFinal);
                     } catch (\Exception $e) {
                         $fechaVencida = false;
@@ -318,7 +320,7 @@ class ActividadController extends Controller
                 }
                 if ($row->fechaInicial) {
                     try {
-                        $fechaInicial = \Carbon\Carbon::parse($row->fechaInicial);
+                        $fechaInicial = \Carbon\Carbon::parse((string) $row->fechaInicial, $tz);
                         $fechaInactiva = $now->lessThan($fechaInicial);
                     } catch (\Exception $e) {
                         $fechaInactiva = false;
@@ -365,7 +367,14 @@ class ActividadController extends Controller
                     'puedeResponder' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO')
                         && !$fechaVencida
                         && !$fechaInactiva
-                        && in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true),
+                        && (
+                            in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true)
+                            || $estadoVisual === 'CORRECCION_SOLICITADA'
+                            || (
+                                strtolower(trim($row->tipoActividad ?? '')) !== 'cuestionario'
+                                && $estadoVisual === 'POR_EVALUAR'
+                            )
+                        ),
                     'estadoActividad' => $row->estadoActividad ?? 'ACTIVO',
                     'activa' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO') && !$fechaVencida && !$fechaInactiva,
                     'esGrupal' => !empty($row->idGrupo),
@@ -656,14 +665,15 @@ class ActividadController extends Controller
                 ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
                 ->where('ca.id', $idCalificacionActividad)
                 ->where('m.idPersona', $idPersona)
-                ->select('ca.id', 'ca.archivo', 'ca.fechaFinal', 'a.tipoActividad', 'e.estado as estadoActividad')
+                ->select('ca.id', 'ca.archivo', 'ca.fechaFinal', 'ca.ComentarioDocente', 'a.tipoActividad', 'e.estado as estadoActividad')
                 ->first();
 
             if (!$registro) {
                 return response()->json(['error' => 'Actividad no encontrada para este aprendiz'], 404);
             }
 
-            if ($registro->fechaFinal && now()->greaterThan(\Carbon\Carbon::parse($registro->fechaFinal))) {
+            $tz = config('app.timezone');
+            if ($registro->fechaFinal && now($tz)->greaterThan(\Carbon\Carbon::parse((string) $registro->fechaFinal, $tz))) {
                 return response()->json(['error' => 'El tiempo de entrega ha finalizado. No puedes entregar esta actividad.'], 422);
             }
 
@@ -698,11 +708,14 @@ class ActividadController extends Controller
                 $archivoPath = $file->storeAs($dir, $filename, 'public');
             }
 
+            $comDocLimpio = $this->comentarioDocenteSinMarcaCorreccion($registro->ComentarioDocente ?? null);
+
             DB::table('calificacionActividad')
                 ->where('id', $idCalificacionActividad)
                 ->update([
                     'ComentarioEstudiante' => $validated['comentarioEstudiante'] ?? null,
                     'archivo' => $archivoPath,
+                    'ComentarioDocente' => $comDocLimpio,
                     'updated_at' => now(),
                 ]);
 
@@ -748,7 +761,8 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Actividad no encontrada para este aprendiz'], 404);
             }
 
-            if ($ca->fechaFinal && now()->greaterThan(\Carbon\Carbon::parse($ca->fechaFinal))) {
+            $tzC = config('app.timezone');
+            if ($ca->fechaFinal && now($tzC)->greaterThan(\Carbon\Carbon::parse((string) $ca->fechaFinal, $tzC))) {
                 return response()->json(['error' => 'El tiempo de entrega ha finalizado. No puedes responder este cuestionario.'], 422);
             }
 
@@ -1802,15 +1816,38 @@ class ActividadController extends Controller
         }
     }
 
+    /**
+     * Al reenviar evidencia tras una solicitud de corrección, se elimina el prefijo interno pero se conserva el texto de observación.
+     */
+    private function comentarioDocenteSinMarcaCorreccion(?string $comentarioDocente): ?string
+    {
+        $t = trim((string) $comentarioDocente);
+        if ($t === '') {
+            return null;
+        }
+        $m = CalificacionActividadController::MARCA_SOLICITUD_CORRECCION;
+        if (! str_starts_with($t, $m)) {
+            return $comentarioDocente;
+        }
+        $rest = ltrim(substr($t, strlen($m)), "\r\n ");
+
+        return $rest !== '' ? $rest : null;
+    }
+
     private function resolverEstadoActividadAprendiz(object $row, bool $tieneRespuestasCuestionario = false): string
     {
         $calificacion = trim((string) ($row->calificacionNumerica ?? ''));
         $archivo = trim((string) ($row->archivoEntrega ?? $row->archivo ?? ''));
-        $fechaFinal = $row->fechaFinal ? \Carbon\Carbon::parse($row->fechaFinal) : null;
+        $tz = config('app.timezone');
+        $fechaFinal = $row->fechaFinal ? \Carbon\Carbon::parse((string) $row->fechaFinal, $tz) : null;
         $esCuestionario = (strtolower(trim($row->tipoActividad ?? '')) === 'cuestionario');
 
         if ($calificacion !== '') {
             return 'CALIFICADO';
+        }
+
+        if (CalificacionActividadController::comentarioIndicaCorreccionPendiente($row->ComentarioDocente ?? null)) {
+            return 'CORRECCION_SOLICITADA';
         }
 
         if ($esCuestionario) {
@@ -1823,7 +1860,7 @@ class ActividadController extends Controller
             }
         }
 
-        if ($fechaFinal && now()->greaterThan($fechaFinal)) {
+        if ($fechaFinal && now($tz)->greaterThan($fechaFinal)) {
             return 'SIN_ENTREGAR';
         }
 
