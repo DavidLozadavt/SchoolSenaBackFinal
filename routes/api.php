@@ -1329,6 +1329,8 @@ Route::middleware('auth:api')->group(function () {
     Route::get('actividades/{idActividad}/fichas/{idFicha}/aprendices', [CalificacionActividadController::class, 'listarPorActividad']);
     Route::get('calificacion-actividad/{idCalificacionActividad}/descargar-archivo', [CalificacionActividadController::class, 'descargarArchivo']);
     Route::post('calificacion-actividad/calificar', [CalificacionActividadController::class, 'calificarIndividual']);
+    Route::post('calificacion-actividad/solicitar-correccion', [CalificacionActividadController::class, 'solicitarCorreccion']);
+    Route::post('calificacion-actividad/ampliar-plazo-individual', [CalificacionActividadController::class, 'ampliarPlazoIndividual']);
     Route::post('calificacion-actividad/ampliar', [CalificacionActividadController::class, 'ampliar']);
     Route::post('calificaciones/individual', [CalificacionActividadController::class, 'calificarIndividual']);
     Route::post('calificaciones/por-grupo', [CalificacionActividadController::class, 'calificarPorGrupo']);
