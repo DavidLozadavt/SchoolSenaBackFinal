@@ -39,4 +39,8 @@ class MatriculaAcademica extends Model
     {
         return $this->hasMany(Asistencia::class, 'idMatriculaAcademica');
     }
+    public function novedades(): HasMany
+    {
+        return $this->hasMany(Novedad::class, 'idmatriculaAcademica');
+    }
 }

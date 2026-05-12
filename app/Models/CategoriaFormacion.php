@@ -13,4 +13,14 @@ class CategoriaFormacion extends Model
     {
         return $this->hasMany(SolicitudMateria::class, 'idCategoriaFormacion', 'id');
     }
+
+    public function contratos()
+    {
+        return $this->hasMany(Contract::class, 'idCategoriaFormacion', 'id');
+    }
+
+    public function materias()
+    {
+        return $this->hasMany(Materia::class, 'idCategoriaFormacion', 'id');
+    }
 }
