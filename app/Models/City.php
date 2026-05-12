@@ -12,13 +12,18 @@ class City extends Model
     protected $table = 'ciudad';
     public static $snakeAttributes = false;
 
-    public function departamento(){
+    public function departamento()
+    {
         return $this->belongsTo(Country::class, 'iddepartamento', 'id');
-    } 
-   
-    public function empresas()
-{
-    return $this->hasMany(Company::class, 'idCiudad');
-}
+    }
 
+    public function empresas()
+    {
+        return $this->hasMany(Company::class, 'idCiudad');
+    }
+
+    public function actas()
+    {
+        return $this->hasMany(Acta::class, 'idCiudad');
+    }
 }
