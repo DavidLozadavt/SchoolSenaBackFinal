@@ -538,8 +538,8 @@ Route::apiResource('tipo_contrato', TipoContratoController::class);
 Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
 
 //rutas para cargar los estudiantes y ejecutar su procedimiento almacenado
-// Route::post('/cargar-estudiantes', [EstudianteController::class, 'cargarEstudiantesDesdeExcel'])->middleware('auth:api');
-// Route::post('/procedimientoEstudiantes', [EstudianteController::class, 'ejecutarProcedimientoEstudiantes'])->middleware('auth:api');
+ Route::post('/cargar-estudiantes', [EstudianteController::class, 'cargarEstudiantesDesdeExcel'])->middleware('auth:api');
+ Route::post('/procedimientoEstudiantes', [EstudianteController::class, 'ejecutarProcedimientoEstudiantes'])->middleware('auth:api');
 
 
 //rutas para cargar los productos y ejecutar su procedimiento almacenado
