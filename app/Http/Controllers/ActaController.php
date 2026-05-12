@@ -14,6 +14,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+
 
 class ActaController extends Controller
 {
@@ -56,6 +58,7 @@ class ActaController extends Controller
             'idCiudad' => 'required|exists:ciudad,id',
             'idFicha' => 'required|exists:ficha,id',
             'idContrato' => 'required|exists:contrato,id',
+            'documento' => 'nullable|string',
             // Relaciones
             'agenda' => 'nullable|array',
             'agenda.*.punto' => 'required|string',
@@ -180,6 +183,7 @@ class ActaController extends Controller
             'idCiudad' => 'sometimes|required|exists:ciudad,id',
             'idFicha' => 'sometimes|required|exists:ficha,id',
             'idContrato' => 'sometimes|required|exists:contrato,id',
+            'documento' => 'nullable|string',
             // Relaciones
             'agenda' => 'nullable|array',
             'agenda.*.punto' => 'required|string',
@@ -892,6 +896,48 @@ class ActaController extends Controller
             Log::error('Error al generar PDF de acta: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Error al generar el PDF',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    public function uploadDocumento(Request $request, $id): JsonResponse
+    {
+        $request->validate([
+            'documento' => 'required|file|mimes:pdf|max:10240',
+        ]);
+
+        try {
+            $acta = Acta::findOrFail($id);
+
+            if ($request->hasFile('documento')) {
+                // Eliminar archivo anterior si existe
+                if ($acta->documento) {
+                    Storage::delete($acta->documento); // ya tiene prefijo "public/"
+                }
+
+                $file = $request->file('documento');
+                $nombreArchivo = uniqid('acta_doc_') . '_' . $file->getClientOriginalName();
+
+                // Guardar igual que AnexoActa: disco local con prefijo public/
+                $path = $file->storeAs('public/actas/documentos', $nombreArchivo);
+
+                $acta->update([
+                    'documento' => $path
+                ]);
+
+                return response()->json([
+                    'message' => 'Documento subido correctamente',
+                    'documento' => $path
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'No se proporcionó ningún archivo'
+            ], 400);
+        } catch (\Exception $e) {
+            Log::error('Error al subir documento de acta: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Error al subir el documento',
                 'error' => $e->getMessage()
             ], 500);
         }

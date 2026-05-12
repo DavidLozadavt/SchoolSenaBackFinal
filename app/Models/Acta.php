@@ -4,12 +4,15 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
 
 class Acta extends Model
 {
     use HasFactory;
 
     protected $table = 'acta';
+
+    protected $appends = ['rutaDocumentoUrl'];
 
     protected $fillable = [
         'nombre',
@@ -23,9 +26,10 @@ class Acta extends Model
         'idCiudad',
         'idFicha',
         'idContrato',
+        'documento',
     ];
 
-     /**
+    /**
      * The attributes that should be cast.
      *
      * @var array
@@ -42,6 +46,7 @@ class Acta extends Model
         'idCiudad' => 'integer',
         'idFicha' => 'integer',
         'idContrato' => 'integer',
+        'documento' => 'string',
     ];
 
     // Relaciones
@@ -88,5 +93,18 @@ class Acta extends Model
     public function anexos()
     {
         return $this->hasMany(AnexoActa::class, 'idacta');
+    }
+
+    public function getRutaDocumentoUrlAttribute()
+    {
+        if (!$this->documento) return null;
+
+        if (str_starts_with($this->documento, 'http')) {
+            return $this->documento;
+        }
+
+        // Igual que Company: url() detecta el dominio del servidor automáticamente
+        $storagePath = str_replace('public/', '/storage/', $this->documento);
+        return url($storagePath);
     }
 }

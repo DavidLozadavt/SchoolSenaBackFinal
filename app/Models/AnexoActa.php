@@ -25,14 +25,13 @@ class AnexoActa extends Model
     {
         if (!$this->archivo) return null;
 
-        // Si ya es una URL completa o ya tiene el prefijo /storage, lo retornamos tal cual
         if (str_starts_with($this->archivo, 'http') || str_starts_with($this->archivo, '/storage')) {
-            return $this->archivo;
+            return url($this->archivo);
         }
 
-        return Storage::url($this->archivo);
+        $storagePath = str_replace('public/', '/storage/', $this->archivo);
+        return url($storagePath);
     }
-
     public function acta()
     {
         return $this->belongsTo(Acta::class, 'idacta');

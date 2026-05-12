@@ -1556,5 +1556,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('actas/ficha-data', [ActaController::class, 'getFichaData']);
     Route::post('actas/anexos/upload', [AnexoActaController::class, 'upload']);
     Route::delete('actas/anexos/{id}', [AnexoActaController::class, 'destroy']);
+    Route::post('actas/{id}/documento', [ActaController::class, 'uploadDocumento']);
     Route::apiResource('actas', ActaController::class);
+
 });
