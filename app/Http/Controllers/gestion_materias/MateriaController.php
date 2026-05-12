@@ -704,9 +704,11 @@ class MateriaController extends Controller
                 }
             }
 
-            // Validar que NADA de lo que vamos a borrar tenga sesiones o datos reales
+            // Validar que NADA de lo que vamos a borrar tenga sesiones o datos reales en ESTA ficha
             $registrosAProcesar = GradoMateria::whereIn('id', $idsAProcesar)
-                ->with(['materia', 'horarioMateria.sesionMaterias'])
+                ->with(['materia', 'horarioMateria' => function ($query) use ($idFicha) {
+                    $query->where('idFicha', $idFicha);
+                }, 'horarioMateria.sesionMaterias'])
                 ->get();
 
             foreach ($registrosAProcesar as $registro) {
@@ -714,27 +716,38 @@ class MateriaController extends Controller
                     foreach ($registro->horarioMateria as $horario) {
                         if ($horario->sesionMaterias->isNotEmpty()) {
                             return response()->json([
-                                'message' => "No se puede eliminar porque la materia '{$registro->materia->nombreMateria}' ya tiene sesiones dadas.",
+                                'message' => "No se puede eliminar porque la materia '{$registro->materia->nombreMateria}' ya tiene sesiones dadas en este trimestre para esta ficha.",
                             ], 400);
                         }
                         if (!is_null($horario->idDia) || !is_null($horario->horaInicial) || !is_null($horario->idContrato)) {
                             return response()->json([
-                                'message' => "No se puede eliminar porque la materia '{$registro->materia->nombreMateria}' ya tiene horarios o instructor.",
+                                'message' => "No se puede eliminar porque la materia '{$registro->materia->nombreMateria}' ya tiene horarios o instructor asignado en esta ficha.",
                             ], 400);
                         }
                     }
                 }
             }
 
-            // eliminación de las materias y sus horarios vacíos
+            // eliminación de las materias y sus horarios vacíos para esta ficha
             foreach ($registrosAProcesar as $registro) {
-                $registro->horarioMateria()->delete();
-                $registro->delete();
+                $registro->horarioMateria()->where('idFicha', $idFicha)->delete();
+                
+                // Si la relación GradoMateria ya no tiene ningún horario (es decir, ninguna otra ficha lo usa), lo eliminamos
+                if ($registro->horarioMateria()->count() === 0) {
+                    $registro->delete();
+                }
             }
 
             // Solo eliminar el trimestre si eliminarTrimestre es true
             if ($eliminarTrimestre) {
-                GradoPrograma::where('id', $idGradoPrograma)->delete();
+                // Verificar si otras fichas tienen horarios en este trimestre antes de borrarlo completamente
+                $horariosEnTrimestre = HorarioMateria::whereHas('gradoMateria', function ($query) use ($idGradoPrograma) {
+                    $query->where('idGradoPrograma', $idGradoPrograma);
+                })->count();
+                
+                if ($horariosEnTrimestre === 0) {
+                    GradoPrograma::where('id', $idGradoPrograma)->delete();
+                }
             }
 
             DB::commit();

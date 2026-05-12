@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\gestion_actividades;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Models\Actividad;
 use App\Models\TipoActividad;
 use App\Models\ClasificacionActividad;
@@ -21,6 +22,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class ActividadController extends Controller
@@ -172,6 +174,7 @@ class ActividadController extends Controller
                 ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
                 ->leftJoin('area_conocimiento as ac', 'mat.idAreaConocimiento', '=', 'ac.id')
                 ->leftJoin('persona as p', 'a.idPersona', '=', 'p.id')
+                ->leftJoin('persona as p_inst', 'ca.idPersona', '=', 'p_inst.id')
                 ->where('m.idPersona', $idPersona);
 
             $total = (clone $query)->count();
@@ -209,9 +212,10 @@ class ActividadController extends Controller
                     'p.apellido1 as autorApellido1',
                     'p.apellido2 as autorApellido2',
                     'p.rutaFoto as autorRutaFoto',
+                    'p_inst.rutaFoto as instructorPersonaRutaFoto',
                     DB::raw($colFicha ? ('ma.' . $colFicha . ' as idFichaContext') : 'NULL as idFichaContext'),
                 ])
-                ->orderBy('ca.id')
+                ->orderByDesc('ca.id')
                 ->offset(($page - 1) * $perPage)
                 ->limit($perPage)
                 ->get();
@@ -297,13 +301,18 @@ class ActividadController extends Controller
                     $row->autorApellido2,
                 ])));
 
-                // Estado calculado solo por: fecha inicio, fecha límite y hora actual
-                $now = now();
+                $autRuta = trim((string) ($row->autorRutaFoto ?? ''));
+                $instRuta = trim((string) ($row->instructorPersonaRutaFoto ?? ''));
+                $rutaFotoPersonaCruda = $autRuta !== '' ? trim((string) $row->autorRutaFoto) : ($instRuta !== '' ? trim((string) $row->instructorPersonaRutaFoto) : null);
+
+                // Estado calculado solo por: fecha inicio, fecha límite y hora actual (`fechaFinal` = límite individual en calificacionActividad).
+                $tz = config('app.timezone');
+                $now = now($tz);
                 $fechaVencida = false;
                 $fechaInactiva = false;
                 if ($row->fechaFinal) {
                     try {
-                        $fechaFinal = \Carbon\Carbon::parse($row->fechaFinal);
+                        $fechaFinal = \Carbon\Carbon::parse((string) $row->fechaFinal, $tz);
                         $fechaVencida = $now->greaterThan($fechaFinal);
                     } catch (\Exception $e) {
                         $fechaVencida = false;
@@ -311,7 +320,7 @@ class ActividadController extends Controller
                 }
                 if ($row->fechaInicial) {
                     try {
-                        $fechaInicial = \Carbon\Carbon::parse($row->fechaInicial);
+                        $fechaInicial = \Carbon\Carbon::parse((string) $row->fechaInicial, $tz);
                         $fechaInactiva = $now->lessThan($fechaInicial);
                     } catch (\Exception $e) {
                         $fechaInactiva = false;
@@ -348,7 +357,8 @@ class ActividadController extends Controller
                     ],
                     'autor' => [
                         'nombreCompleto' => $autor ?: 'Sin asignar',
-                        'rutaFotoUrl' => $this->publicUrl($row->autorRutaFoto),
+                        /** Misma regla que App\Models\Person::getRutaFotoUrl (url()), no solo Storage::url sobre /storage/… */
+                        'rutaFotoUrl' => $this->resolvePersonaPublicFotoUrl($rutaFotoPersonaCruda),
                     ],
                     'materialesApoyo' => $materialesPorRap[((int) ($row->idFichaContext ?? 0)) . '_' . ((int) ($row->idMateria ?? 0))] ?? [],
                     'estadoVisual' => $estadoVisual,
@@ -357,7 +367,14 @@ class ActividadController extends Controller
                     'puedeResponder' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO')
                         && !$fechaVencida
                         && !$fechaInactiva
-                        && in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true),
+                        && (
+                            in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true)
+                            || $estadoVisual === 'CORRECCION_SOLICITADA'
+                            || (
+                                strtolower(trim($row->tipoActividad ?? '')) !== 'cuestionario'
+                                && $estadoVisual === 'POR_EVALUAR'
+                            )
+                        ),
                     'estadoActividad' => $row->estadoActividad ?? 'ACTIVO',
                     'activa' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO') && !$fechaVencida && !$fechaInactiva,
                     'esGrupal' => !empty($row->idGrupo),
@@ -586,10 +603,58 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
             }
 
-            $validated = $request->validate([
+            $validator = Validator::make($request->all(), [
                 'comentarioEstudiante' => 'nullable|string|max:3000',
-                'archivo' => 'nullable|file|mimes:pdf,doc,docx,png,jpg,jpeg,zip,rar|max:10240',
+                'archivo' => 'nullable|file|max:10240',
             ]);
+
+            $validator->after(function ($v) use ($request) {
+                if (! $request->hasFile('archivo')) {
+                    return;
+                }
+
+                $file = $request->file('archivo');
+                if (! $file) {
+                    return;
+                }
+
+                $allowedExtensions = ['pdf', 'doc', 'docx', 'png', 'jpg', 'jpeg', 'zip', 'rar', 'sql'];
+                $ext = strtolower((string) $file->getClientOriginalExtension());
+
+                if ($ext === '' || ! in_array($ext, $allowedExtensions, true)) {
+                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, PNG, JPG, JPEG, ZIP, RAR, SQL.');
+                    return;
+                }
+
+                if ($ext === 'sql') {
+                    $mime = strtolower((string) ($file->getMimeType() ?? ''));
+                    $allowedSqlMimes = [
+                        'text/plain',
+                        'text/x-sql',
+                        'application/sql',
+                        'application/x-sql',
+                        'application/octet-stream',
+                    ];
+
+                    // MIME vacío: permitido SOLO si la extensión ya es .sql
+                    if ($mime !== '' && ! in_array($mime, $allowedSqlMimes, true)) {
+                        $v->errors()->add('archivo', 'El archivo SQL no tiene un tipo válido.');
+                    }
+
+                    return;
+                }
+
+                // Para los demás tipos, mantenemos la validación segura por "mimes" (sin sql).
+                $secondary = Validator::make(['archivo' => $file], [
+                    'archivo' => 'mimes:pdf,doc,docx,png,jpg,jpeg,zip,rar',
+                ]);
+
+                if ($secondary->fails()) {
+                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, PNG, JPG, JPEG, ZIP, RAR, SQL.');
+                }
+            });
+
+            $validated = $validator->validate();
 
             $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
 
@@ -600,14 +665,15 @@ class ActividadController extends Controller
                 ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
                 ->where('ca.id', $idCalificacionActividad)
                 ->where('m.idPersona', $idPersona)
-                ->select('ca.id', 'ca.archivo', 'ca.fechaFinal', 'a.tipoActividad', 'e.estado as estadoActividad')
+                ->select('ca.id', 'ca.archivo', 'ca.fechaFinal', 'ca.ComentarioDocente', 'a.tipoActividad', 'e.estado as estadoActividad')
                 ->first();
 
             if (!$registro) {
                 return response()->json(['error' => 'Actividad no encontrada para este aprendiz'], 404);
             }
 
-            if ($registro->fechaFinal && now()->greaterThan(\Carbon\Carbon::parse($registro->fechaFinal))) {
+            $tz = config('app.timezone');
+            if ($registro->fechaFinal && now($tz)->greaterThan(\Carbon\Carbon::parse((string) $registro->fechaFinal, $tz))) {
                 return response()->json(['error' => 'El tiempo de entrega ha finalizado. No puedes entregar esta actividad.'], 422);
             }
 
@@ -642,11 +708,14 @@ class ActividadController extends Controller
                 $archivoPath = $file->storeAs($dir, $filename, 'public');
             }
 
+            $comDocLimpio = $this->comentarioDocenteSinMarcaCorreccion($registro->ComentarioDocente ?? null);
+
             DB::table('calificacionActividad')
                 ->where('id', $idCalificacionActividad)
                 ->update([
                     'ComentarioEstudiante' => $validated['comentarioEstudiante'] ?? null,
                     'archivo' => $archivoPath,
+                    'ComentarioDocente' => $comDocLimpio,
                     'updated_at' => now(),
                 ]);
 
@@ -692,7 +761,8 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Actividad no encontrada para este aprendiz'], 404);
             }
 
-            if ($ca->fechaFinal && now()->greaterThan(\Carbon\Carbon::parse($ca->fechaFinal))) {
+            $tzC = config('app.timezone');
+            if ($ca->fechaFinal && now($tzC)->greaterThan(\Carbon\Carbon::parse((string) $ca->fechaFinal, $tzC))) {
                 return response()->json(['error' => 'El tiempo de entrega ha finalizado. No puedes responder este cuestionario.'], 422);
             }
 
@@ -1746,15 +1816,38 @@ class ActividadController extends Controller
         }
     }
 
+    /**
+     * Al reenviar evidencia tras una solicitud de corrección, se elimina el prefijo interno pero se conserva el texto de observación.
+     */
+    private function comentarioDocenteSinMarcaCorreccion(?string $comentarioDocente): ?string
+    {
+        $t = trim((string) $comentarioDocente);
+        if ($t === '') {
+            return null;
+        }
+        $m = CalificacionActividadController::MARCA_SOLICITUD_CORRECCION;
+        if (! str_starts_with($t, $m)) {
+            return $comentarioDocente;
+        }
+        $rest = ltrim(substr($t, strlen($m)), "\r\n ");
+
+        return $rest !== '' ? $rest : null;
+    }
+
     private function resolverEstadoActividadAprendiz(object $row, bool $tieneRespuestasCuestionario = false): string
     {
         $calificacion = trim((string) ($row->calificacionNumerica ?? ''));
         $archivo = trim((string) ($row->archivoEntrega ?? $row->archivo ?? ''));
-        $fechaFinal = $row->fechaFinal ? \Carbon\Carbon::parse($row->fechaFinal) : null;
+        $tz = config('app.timezone');
+        $fechaFinal = $row->fechaFinal ? \Carbon\Carbon::parse((string) $row->fechaFinal, $tz) : null;
         $esCuestionario = (strtolower(trim($row->tipoActividad ?? '')) === 'cuestionario');
 
         if ($calificacion !== '') {
             return 'CALIFICADO';
+        }
+
+        if (CalificacionActividadController::comentarioIndicaCorreccionPendiente($row->ComentarioDocente ?? null)) {
+            return 'CORRECCION_SOLICITADA';
         }
 
         if ($esCuestionario) {
@@ -1767,7 +1860,7 @@ class ActividadController extends Controller
             }
         }
 
-        if ($fechaFinal && now()->greaterThan($fechaFinal)) {
+        if ($fechaFinal && now($tz)->greaterThan($fechaFinal)) {
             return 'SIN_ENTREGAR';
         }
 
@@ -1785,6 +1878,27 @@ class ActividadController extends Controller
         }
 
         return Storage::disk('public')->url($path);
+    }
+
+    /**
+     * Foto `persona.rutaFoto`: en BD suele guardarse como "/storage/persona/..."; Person usa {@see url()},
+     * mientras que {@see publicUrl()} con Storage puede generar URL incorrecta o duplicar prefijos.
+     */
+    private function resolvePersonaPublicFotoUrl(?string $path): ?string
+    {
+        if ($path === null) {
+            return null;
+        }
+        $path = trim($path);
+        if ($path === '' || strcasecmp($path, 'null') === 0) {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        return url($path);
     }
 
     /**

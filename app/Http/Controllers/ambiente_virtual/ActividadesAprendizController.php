@@ -8,6 +8,7 @@ use App\Util\KeyUtil;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
 
 /**
  * Actividades asignadas al aprendiz - vista del estudiante.
@@ -158,11 +159,57 @@ class ActividadesAprendizController extends Controller
     public function entregar(\Illuminate\Http\Request $request): JsonResponse
     {
         try {
-            $validated = $request->validate([
+            $validator = Validator::make($request->all(), [
                 'idCalificacionActividad' => 'required|integer',
-                'archivo' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+                'archivo' => 'nullable|file|max:10240',
                 'ComentarioEstudiante' => 'nullable|string|max:2000',
             ]);
+
+            $validator->after(function ($v) use ($request) {
+                if (! $request->hasFile('archivo')) {
+                    return;
+                }
+
+                $file = $request->file('archivo');
+                if (! $file) {
+                    return;
+                }
+
+                $allowedExtensions = ['pdf', 'doc', 'docx', 'zip', 'rar', 'sql'];
+                $ext = strtolower((string) $file->getClientOriginalExtension());
+
+                if ($ext === '' || ! in_array($ext, $allowedExtensions, true)) {
+                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, ZIP, RAR, SQL.');
+                    return;
+                }
+
+                if ($ext === 'sql') {
+                    $mime = strtolower((string) ($file->getMimeType() ?? ''));
+                    $allowedSqlMimes = [
+                        'text/plain',
+                        'text/x-sql',
+                        'application/sql',
+                        'application/x-sql',
+                        'application/octet-stream',
+                    ];
+
+                    if ($mime !== '' && ! in_array($mime, $allowedSqlMimes, true)) {
+                        $v->errors()->add('archivo', 'El archivo SQL no tiene un tipo válido.');
+                    }
+
+                    return;
+                }
+
+                $secondary = Validator::make(['archivo' => $file], [
+                    'archivo' => 'mimes:pdf,doc,docx,zip,rar',
+                ]);
+
+                if ($secondary->fails()) {
+                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, ZIP, RAR, SQL.');
+                }
+            });
+
+            $validated = $validator->validate();
 
             $user = KeyUtil::user();
             $idPersona = $user?->idpersona ?? null;

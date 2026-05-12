@@ -579,6 +579,9 @@ class AsignacionActividadController extends Controller
         $matriculasMap = DB::table('matricula')->whereIn('id', $idsMatricula)->get(['id', 'idPersona'])->keyBy('id');
         $idsPersona = $matriculasMap->pluck('idPersona')->unique()->filter()->values();
         $personas = DB::table('persona')->whereIn('id', $idsPersona)->get()->keyBy('id');
+        $emailsPorPersona = Schema::hasTable('usuario')
+            ? DB::table('usuario')->whereIn('idpersona', $idsPersona->all())->pluck('email', 'idpersona')
+            : collect();
 
         $vistos = [];
         $result = [];
@@ -588,11 +591,22 @@ class AsignacionActividadController extends Controller
             if ($idPersona === null || isset($vistos[$idPersona])) continue;
             $vistos[$idPersona] = true;
             $p = $personas[$idPersona] ?? null;
+            $nombreCompleto = $p
+                ? trim(implode(' ', array_filter([
+                    $p->nombre1 ?? null,
+                    $p->nombre2 ?? null,
+                    $p->apellido1 ?? null,
+                    $p->apellido2 ?? null,
+                ])))
+                : '';
             $result[] = [
                 'id' => $m->idMatricula,
                 'idMatriculaAcademica' => $m->id,
                 'idMateria' => $m->idMateria,
                 'nombre' => $p ? trim(($p->nombre1 ?? '') . ' ' . ($p->apellido1 ?? '')) : 'N/A',
+                'nombreCompleto' => $nombreCompleto !== '' ? $nombreCompleto : null,
+                'identificacion' => $p ? (string) ($p->identificacion ?? '') : null,
+                'email' => $emailsPorPersona[(int) $idPersona] ?? $emailsPorPersona[(string) $idPersona] ?? null,
                 'rutaFoto' => $p->rutaFoto ?? null,
             ];
         }
