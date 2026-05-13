@@ -8,30 +8,37 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class JustificacionInasistencia extends Model
 {
-  use HasFactory;
+    use HasFactory;
 
-  protected $table = 'justificacionInasistencia';
+    protected $table = 'justificacionInasistencia';
 
-  protected $guarded = ['id'];
+    protected $fillable = [
+        'idAsistencia',
+        'idExcusa',
+        'idMatriculaAcademica',
+        'estado',
+        'idPersona',
+        'observacion',
+        'archivoSoporte',
+    ];
 
-  public function asistencia(): BelongsTo
-  {
-    return $this->belongsTo(Asistencia::class, 'idAsistencia', 'id');
-  }
+    public function asistencia(): BelongsTo
+    {
+        return $this->belongsTo(Asistencia::class, 'idAsistencia', 'id');
+    }
 
-  public function excusa(): BelongsTo
-  {
-    return $this->belongsTo(Excusa::class, 'idExcusa', 'id');
-  }
+    public function excusa(): BelongsTo
+    {
+        return $this->belongsTo(Excusa::class, 'idExcusa', 'id');
+    }
 
-  public function matriculaAcademica(): BelongsTo
-  {
-    return $this->belongsTo(MatriculaAcademica::class, 'idMatriculaAcademica', 'id');
-  }
+    public function matriculaAcademica(): BelongsTo
+    {
+        return $this->belongsTo(MatriculaAcademica::class, 'idMatriculaAcademica', 'id');
+    }
 
-  public function persona(): BelongsTo
-  {
-    return $this->belongsTo(Person::class, 'idPersona', 'id');
-  } 
-
+    public function persona(): BelongsTo
+    {
+        return $this->belongsTo(Person::class, 'idPersona', 'id');
+    }
 }

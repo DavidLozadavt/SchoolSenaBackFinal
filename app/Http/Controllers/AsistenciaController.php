@@ -141,7 +141,6 @@ class AsistenciaController extends Controller
     public function getEstadisticasPorEstudiante(Request $request): JsonResponse
     {
         try {
-
             $idMatricula = $request->input('idMatricula');
 
             if (!$idMatricula) {
@@ -154,6 +153,7 @@ class AsistenciaController extends Controller
                 'matricula.person',
                 'materia',
                 'asistencias.sesionMateria',
+                'asistencias.justificacion.excusa',
             ])
                 ->where('idMatricula', $idMatricula)
                 ->get();
@@ -164,37 +164,94 @@ class AsistenciaController extends Controller
                 ], 404);
             }
 
-            $aprendiz = $matriculas->first()->matricula->person;
+            $aprendiz = $matriculas->first()->matricula->person ?? null;
 
             $countAsistencia = 0;
             $countFaltas = 0;
             $countJustificadas = 0;
             $materiaStats = [];
-
-            // Eager load the justificacion relation to avoid N+1 queries
-            $matriculas->load('asistencias.justificacion');
+            $justificacionesDetalle = [];
 
             foreach ($matriculas as $matricula) {
+                $asistidas = $matricula->asistencias->filter(function ($asistencia) {
+                    return $asistencia->asistio === true
+                        || $asistencia->asistio === 1
+                        || $asistencia->asistio === '1';
+                });
 
-                // Cálculo basado exclusivamente en la tabla asistencia
-                $asistidas = $matricula->asistencias->where('asistio', true)->count();
-                $faltas = $matricula->asistencias->where('asistio', false)->count();
+                $faltasCollection = $matricula->asistencias->filter(function ($asistencia) {
+                    return $asistencia->asistio === false
+                        || $asistencia->asistio === 0
+                        || $asistencia->asistio === '0';
+                });
 
-                // Identificar justificadas dentro de las inasistencias reales
-                $justificadas = $matricula->asistencias->where('asistio', false)->filter(function ($asistencia) {
-                    return $asistencia->justificacion && $asistencia->justificacion->estado === 'APROBADO';
-                })->count();
+                $justificadasCollection = $faltasCollection->filter(function ($asistencia) {
+                    return $asistencia->justificacion
+                        && in_array($asistencia->justificacion->estado, [
+                            'APROBADO',
+                            'JUSTIFICADO',
+                            'ACEPTADO'
+                        ]);
+                });
 
-                $countAsistencia += $asistidas;
-                // Para el reporte de estadísticas por estudiante, restamos las justificadas de las faltas
-                $faltasNetas = max(0, $faltas - $justificadas);
+                $asistidasCount = $asistidas->count();
+                $faltasCount = $faltasCollection->count();
+                $justificadasCount = $justificadasCollection->count();
+
+                $faltasNetas = max(0, $faltasCount - $justificadasCount);
+
+                $countAsistencia += $asistidasCount;
                 $countFaltas += $faltasNetas;
-                $countJustificadas += $justificadas;
+                $countJustificadas += $justificadasCount;
+
+                foreach ($justificadasCollection as $asistencia) {
+                    $justificacion = $asistencia->justificacion;
+                    $excusa = $justificacion?->excusa;
+
+                    $archivoPath = $justificacion?->archivoSoporte ?: ($excusa?->urlDocumento ?? null);
+                    $archivoUrl = null;
+
+                    if ($archivoPath) {
+                        $archivoPath = trim($archivoPath);
+
+                        if (
+                            str_starts_with($archivoPath, 'http://') ||
+                            str_starts_with($archivoPath, 'https://')
+                        ) {
+                            $archivoUrl = $archivoPath;
+                        } elseif ($justificacion?->id) {
+                            $archivoUrl = route('justificaciones.soporte', $justificacion->id);
+                        }
+                    }
+
+                    $justificacionesDetalle[] = [
+                        'idJustificacion' => $justificacion?->id,
+                        'idAsistencia' => $asistencia->id,
+                        'idMateria' => $matricula->idMateria,
+                        'nombreMateria' => optional($matricula->materia)->nombreMateria ?? 'SIN MATERIA',
+                        'fecha' => $asistencia->sesionMateria?->fechaSesion,
+                        'numeroSesion' => $asistencia->sesionMateria?->numeroSesion,
+                        'estado' => $justificacion?->estado,
+                        'observacion' => $justificacion?->observacion,
+                        'archivoSoporte' => $archivoPath,
+                        'archivoSoporteUrl' => $archivoUrl,
+                        'excusa' => [
+                            'id' => $excusa?->id,
+                            'tipoExcusa' => $excusa?->tipoExcusa,
+                            'observacion' => $excusa?->observacion,
+                            'fechaInicialJustificacion' => $excusa?->fechaInicialJustificacion,
+                            'fechaFinalJustificacion' => $excusa?->fechaFinalJustificacion,
+                        ],
+                    ];
+                }
 
                 $materiaStats[] = [
+                    'idMateria' => $matricula->idMateria,
                     'nombreMateria' => optional($matricula->materia)->nombreMateria ?? 'SIN MATERIA',
-                    'faltas' => $faltas,
-                    'retrasos' => 0
+                    'faltas' => $faltasNetas,
+                    'faltasTotales' => $faltasCount,
+                    'justificadas' => $justificadasCount,
+                    'retrasos' => 0,
                 ];
             }
 
@@ -204,11 +261,11 @@ class AsistenciaController extends Controller
                 'countAsistenciasJustificadas' => $countJustificadas,
                 'countTotalAsistencias' => $countAsistencia + $countFaltas + $countJustificadas,
                 'aprendiz' => $aprendiz,
-                'materiaStats' => $materiaStats
+                'materiaStats' => $materiaStats,
+                'justificaciones' => $justificacionesDetalle,
             ]);
 
         } catch (\Exception $e) {
-
             return response()->json([
                 'message' => 'Error general',
                 'error' => $e->getMessage()
@@ -232,165 +289,286 @@ class AsistenciaController extends Controller
     }
     public function updateAssistance(Request $request): JsonResponse
     {
+        try {
+            $validatedData = $request->validate([
+                'idMateria' => 'nullable|integer',
+                'idMatricula' => 'required|integer',
+                'idHorarioMateria' => 'nullable|integer|exists:horarioMateria,id',
+                'idMatriculaAcademica' => 'nullable|integer',
 
-        $validatedData = $request->validate([
-            'idMateria' => 'nullable|integer',
-            'idMatricula' => 'required|integer',
-            'idHorarioMateria' => 'nullable|integer|exists:horarioMateria,id',
-            'idMatriculaAcademica' => 'nullable|integer'
-        ]);
+                // Se dejan sin boolean porque desde FormData llegan como texto: "true", "false", "1" o "0"
+                'asistio' => 'required',
+                'justificada' => 'nullable',
 
-        $idMatricula = $validatedData['idMatricula'];
-        $requestMateriaId = $validatedData['idMateria'] ?? null;
-        $idHorarioMateria = $validatedData['idHorarioMateria'] ?? null;
-        $idMatriculaAcademica = $validatedData['idMatriculaAcademica'] ?? $request->input('idMatriculaAcademica');
+                'tipoExcusa' => 'nullable|string|max:255',
+                'observacionExcusa' => 'nullable|string',
+                'archivoSoporte' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            ]);
 
-        $matriculaAcademica = null;
+            $idMatricula = $validatedData['idMatricula'];
+            $requestMateriaId = $validatedData['idMateria'] ?? null;
+            $idHorarioMateria = $validatedData['idHorarioMateria'] ?? null;
+            $idMatriculaAcademica = $validatedData['idMatriculaAcademica'] ?? $request->input('idMatriculaAcademica');
 
-        // 1. Buscar matrícula académica
-        if ($idMatriculaAcademica) {
-            $matriculaAcademica = MatriculaAcademica::with('ficha')->find($idMatriculaAcademica);
-        }
+            $asistio = $request->boolean('asistio');
+            $esJustificada = $request->boolean('justificada');
 
-        if (!$matriculaAcademica) {
-            $matriculaAcademica = MatriculaAcademica::with('ficha')
-                ->where('idMatricula', $idMatricula)
-                ->when($requestMateriaId, function ($q) use ($requestMateriaId) {
-                    return $q->where('idMateria', $requestMateriaId);
-                })
-                ->first();
-        }
+            $matriculaAcademica = null;
 
-        if (!$matriculaAcademica) {
-            return response()->json(['message' => 'Matrícula académica no encontrada'], 404);
-        }
+            // 1. Buscar matrícula académica
+            if ($idMatriculaAcademica) {
+                $matriculaAcademica = MatriculaAcademica::with('ficha')->find($idMatriculaAcademica);
+            }
 
-        // Resolver IDs necesarios
-        $idMateria = $requestMateriaId ?? $matriculaAcademica->idMateria;
-        $idFicha = $matriculaAcademica->idFicha;
+            if (!$matriculaAcademica) {
+                $matriculaAcademica = MatriculaAcademica::with('ficha')
+                    ->where('idMatricula', $idMatricula)
+                    ->when($requestMateriaId, function ($q) use ($requestMateriaId) {
+                        return $q->where('idMateria', $requestMateriaId);
+                    })
+                    ->first();
+            }
 
-        $hoy = now();
-        $dbIdDia = ($hoy->dayOfWeek == 0) ? 7 : $hoy->dayOfWeek;
+            if (!$matriculaAcademica) {
+                return response()->json([
+                    'message' => 'Matrícula académica no encontrada'
+                ], 404);
+            }
 
-        // ── Buscar el HorarioMateria ──────────────────────────────────────────
-        if ($idHorarioMateria) {
-            $horarioMateria = \App\Models\HorarioMateria::find($idHorarioMateria);
-        } else {
-            $horarioMateria = \App\Models\HorarioMateria::where('idFicha', $idFicha)
-                ->whereHas('gradoMateria', function ($query) use ($idMateria) {
-                    $query->where('idMateria', $idMateria);
-                })
-                ->where('idDia', $dbIdDia)
-                ->first();
+            // Resolver IDs necesarios
+            $idMateria = $requestMateriaId ?? $matriculaAcademica->idMateria;
+            $idFicha = $matriculaAcademica->idFicha;
 
-            if (!$horarioMateria) {
+            $hoy = now();
+            $dbIdDia = ($hoy->dayOfWeek == 0) ? 7 : $hoy->dayOfWeek;
+
+            // ── Buscar el HorarioMateria ──────────────────────────────────────────
+            if ($idHorarioMateria) {
+                $horarioMateria = \App\Models\HorarioMateria::find($idHorarioMateria);
+            } else {
                 $horarioMateria = \App\Models\HorarioMateria::where('idFicha', $idFicha)
                     ->whereHas('gradoMateria', function ($query) use ($idMateria) {
                         $query->where('idMateria', $idMateria);
                     })
+                    ->where('idDia', $dbIdDia)
                     ->first();
-            }
-        }
 
-        if (!$horarioMateria) {
-            return response()->json(['message' => 'No se encontró un horario asignado'], 404);
-        }
-
-        // ── Buscar / crear SesionMateria ──────────────────────────────────────
-        $sesionMateria = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
-            ->whereDate('fechaSesion', today())
-            ->first();
-
-        if (!$sesionMateria && $horarioMateria->idDia == $dbIdDia) {
-            $lastSession = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
-                ->max('numeroSesion') ?? 0;
-
-            $sesionMateria = \App\Models\SesionMateria::create([
-                'numeroSesion' => $lastSession + 1,
-                'idHorarioMateria' => $horarioMateria->id,
-                'fechaSesion' => today()->toDateString(),
-            ]);
-        }
-
-        if (!$sesionMateria) {
-            $sesionMateria = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
-                ->orderBy('fechaSesion', 'desc')
-                ->first();
-        }
-
-        if (!$sesionMateria) {
-            return response()->json(['message' => 'No hay sesiones programadas'], 404);
-        }
-
-        // ── Crear o actualizar la asistencia del estudiante ───────────────────
-        $asistencia = Asistencia::where('idMatriculaAcademica', $matriculaAcademica->id)
-            ->where('idSesionMateria', $sesionMateria->id)
-            ->first();
-
-        if (!$asistencia) {
-            $asistencia = Asistencia::create([
-                'idMatriculaAcademica' => $matriculaAcademica->id,
-                'idSesionMateria' => $sesionMateria->id,
-                'horaLLegada' => now(),
-                'asistio' => $request['asistio'] ?? 0
-            ]);
-        } else {
-            $asistencia->update([
-                'asistio' => $request['asistio'] ?? 0
-            ]);
-        }
-
-        // ─── AUTO-REGISTRO DE INASISTENCIAS PARA EL RESTO DEL GRUPO ───────────
-        try {
-            // Obtenemos todos los demás alumnos de la MISMA materia y ficha
-            $todasLasMatriculas = MatriculaAcademica::where('idFicha', $idFicha)
-                ->where('idMateria', $idMateria)
-                ->where('id', '!=', $matriculaAcademica->id)
-                ->get();
-
-            foreach ($todasLasMatriculas as $otraMatricula) {
-                $existe = Asistencia::where('idMatriculaAcademica', $otraMatricula->id)
-                    ->where('idSesionMateria', $sesionMateria->id)
-                    ->exists();
-
-                if (!$existe) {
-                    Asistencia::create([
-                        'idMatriculaAcademica' => $otraMatricula->id,
-                        'idSesionMateria' => $sesionMateria->id,
-                        'horaLLegada' => null,
-                        'asistio' => false,
-                    ]);
+                if (!$horarioMateria) {
+                    $horarioMateria = \App\Models\HorarioMateria::where('idFicha', $idFicha)
+                        ->whereHas('gradoMateria', function ($query) use ($idMateria) {
+                            $query->where('idMateria', $idMateria);
+                        })
+                        ->first();
                 }
             }
+
+            if (!$horarioMateria) {
+                return response()->json([
+                    'message' => 'No se encontró un horario asignado'
+                ], 404);
+            }
+
+            // ── Buscar / crear SesionMateria ──────────────────────────────────────
+            $sesionMateria = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
+                ->whereDate('fechaSesion', today())
+                ->first();
+
+            if (!$sesionMateria && $horarioMateria->idDia == $dbIdDia) {
+                $lastSession = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
+                    ->max('numeroSesion') ?? 0;
+
+                $sesionMateria = \App\Models\SesionMateria::create([
+                    'numeroSesion' => $lastSession + 1,
+                    'idHorarioMateria' => $horarioMateria->id,
+                    'fechaSesion' => today()->toDateString(),
+                ]);
+            }
+
+            if (!$sesionMateria) {
+                $sesionMateria = \App\Models\SesionMateria::where('idHorarioMateria', $horarioMateria->id)
+                    ->orderBy('fechaSesion', 'desc')
+                    ->first();
+            }
+
+            if (!$sesionMateria) {
+                return response()->json([
+                    'message' => 'No hay sesiones programadas'
+                ], 404);
+            }
+
+            // ── Crear o actualizar la asistencia del estudiante ───────────────────
+            $asistencia = Asistencia::where('idMatriculaAcademica', $matriculaAcademica->id)
+                ->where('idSesionMateria', $sesionMateria->id)
+                ->first();
+
+            if (!$asistencia) {
+                $asistencia = Asistencia::create([
+                    'idMatriculaAcademica' => $matriculaAcademica->id,
+                    'idSesionMateria' => $sesionMateria->id,
+                    'horaLLegada' => $asistio ? now() : null,
+                    'asistio' => $asistio,
+                ]);
+            } else {
+                $asistencia->update([
+                    'horaLLegada' => $asistio ? now() : null,
+                    'asistio' => $asistio,
+                ]);
+            }
+
+            // ─── AUTO-REGISTRO DE INASISTENCIAS PARA EL RESTO DEL GRUPO ───────────
+            try {
+                $todasLasMatriculas = MatriculaAcademica::where('idFicha', $idFicha)
+                    ->where('idMateria', $idMateria)
+                    ->where('id', '!=', $matriculaAcademica->id)
+                    ->get();
+
+                foreach ($todasLasMatriculas as $otraMatricula) {
+                    $existe = Asistencia::where('idMatriculaAcademica', $otraMatricula->id)
+                        ->where('idSesionMateria', $sesionMateria->id)
+                        ->exists();
+
+                    if (!$existe) {
+                        Asistencia::create([
+                            'idMatriculaAcademica' => $otraMatricula->id,
+                            'idSesionMateria' => $sesionMateria->id,
+                            'horaLLegada' => null,
+                            'asistio' => false,
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error('Error en auto-registro: ' . $e->getMessage());
+            }
+
+            // ── Justificación de inasistencia ─────────────────────────────────────
+            if ($esJustificada && !$asistio) {
+                $archivoSoporte = null;
+
+                if ($request->hasFile('archivoSoporte')) {
+                    $archivoSoporte = $request->file('archivoSoporte')
+                        ->store('justificaciones_inasistencia', 'public');
+                }
+
+                $justificacionExistente = JustificacionInasistencia::where('idAsistencia', $asistencia->id)
+                    ->first();
+
+                // Si ya existía una justificación y no subieron nuevo archivo,
+                // conservamos el archivo anterior.
+                if ($justificacionExistente && !$archivoSoporte) {
+                    $archivoSoporte = $justificacionExistente->archivoSoporte;
+                }
+
+                // Si subieron un nuevo archivo y ya había uno anterior, eliminamos el anterior.
+                if (
+                    $justificacionExistente &&
+                    $request->hasFile('archivoSoporte') &&
+                    $justificacionExistente->archivoSoporte &&
+                    Storage::disk('public')->exists($justificacionExistente->archivoSoporte)
+                ) {
+                    Storage::disk('public')->delete($justificacionExistente->archivoSoporte);
+                }
+
+                if ($justificacionExistente && $justificacionExistente->idExcusa) {
+                    $excusa = \App\Models\Excusa::find($justificacionExistente->idExcusa);
+
+                    if ($excusa) {
+                        $excusa->update([
+                            'tipoExcusa' => $request->tipoExcusa ?? 'FUERZA MAYOR',
+                            'observacion' => $request->observacionExcusa ?? null,
+                            'urlDocumento' => $archivoSoporte,
+                            'fechaInicialJustificacion' => today(),
+                            'fechaFinalJustificacion' => today(),
+                        ]);
+                    } else {
+                        $excusa = \App\Models\Excusa::create([
+                            'tipoExcusa' => $request->tipoExcusa ?? 'FUERZA MAYOR',
+                            'observacion' => $request->observacionExcusa ?? null,
+                            'urlDocumento' => $archivoSoporte,
+                            'fechaInicialJustificacion' => today(),
+                            'fechaFinalJustificacion' => today(),
+                        ]);
+                    }
+                } else {
+                    $excusa = \App\Models\Excusa::create([
+                        'tipoExcusa' => $request->tipoExcusa ?? 'FUERZA MAYOR',
+                        'observacion' => $request->observacionExcusa ?? null,
+                        'urlDocumento' => $archivoSoporte,
+                        'fechaInicialJustificacion' => today(),
+                        'fechaFinalJustificacion' => today(),
+                    ]);
+                }
+
+                JustificacionInasistencia::updateOrCreate(
+                    [
+                        'idAsistencia' => $asistencia->id,
+                    ],
+                    [
+                        'idExcusa' => $excusa->id,
+                        'idMatriculaAcademica' => $matriculaAcademica->id,
+                        'idPersona' => auth()->user()->idpersona ?? null,
+                        'estado' => 'APROBADO',
+                        'observacion' => $request->observacionExcusa ?? 'Justificada desde el registro de asistencia de clase',
+                        'archivoSoporte' => $archivoSoporte,
+                    ]
+                );
+            }
+
+            return response()->json([
+                'message' => 'Asistencia actualizada correctamente',
+                'data' => $asistencia->fresh(),
+            ], $request->isMethod('put') ? 200 : 201);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors(),
+            ], 422);
+
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Error en auto-registro: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Error al actualizar asistencia',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-        // ──────────────────────────────────────────────────────────────────────
-
-        // ── Justificación ────────────────────────────────────────────────────
-        if ($request->has('justificada') && $request->justificada && !$request->asistio) {
-            $excusa = \App\Models\Excusa::create([
-                'tipoExcusa' => $request->tipoExcusa ?? 'FUERZA MAYOR',
-                'observacion' => $request->observacionExcusa ?? null,
-                'urlDocumento' => $request->urlDocumento ?? null,
-                'fechaInicialJustificacion' => today(),
-                'fechaFinalJustificacion' => today(),
-            ]);
-
-            \App\Models\JustificacionInasistencia::create([
-                'idAsistencia' => $asistencia->id,
-                'idExcusa' => $excusa->id,
-                'idMatriculaAcademica' => $matriculaAcademica->id,
-                'idPersona' => auth()->user()->idpersona ?? null,
-                'estado' => 'APROBADO',
-                'observacion' => 'Justificada desde el registro de asistencia de clase'
-            ]);
-        }
-        // ─────────────────────────────────────────────────────────────────────
-
-        return response()->json($asistencia, $request->isMethod('put') ? 200 : 201);
     }
+    public function verSoporteJustificacion($id)
+    {
+        try {
+            $justificacion = JustificacionInasistencia::with('excusa')->findOrFail($id);
 
+            $archivo = $justificacion->archivoSoporte;
+
+            if (!$archivo && $justificacion->excusa) {
+                $archivo = $justificacion->excusa->urlDocumento;
+            }
+
+            if (!$archivo) {
+                return response()->json([
+                    'message' => 'La justificación no tiene archivo soporte.'
+                ], 404);
+            }
+
+            $archivo = trim($archivo);
+            $archivo = str_replace('/storage/', '', $archivo);
+            $archivo = str_replace('storage/', '', $archivo);
+            $archivo = ltrim($archivo, '/');
+
+            if (!Storage::disk('public')->exists($archivo)) {
+                return response()->json([
+                    'message' => 'El archivo no existe en el almacenamiento.',
+                    'archivo' => $archivo,
+                ], 404);
+            }
+
+            return response()->file(storage_path('app/public/' . $archivo));
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'No se pudo abrir el archivo soporte.',
+                'error' => $e->getMessage(),
+            ], 404);
+        }
+    }
     /**
      * Endpoint temporal para subir documento de excusa
      * TODO: Mover a un controlador específico de excusas cuando se implemente la funcionalidad completa

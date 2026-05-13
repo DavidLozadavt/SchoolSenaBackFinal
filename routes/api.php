@@ -1407,11 +1407,14 @@ Route::get('sanciones_by_anotacion/{idAnotacion}', [SancionesController::class, 
 Route::post('sanciones', [SancionesController::class, 'store']);
 
 
-//asistencia y inasistencia
+// asistencia e inasistencia
 Route::apiResource('asistencia', AsistenciaController::class);
 Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
-Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
-Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);
+Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica',[AsistenciaController::class, 'getAllAssistance']);
+Route::put('update_assistance',[AsistenciaController::class, 'updateAssistance']);
+Route::post('update_assistance',[AsistenciaController::class, 'updateAssistance']);
+Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
+Route::get('justificaciones-inasistencia/{id}/soporte',[AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
 
 //Intructores:
 Route::middleware('auth:api')->group(function () {
