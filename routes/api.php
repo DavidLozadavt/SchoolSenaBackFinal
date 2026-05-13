@@ -1022,32 +1022,6 @@ Route::get('entidades/caja_compensacion', [EntidadesSeguridadSocialController::c
 Route::get('entidades/cesantias', [EntidadesSeguridadSocialController::class, 'getCesantias']);
 
 
-//historis and music
-Route::get('/deezer/search', [MultimediaHistoriasController::class, 'searchTrack']);
-Route::get('/deezer/search/{id}', [MultimediaHistoriasController::class, 'getTrack']);
-
-
-
-
-
-Route::group([
-    'middleware' => 'api',
-], function () {
-
-    Route::get('multimedia_by_company', [MultimediaHistoriasController::class, 'getGruposMultimedia']);
-
-    Route::post('store_grupo_multimedia', [MultimediaHistoriasController::class, 'storeMultimediaGrupo']);
-
-    Route::post('update_grupo_multimedia/{id}', [MultimediaHistoriasController::class, 'updateMultimediaGrupo']);
-
-    Route::delete('delete_grupo_multimedia/{id}', [MultimediaHistoriasController::class, 'destroyGrupoMultimedia']);
-    Route::delete('delete_multimedia_by_user/{id}', [MultimediaHistoriasController::class, 'destroyMultimediaUser']);
-
-    Route::get('get_stories', [MultimediaHistoriasController::class, 'getStories']);
-    Route::get('get_stories_by_user', [MultimediaHistoriasController::class, 'getStoriesByUser']);
-
-    Route::get('get_stories_by_company/{id}', [MultimediaHistoriasController::class, 'getStoriesByCompany']);
-});
 //tipo conceptos
 Route::get('get_tipo_conceptos', [OtrasDeduccionesController::class, 'getTipoConceptos']);
 Route::post('store_tipo_conceptos', [OtrasDeduccionesController::class, 'storeTipoConcepto']);
@@ -1502,11 +1476,9 @@ Route::middleware('auth:api')->group(function () {
     Route::get('asistencias-por-area', [AsistenciaController::class, 'getAsistenciasPorArea']);
     Route::get('mis-asistencias-generales', [AsistenciaController::class, 'misAsistenciasGenerales']);
     Route::get('estudiante/mi-dashboard', [AsistenciaController::class, 'getDashboardEstudiante']);
-    Route::get('estudiante/dashboard/{idPersona}', [AsistenciaController::class, 'getDashboardEstudiantePorId']);
+    Route::get('instructores/mi-dashboard', [InstructoresController::class, 'getDashboardInstructor']);
+    Route::get('misAsistenciasEstudiante', [AsistenciaController::class, 'misAsistenciasEstudiante']);
 });
-//dashboard para instructores
-Route::get('instructores/mi-dashboard', [InstructoresController::class, 'getDashboardInstructor']);
-Route::get('misAsistenciasEstudiante', [AsistenciaController::class, 'misAsistenciasEstudiante']);
 
 
 Route::middleware('auth:api')->group(function () {
@@ -1547,6 +1519,39 @@ Route::middleware('auth:api')->group(function () {
     Route::post('asignacion-sesion', [AsignacionSesionController::class, 'store']);
     Route::put('horario/asignar-compartido', [HorarioMateriaController::class, 'assignSharedInstructor']); //asignar instructor secundario a horarios compartidos
     Route::put('asignacion-sesion/desasignar', [AsignacionSesionController::class, 'desasignarSesiones']);
+});
+
+// ─── MULTIMEDIA: HISTORIAS & REELS ────────────────────────────────────────────
+Route::middleware('auth:api')->group(function () {
+    // Listar grupos (filtrar por ?tipo=historia|reel)
+    Route::get('multimedia_by_company', [MultimediaHistoriasController::class, 'getGruposMultimedia']);
+
+    // Dashboard: historias + reels juntos
+    Route::get('dashboard_multimedia', [MultimediaHistoriasController::class, 'getDashboardMultimedia']);
+
+    // Solo reels
+    Route::get('multimedia_reels', [MultimediaHistoriasController::class, 'getReels']);
+
+    // Solo historias
+    Route::get('multimedia_historias', [MultimediaHistoriasController::class, 'getStories']);
+
+    // Historias agrupadas por empresa (stories carousel)
+    Route::get('stories_grouped', [MultimediaHistoriasController::class, 'getStoriesGrouped']);
+
+    // Mis historias/reels
+    Route::get('mis_multimedia', [MultimediaHistoriasController::class, 'getStoriesByUser']);
+
+    // CRUD grupo
+    Route::post('store_grupo_multimedia', [MultimediaHistoriasController::class, 'storeMultimediaGrupo']);
+    Route::post('update_grupo_multimedia/{id}', [MultimediaHistoriasController::class, 'updateMultimediaGrupo']);
+    Route::delete('delete_grupo_multimedia/{id}', [MultimediaHistoriasController::class, 'destroyGrupoMultimedia']);
+
+    // Eliminar ítem individual
+    Route::delete('delete_multimedia_user/{id}', [MultimediaHistoriasController::class, 'destroyMultimediaUser']);
+
+    // Deezer
+    Route::get('deezer/search', [MultimediaHistoriasController::class, 'searchTrack']);
+    Route::get('deezer/search/{id}', [MultimediaHistoriasController::class, 'getTrack']);
 });
 
 // Rutas para Actas
