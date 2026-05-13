@@ -154,6 +154,7 @@ use App\Http\Controllers\InstructoresController;
 use App\Http\Controllers\ProyectoFormativoController;
 use App\Http\Controllers\SancionesController;
 use App\Http\Controllers\AnexoActaController;
+use App\Http\Controllers\InstructorLiderController;
 
 /*
 |--------------------------------------------------------------------------
@@ -1562,4 +1563,9 @@ Route::middleware('auth:api')->group(function () {
     Route::post('actas/{id}/documento', [ActaController::class, 'uploadDocumento']);
     Route::apiResource('actas', ActaController::class);
 
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::get('instructor-lider', [InstructorLiderController::class, 'getFichasLider']);
+    Route::get('instructor-lider/ficha/{idFicha}/aprendices', [InstructorLiderController::class, 'getAprendicesFicha']);
 });
