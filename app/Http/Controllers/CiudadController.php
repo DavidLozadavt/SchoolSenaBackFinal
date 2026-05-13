@@ -17,7 +17,7 @@ class CiudadController extends Controller
 
     public function ciudades()
     {
-        $ciudades = City::all();
+        $ciudades = City::with('departamento')->get();
         return response()->json($ciudades);
     }
 
