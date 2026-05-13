@@ -289,7 +289,7 @@ class CentrosFormacionController extends Controller
             'data' => $centros
         ]);
     }
-    
+
     public function destroy($id)
     {
         DB::beginTransaction();

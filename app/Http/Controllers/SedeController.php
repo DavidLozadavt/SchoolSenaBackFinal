@@ -15,6 +15,27 @@ class SedeController extends Controller
 {
     public function store(Request $request): JsonResponse
     {
+        $user = KeyUtil::user();
+        $idCentro = $user->idCentroFormacion ?? null;
+
+        // Fallback al centro de formación del contrato si no está en el usuario
+        if (!$idCentro && $user && $user->persona) {
+            $contrato = $user->persona->contrato->first();
+            if ($contrato) {
+                $idCentro = $contrato->idCentroFormacion;
+            }
+        }
+
+        if ($idCentro) {
+            $request->merge(['idCentroFormacion' => $idCentro]);
+
+            // Si el usuario tiene centro, forzamos la regional de ese centro
+            $centro = CentrosFormacion::find($idCentro);
+            if ($centro && $centro->idEmpresa) {
+                $request->merge(['idEmpresa' => $centro->idEmpresa]);
+            }
+        }
+
         // 1️⃣ Limpiar nombre (bonito)
         $nombreOriginal = preg_replace(
             '/\s+/',
