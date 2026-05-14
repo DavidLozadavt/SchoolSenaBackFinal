@@ -112,8 +112,7 @@ class GradoProgramaController extends Controller
 
             // buscamos todos lo horarios de la ficha con estado PENDIENTE y ASIGNADO
             $horarios = HorarioMateria::where('idFicha', $datos['idFicha'])
-                ->where('estado', 'PENDIENTE')
-                ->orWhere('estado', 'ASIGNADO')
+                ->whereIn('estado', ['PENDIENTE', 'ASIGNADO'])
                 ->get();
             
             // si existen horarios los actualizamos a estado INTERRUMPIDO
