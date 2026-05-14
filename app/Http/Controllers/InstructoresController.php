@@ -13,7 +13,6 @@ use App\Models\NotificacionSistema;
 use App\Models\Person;
 use App\Models\Rmi;
 use App\Models\GC;
-use App\Models\AsignacionSesion;
 use App\Models\SesionMateria;
 use App\Models\User;
 use App\Util\KeyUtil;
@@ -75,51 +74,28 @@ class InstructoresController extends Controller
             ->whereHas('user', function ($q) use ($validated) {
                 $q->where('idCentroFormacion', $validated['idCentroFormacion']);
             })
-            ->where(function ($query) use ($inicio, $fin) {
-                $query->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
-                    $h->where('estado', 'ASIGNADO')
-                        ->where(function ($q) use ($inicio, $fin) {
-                            $q->whereBetween('fechaInicial', [$inicio, $fin])
-                                ->orWhereBetween('fechaFinal', [$inicio, $fin])
-                                ->orWhere(function ($q2) use ($inicio, $fin) {
-                                    $q2->where('fechaInicial', '<=', $inicio)
-                                        ->where('fechaFinal', '>=', $fin);
-                                });
-                        });
-                })
-                ->orWhereHas('user.persona.contracts.asignacionSesion', function ($a) use ($inicio, $fin) {
-                    $a->where('tipoAsignacion', 'REEMPLAZO')
-                        ->where(function ($q) use ($inicio, $fin) {
-                            $q->whereBetween('fechaInicio', [$inicio, $fin])
-                                ->orWhereBetween('fechaFin', [$inicio, $fin])
-                                ->orWhere(function ($q2) use ($inicio, $fin) {
-                                    $q2->where('fechaInicio', '<=', $inicio)
-                                        ->where('fechaFin', '>=', $fin);
-                                });
-                        });
-                });
+            ->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
+                $h->where('estado', 'ASIGNADO')
+                    ->where(function ($q) use ($inicio, $fin) {
+                        $q->whereBetween('fechaInicial', [$inicio, $fin])
+                            ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                            ->orWhere(function ($q2) use ($inicio, $fin) {
+                                $q2->where('fechaInicial', '<=', $inicio)
+                                    ->where('fechaFinal', '>=', $fin);
+                            });
+                    });
             })
             ->get()
             ->flatMap(function ($acu) use ($inicio, $fin, $rmi) {
 
                 $user = $acu->user;
                 $persona = $user->persona;
-                // Buscar el contrato que tiene horarios o reemplazos en este periodo
-                $contrato = $persona->contracts->first(fn($c) => 
-                    $c->horarioMateria->isNotEmpty() || $c->asignacionSesion->isNotEmpty()
-                ) ?? $persona->contracts->first();
+                // Buscar el contrato que tiene horarios en este periodo
+                $contrato = $persona->contracts->first(fn($c) => $c->horarioMateria->isNotEmpty())
+                    ?? $persona->contracts->first();
 
                 if (!$contrato)
                     return [];
-
-                // Reemplazos que este instructor está realizando
-                $reemplazosHechos = AsignacionSesion::with('horario')
-                    ->where('idContrato', $contrato->id)
-                    ->where('tipoAsignacion', 'REEMPLAZO')
-                    ->where(function ($q) use ($inicio, $fin) {
-                        $q->whereBetween('fechaInicio', [$inicio, $fin])
-                          ->orWhereBetween('fechaFin', [$inicio, $fin]);
-                    })->get();
 
                 // Obtener detallesRmi PENDIENTE/RECHAZADO del periodo actual para este contrato
                 $detallesRmi = $rmi
@@ -131,47 +107,30 @@ class InstructoresController extends Controller
                     ->get()
                     : collect();
 
-                // Si no tiene detallesRmi PENDIENTE/RECHAZADO Y no tiene reemplazos hechos, excluir
-                if ($detallesRmi->isEmpty() && $reemplazosHechos->isEmpty())
+                // Si no tiene detallesRmi PENDIENTE/RECHAZADO en el periodo, excluir
+                if ($detallesRmi->isEmpty())
                     return [];
 
                 // IDs de horarios con detalleRmi PENDIENTE o RECHAZADO
                 $idsConDetalle = $detallesRmi->pluck('idHorarioMateria')->toArray();
 
-                $horariosFilas = collect();
-
                 // Mapear horarios del mes que tienen detalleRmi relevante
-                foreach ($contrato->horarioMateria->filter(fn($h) => in_array($h->id, $idsConDetalle)) as $h) {
-                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-                    $idDiaInt = (int) $h->idDia;
-                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-                    $cantidadSesiones = 0;
-                    $cursor = $desde->copy()->startOfDay();
-                    $finalC = $hasta->copy()->startOfDay();
-
-                    // Reemplazos que le hicieron a este horario
-                    $reemplazosQueLeHicieron = AsignacionSesion::where('idHorarioMateria', $h->id)
-                        ->where('tipoAsignacion', 'REEMPLAZO')
-                        ->get();
-
-                    while ($cursor->lte($finalC)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                            $esReemplazo = $reemplazosQueLeHicieron->contains(function ($r) use ($cursor) {
-                                $inicioR = \Carbon\Carbon::parse($r->fechaInicio)->startOfDay();
-                                $finR = \Carbon\Carbon::parse($r->fechaFin)->startOfDay();
-                                return $cursor->between($inicioR, $finR);
-                            });
-                            if (!$esReemplazo) {
+                $horariosBase = $contrato->horarioMateria
+                    ->filter(fn($h) => in_array($h->id, $idsConDetalle))
+                    ->map(function ($h) use ($inicio, $fin) {
+                        $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+                        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                        $idDiaInt = (int) $h->idDia;
+                        $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
+                        $cantidadSesiones = 0;
+                        $cursor = $desde->copy();
+                        while ($cursor->lte($hasta)) {
+                            if ($cursor->dayOfWeek === $diaSemanaCarbon)
                                 $cantidadSesiones++;
-                            }
+                            $cursor->addDay();
                         }
-                        $cursor->addDay();
-                    }
-
-                    if ($cantidadSesiones > 0) {
-                        $horariosFilas->push([
+                        return [
                             'id' => $h->id,
                             'idContrato' => $h->idContrato,
                             'horaInicial' => $h->horaInicial,
@@ -183,80 +142,14 @@ class InstructoresController extends Controller
                             'duracionSesion' => (float) $duracionSesion,
                             'cantidadSesiones' => (int) $cantidadSesiones,
                             'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
-                        ]);
-                    }
-                }
+                        ];
+                    })->keyBy('id');
 
-                // Agregar reemplazos hechos por este instructor
-                foreach ($reemplazosHechos as $r) {
-                    $h = $r->horario;
-                    if (!$h) continue;
-
-                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                    $desde = \Carbon\Carbon::parse($r->fechaInicio)->max($inicio);
-                    $hasta = \Carbon\Carbon::parse($r->fechaFin)->min($fin);
-                    $idDiaInt = (int) $h->idDia;
-                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-                    $cantidadSesiones = 0;
-                    $cursor = $desde->copy()->startOfDay();
-                    $finalC = $hasta->copy()->startOfDay();
-
-                    while ($cursor->lte($finalC)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
-                            $cantidadSesiones++;
-                        $cursor->addDay();
-                    }
-
-                    if ($cantidadSesiones > 0) {
-                        $horariosFilas->push([
-                            'id' => 'r' . $r->id,
-                            'idContrato' => $contrato->id,
-                            'horaInicial' => $h->horaInicial,
-                            'horaFinal' => $h->horaFinal,
-                            'estado' => 'REEMPLAZO',
-                            'idDia' => $h->idDia,
-                            'fechaInicial' => $r->fechaInicio,
-                            'fechaFinal' => $r->fechaFin,
-                            'duracionSesion' => (float) $duracionSesion,
-                            'cantidadSesiones' => (int) $cantidadSesiones,
-                            'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
-                        ]);
-                    }
-                }
-
-                $horariosBase = $horariosFilas->keyBy('id');
-
-                // Horas ejecutadas en el mes actual (sesiones registradas para este contrato)
+                // Horas ejecutadas en el mes actual (sesiones registradas)
                 $horasEjecutadas = round(
                     SesionMateria::join('horarioMateria', 'sesionMateria.idHorarioMateria', '=', 'horarioMateria.id')
-                        ->whereBetween('sesionMateria.fechaSesion', [$inicio, $fin])
-                        ->where(function ($q) use ($contrato) {
-                            $q->where(function ($q2) use ($contrato) {
-                                // Caso 1: El instructor es el original del horario
-                                $q2->where('horarioMateria.idContrato', $contrato->id)
-                                    // Y NO hubo un reemplazo en la fecha de la sesión
-                                    ->whereNotExists(function ($sub) {
-                                        $sub->select(DB::raw(1))
-                                            ->from('asignacionSesion')
-                                            ->whereColumn('asignacionSesion.idHorarioMateria', 'horarioMateria.id')
-                                            ->where('asignacionSesion.tipoAsignacion', 'REEMPLAZO')
-                                            ->whereColumn('sesionMateria.fechaSesion', '>=', 'asignacionSesion.fechaInicio')
-                                            ->whereColumn('sesionMateria.fechaSesion', '<=', 'asignacionSesion.fechaFin');
-                                    });
-                            })
-                            ->orWhere(function ($q2) use ($contrato) {
-                                // Caso 2: El instructor es el reemplazo asignado para esa fecha
-                                $q2->whereExists(function ($sub) use ($contrato) {
-                                    $sub->select(DB::raw(1))
-                                        ->from('asignacionSesion')
-                                        ->whereColumn('asignacionSesion.idHorarioMateria', 'horarioMateria.id')
-                                        ->where('asignacionSesion.idContrato', $contrato->id)
-                                        ->where('asignacionSesion.tipoAsignacion', 'REEMPLAZO')
-                                        ->whereColumn('sesionMateria.fechaSesion', '>=', 'asignacionSesion.fechaInicio')
-                                        ->whereColumn('sesionMateria.fechaSesion', '<=', 'asignacionSesion.fechaFin');
-                                });
-                            });
-                        })
+                        ->where('horarioMateria.idContrato', $contrato->id)
+                        ->whereBetween('fechaSesion', [$inicio, $fin])
                         ->selectRaw('SUM((TIME_TO_SEC(horarioMateria.horaFinal) - TIME_TO_SEC(horarioMateria.horaInicial)) / 3600) as totalHoras')
                         ->value('totalHoras') ?? 0
                 );
@@ -272,27 +165,17 @@ class InstructoresController extends Controller
                     'email' => $persona->email,
                     'celular' => $persona->celular,
                     'telefonoFijo' => $persona->telefonoFijo,
-                            'perfil' => $persona->perfil,
+                    'perfil' => $persona->perfil,
                     'sexo' => $persona->sexo,
                     'rh' => $persona->rh,
                     'rutaFoto' => $persona->rutaFotoUrl
                 ];
 
                 // Agrupar por estado → una entrada por cada estado distinto
-                $grupos = $detallesRmi->groupBy('estado');
-
-                // Si hay reemplazos pero no hay detalles, crear un grupo virtual "PENDIENTE" para mostrar los reemplazos
-                if ($grupos->isEmpty() && $reemplazosHechos->isNotEmpty()) {
-                    $grupos->put('PENDIENTE', collect());
-                }
-
-                return $grupos
+                return $detallesRmi
+                    ->groupBy('estado')
                     ->map(function ($grupo, $estado) use ($acu, $user, $contrato, $personaData, $horariosBase, $horasEjecutadas, $rmi) {
                         $idsGrupo = $grupo->pluck('idHorarioMateria')->toArray();
-                        
-                        // Incluir IDs de reemplazos ('rX') en el listado de horarios
-                        $idsReemplazos = $horariosBase->keys()->filter(fn($id) => str_starts_with($id, 'r'))->toArray();
-                        $todosLosIds = array_merge($idsGrupo, $idsReemplazos);
 
                         $motivoRechazo = $estado === 'RECHAZADO'
                             ? $grupo->first(fn($d) => !empty($d->observacion))?->observacion
@@ -305,10 +188,10 @@ class InstructoresController extends Controller
                             'idRmi' => $rmi?->id,
                             'roles' => $acu->getRoleNames(),
                             'estado' => $estado,
-                            'totalHoras' => $horariosBase->sum('duracionHoras'), // Suma de horas teóricas calculadas
+                            'totalHoras' => $contrato->horasmes ?? 0,
                             'totalHorasFormato' => $horasEjecutadas,
                             'motivoRechazo' => $motivoRechazo,
-                            'horarios' => $horariosBase->only($todosLosIds)->values(),
+                            'horarios' => $horariosBase->only($idsGrupo)->values(),
                             'persona' => $personaData,
                         ];
                     })
@@ -364,147 +247,65 @@ class InstructoresController extends Controller
                 $q->where('idCentroFormacion', $validated['idCentroFormacion']);
             })
             // Solo instructores con horarios en el periodo
-            ->where(function ($query) use ($inicio, $fin) {
-                $query->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
-                    $h->where('estado', 'ASIGNADO')
-                        ->where(function ($q) use ($inicio, $fin) {
-                            $q->whereBetween('fechaInicial', [$inicio, $fin])
-                                ->orWhereBetween('fechaFinal', [$inicio, $fin])
-                                ->orWhere(function ($q2) use ($inicio, $fin) {
-                                    $q2->where('fechaInicial', '<=', $inicio)
-                                        ->where('fechaFinal', '>=', $fin);
-                                });
-                        });
-                })
-                ->orWhereHas('user.persona.contracts.asignacionSesion', function ($a) use ($inicio, $fin) {
-                    $a->where('tipoAsignacion', 'REEMPLAZO')
-                        ->where(function ($q) use ($inicio, $fin) {
-                            $q->whereBetween('fechaInicio', [$inicio, $fin])
-                                ->orWhereBetween('fechaFin', [$inicio, $fin])
-                                ->orWhere(function ($q2) use ($inicio, $fin) {
-                                    $q2->where('fechaInicio', '<=', $inicio)
-                                        ->where('fechaFin', '>=', $fin);
-                                });
-                        });
-                });
+            ->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
+                $h->where('estado', 'ASIGNADO')
+                    ->where(function ($q) use ($inicio, $fin) {
+                        $q->whereBetween('fechaInicial', [$inicio, $fin])
+                            ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                            ->orWhere(function ($q2) use ($inicio, $fin) {
+                                $q2->where('fechaInicial', '<=', $inicio)
+                                    ->where('fechaFinal', '>=', $fin);
+                            });
+                    });
             })
             ->get()
             ->map(function ($acu) use ($periodoReq, $inicio, $fin) {
 
                 $user = $acu->user;
                 $persona = $user->persona;
-                // Buscar el contrato que tiene horarios o reemplazos en este periodo
-                $contrato = $persona->contracts->first(fn($c) => 
-                    $c->horarioMateria->isNotEmpty() || $c->asignacionSesion->isNotEmpty()
-                ) ?? $persona->contracts->first();
+                // Buscar el contrato que tiene horarios en este periodo
+                $contrato = $persona->contracts->first(fn($c) => $c->horarioMateria->isNotEmpty())
+                    ?? $persona->contracts->first();
 
-                // Reemplazos que este instructor está realizando
-                $reemplazosHechos = collect();
-                if ($contrato) {
-                    $reemplazosHechos = AsignacionSesion::with('horario')
-                        ->where('idContrato', $contrato->id)
-                        ->where('tipoAsignacion', 'REEMPLAZO')
-                        ->where(function ($q) use ($inicio, $fin) {
-                            $q->whereBetween('fechaInicio', [$inicio, $fin])
-                              ->orWhereBetween('fechaFin', [$inicio, $fin]);
-                        })->get();
-                }
-
-                $horariosFilas = collect();
-
-                if ($contrato) {
-                    foreach ($contrato->horarioMateria as $h) {
-                        $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-                        $idDiaInt = (int) $h->idDia;
-                        $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-                        $cantidadSesiones = 0;
-                        $cursor = $desde->copy()->startOfDay();
-                        $finalC = $hasta->copy()->startOfDay();
-
-                        // Reemplazos que le hicieron a este horario
-                        $reemplazosQueLeHicieron = AsignacionSesion::where('idHorarioMateria', $h->id)
-                            ->where('tipoAsignacion', 'REEMPLAZO')
-                            ->get();
-
-                        while ($cursor->lte($finalC)) {
-                            if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                                $esReemplazo = $reemplazosQueLeHicieron->contains(function ($r) use ($cursor) {
-                                    $inicioR = \Carbon\Carbon::parse($r->fechaInicio)->startOfDay();
-                                    $finR = \Carbon\Carbon::parse($r->fechaFin)->startOfDay();
-                                    return $cursor->between($inicioR, $finR);
-                                });
-                                if (!$esReemplazo) {
-                                    $cantidadSesiones++;
-                                }
-                            }
-                            $cursor->addDay();
-                        }
-
-                        if ($cantidadSesiones > 0) {
-                            $horariosFilas->push([
-                                'id' => $h->id,
-                                'idContrato' => $h->idContrato,
-                                'horaInicial' => $h->horaInicial,
-                                'horaFinal' => $h->horaFinal,
-                                'estado' => $h->estado,
-                                'idDia' => $h->idDia,
-                                'fechaInicial' => $h->fechaInicial,
-                                'fechaFinal' => $h->fechaFinal,
-                                'duracionSesion' => (float) $duracionSesion,
-                                'cantidadSesiones' => (int) $cantidadSesiones,
-                                'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
-                            ]);
-                        }
-                    }
-                }
-
-                // Agregar reemplazos hechos por este instructor
-                foreach ($reemplazosHechos as $r) {
-                    $h = $r->horario;
-                    if (!$h) continue;
-
+                $horarios = $contrato?->horarioMateria->map(function ($h) use ($inicio, $fin) {
                     $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                    $desde = \Carbon\Carbon::parse($r->fechaInicio)->max($inicio);
-                    $hasta = \Carbon\Carbon::parse($r->fechaFin)->min($fin);
+
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+
                     $idDiaInt = (int) $h->idDia;
                     $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
                     $cantidadSesiones = 0;
-                    $cursor = $desde->copy()->startOfDay();
-                    $finalC = $hasta->copy()->startOfDay();
+                    $cursor = $desde->copy();
 
-                    while ($cursor->lte($finalC)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
                             $cantidadSesiones++;
+                        }
                         $cursor->addDay();
                     }
 
-                    if ($cantidadSesiones > 0) {
-                        $horariosFilas->push([
-                            'id' => 'r' . $r->id,
-                            'idContrato' => $contrato->id,
-                            'horaInicial' => $h->horaInicial,
-                            'horaFinal' => $h->horaFinal,
-                            'estado' => 'REEMPLAZO',
-                            'idDia' => $h->idDia,
-                            'fechaInicial' => $r->fechaInicio,
-                            'fechaFinal' => $r->fechaFin,
-                            'duracionSesion' => (float) $duracionSesion,
-                            'cantidadSesiones' => (int) $cantidadSesiones,
-                            'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
-                        ]);
-                    }
-                }
+                    return [
+                        'id' => $h->id,
+                        'idContrato' => $h->idContrato,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'estado' => $h->estado,
+                        'idDia' => $h->idDia,
+                        'fechaInicial' => $h->fechaInicial,
+                        'fechaFinal' => $h->fechaFinal,
+                        'duracionSesion' => (float) $duracionSesion,
+                        'cantidadSesiones' => (int) $cantidadSesiones,
+                        'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
+                    ];
+                });
 
-                $horarios = $horariosFilas;
-
-                // Horas ejecutadas en el periodo (sesiones registradas para este contrato)
+                // Horas ejecutadas en el periodo (sesiones registradas)
                 $horasEjecutadas = 0;
                 if ($contrato) {
                     $horasEjecutadas = round(
                         SesionMateria::join('horarioMateria', 'sesionMateria.idHorarioMateria', '=', 'horarioMateria.id')
-                            ->where('sesionMateria.idContrato', $contrato->id) // Usar idContrato de sesionMateria
+                            ->where('horarioMateria.idContrato', $contrato->id)
                             ->whereBetween('fechaSesion', [$inicio, $fin])
                             ->selectRaw('SUM((TIME_TO_SEC(horarioMateria.horaFinal) - TIME_TO_SEC(horarioMateria.horaInicial)) / 3600) as totalHoras')
                             ->value('totalHoras') ?? 0
@@ -552,7 +353,7 @@ class InstructoresController extends Controller
                     'roles' => $acu->getRoleNames(),
                     'horarios' => $horarios,
                     'estado' => $estadoRmi,
-                    'totalHoras' => $horariosFilas->sum('duracionHoras'),
+                    'totalHoras' => $contrato?->horasmes ?? 0,
                     'totalHorasFormato' => $horasEjecutadas,
                     'motivoRechazo' => $motivoRechazo,
                     'persona' => [
@@ -1894,8 +1695,66 @@ class InstructoresController extends Controller
 
         $diasSemana = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miércoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sábado', 7 => 'Domingo'];
 
-        // 1. Obtener horarios originales
-        $horariosOriginales = \App\Models\HorarioMateria::with(['ficha.asignacion.programa'])
+        $horariosPorFicha = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+        ])
+            ->where('idContrato', $idContrato)
+            ->where('estado', 'ASIGNADO')
+            ->where(function ($q) use ($inicio, $fin) {
+                $q->whereBetween('fechaInicial', [$inicio, $fin])
+                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                    ->orWhere(function ($q2) use ($inicio, $fin) {
+                        $q2->where('fechaInicial', '<=', $inicio)
+                            ->where('fechaFinal', '>=', $fin);
+                    });
+            })
+            ->get()
+            ->groupBy('idFicha')
+            ->map(function ($horarios) use ($inicio, $fin, $diasSemana) {
+                $ficha = $horarios->first()->ficha;
+                $programa = $ficha?->asignacion?->programa;
+                $idFicha = $horarios->first()->idFicha;
+
+                $filas = $horarios->map(function ($h) use ($inicio, $fin, $diasSemana) {
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                    $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                    $cantSesiones = 0;
+                    $cursor = $desde->copy();
+
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                            $cantSesiones++;
+                        $cursor->addDay();
+                    }
+
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                    return [
+                        'dia' => $diasSemana[$h->idDia] ?? $h->idDia,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'cantSesiones' => $cantSesiones,
+                        'horasTotales' => round($duracionSesion * $cantSesiones, 2),
+                    ];
+                })->values();
+
+                return [
+                    'idFicha' => $idFicha,
+                    'codigoFicha' => $ficha?->codigo,
+                    'programaFormacion' => $programa?->nombrePrograma,
+                    'filas' => $filas,
+                    'totalHorasFicha' => $filas->sum('horasTotales'),
+                ];
+            })->values();
+        // ─────────────────────────────────────────────────────────────────────
+
+        // ── MATERIAS / RAPs POR FICHA CON FASE DE PROYECTO ───────────────────────────
+
+        $horariosMaterias = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+            'gradoMateria.materia.padre',
+        ])
             ->where('idContrato', $idContrato)
             ->where('estado', 'ASIGNADO')
             ->where(function ($q) use ($inicio, $fin) {
@@ -1907,124 +1766,6 @@ class InstructoresController extends Controller
                     });
             })
             ->get();
-
-        // 2. Obtener reemplazos realizados por este instructor
-        $reemplazosHechos = \App\Models\AsignacionSesion::with(['horario.ficha.asignacion.programa', 'horario.gradoMateria.materia.padre'])
-            ->where('idContrato', $idContrato)
-            ->where('tipoAsignacion', 'REEMPLAZO')
-            ->where(function ($q) use ($inicio, $fin) {
-                $q->whereBetween('fechaInicio', [$inicio, $fin])
-                    ->orWhereBetween('fechaFin', [$inicio, $fin])
-                    ->orWhere(function ($q2) use ($inicio, $fin) {
-                        $q2->where('fechaInicio', '<=', $inicio)
-                            ->where('fechaFin', '>=', $fin);
-                    });
-            })
-            ->get();
-
-        // 3. Procesar horarios originales (restando cuando alguien más lo reemplaza)
-        $filas = collect();
-        foreach ($horariosOriginales as $h) {
-            $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-            $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-            $idDiaInt = (int) $h->idDia;
-            $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-            $cantSesiones = 0;
-            $cursor = $desde->copy()->startOfDay();
-            $finalC = $hasta->copy()->startOfDay();
-
-            // Reemplazos que le hicieron a este horario
-            $reemplazos = \App\Models\AsignacionSesion::where('idHorarioMateria', $h->id)
-                ->where('tipoAsignacion', 'REEMPLAZO')
-                ->get();
-
-            while ($cursor->lte($finalC)) {
-                if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                    $esReemplazo = $reemplazos->contains(function ($r) use ($cursor) {
-                        $inicioR = \Carbon\Carbon::parse($r->fechaInicio)->startOfDay();
-                        $finR = \Carbon\Carbon::parse($r->fechaFin)->startOfDay();
-                        return $cursor->between($inicioR, $finR);
-                    });
-                    if (!$esReemplazo) {
-                        $cantSesiones++;
-                    }
-                }
-                $cursor->addDay();
-            }
-
-            if ($cantSesiones > 0) {
-                $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                $filas->push([
-                    'idFicha' => $h->idFicha,
-                    'ficha' => $h->ficha,
-                    'dia' => $diasSemana[$h->idDia] ?? $h->idDia,
-                    'horaInicial' => $h->horaInicial,
-                    'horaFinal' => $h->horaFinal,
-                    'cantSesiones' => $cantSesiones,
-                    'horasTotales' => round($duracionSesion * $cantSesiones, 2),
-                    'horarioMateria' => $h
-                ]);
-            }
-        }
-
-        // 4. Procesar reemplazos hechos (sumando horas)
-        foreach ($reemplazosHechos as $r) {
-            $h = $r->horario;
-            if (!$h) continue;
-
-            $desde = \Carbon\Carbon::parse($r->fechaInicio)->max($inicio);
-            $hasta = \Carbon\Carbon::parse($r->fechaFin)->min($fin);
-            $idDiaInt = (int) $h->idDia;
-            $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-            $cantSesiones = 0;
-            $cursor = $desde->copy()->startOfDay();
-            $finalC = $hasta->copy()->startOfDay();
-
-            while ($cursor->lte($finalC)) {
-                if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                    $cantSesiones++;
-                }
-                $cursor->addDay();
-            }
-
-            if ($cantSesiones > 0) {
-                $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                $filas->push([
-                    'idFicha' => $h->idFicha,
-                    'ficha' => $h->ficha,
-                    'dia' => ($diasSemana[$h->idDia] ?? $h->idDia) . ' (Reemplazo)',
-                    'horaInicial' => $h->horaInicial,
-                    'horaFinal' => $h->horaFinal,
-                    'cantSesiones' => $cantSesiones,
-                    'horasTotales' => round($duracionSesion * $cantSesiones, 2),
-                    'horarioMateria' => $h
-                ]);
-            }
-        }
-
-        $horariosPorFicha = $filas->groupBy('idFicha')->map(function ($grupo) {
-            $primera = $grupo->first();
-            $ficha = $primera['ficha'];
-            $programa = $ficha?->asignacion?->programa;
-
-            return [
-                'idFicha' => $primera['idFicha'],
-                'codigoFicha' => $ficha?->codigo,
-                'programaFormacion' => $programa?->nombrePrograma,
-                'filas' => $grupo->map(function ($f) {
-                    unset($f['idFicha'], $f['ficha'], $f['horarioMateria']);
-                    return $f;
-                })->values(),
-                'totalHorasFicha' => $grupo->sum('horasTotales'),
-            ];
-        })->values();
-
-        $horariosMaterias = $filas->pluck('horarioMateria')->unique('id')->values();
-        // ─────────────────────────────────────────────────────────────────────
-
-        // ── MATERIAS / RAPs POR FICHA CON FASE DE PROYECTO ───────────────────────────
-
-
 
         // IDs únicos de los RAPs que se están impartiendo en el periodo
         $idMaterias = $horariosMaterias
@@ -2169,8 +1910,66 @@ class InstructoresController extends Controller
 
         $diasSemana = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miércoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sábado', 7 => 'Domingo'];
 
-        // 1. Obtener horarios originales
-        $horariosOriginales = \App\Models\HorarioMateria::with(['ficha.asignacion.programa'])
+        $horariosPorFicha = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+        ])
+            ->where('idContrato', $idContrato)
+            ->where('estado', 'ASIGNADO')
+            ->where(function ($q) use ($inicio, $fin) {
+                $q->whereBetween('fechaInicial', [$inicio, $fin])
+                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                    ->orWhere(function ($q2) use ($inicio, $fin) {
+                        $q2->where('fechaInicial', '<=', $inicio)
+                            ->where('fechaFinal', '>=', $fin);
+                    });
+            })
+            ->get()
+            ->groupBy('idFicha')
+            ->map(function ($horarios) use ($inicio, $fin, $diasSemana) {
+                $ficha = $horarios->first()->ficha;
+                $programa = $ficha?->asignacion?->programa;
+                $idFicha = $horarios->first()->idFicha;
+
+                $filas = $horarios->map(function ($h) use ($inicio, $fin, $diasSemana) {
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                    $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                    $cantSesiones = 0;
+                    $cursor = $desde->copy();
+
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                            $cantSesiones++;
+                        $cursor->addDay();
+                    }
+
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                    return [
+                        'dia' => $diasSemana[$h->idDia] ?? $h->idDia,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'cantSesiones' => $cantSesiones,
+                        'horasTotales' => round($duracionSesion * $cantSesiones, 2),
+                    ];
+                })->values();
+
+                return [
+                    'idFicha' => $idFicha,
+                    'codigoFicha' => $ficha?->codigo,
+                    'programaFormacion' => $programa?->nombrePrograma,
+                    'filas' => $filas,
+                    'totalHorasFicha' => $filas->sum('horasTotales'),
+                ];
+            })->values();
+        // ─────────────────────────────────────────────────────────────────────
+
+        // ── MATERIAS / RAPs POR FICHA CON FASE DE PROYECTO ───────────────────────────
+
+        $horariosMaterias = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+            'gradoMateria.materia.padre',
+        ])
             ->where('idContrato', $idContrato)
             ->where('estado', 'ASIGNADO')
             ->where(function ($q) use ($inicio, $fin) {
@@ -2182,119 +1981,6 @@ class InstructoresController extends Controller
                     });
             })
             ->get();
-
-        // 2. Obtener reemplazos realizados por este instructor
-        $reemplazosHechos = \App\Models\AsignacionSesion::with(['horario.ficha.asignacion.programa', 'horario.gradoMateria.materia.padre'])
-            ->where('idContrato', $idContrato)
-            ->where('tipoAsignacion', 'REEMPLAZO')
-            ->where(function ($q) use ($inicio, $fin) {
-                $q->whereBetween('fechaInicio', [$inicio, $fin])
-                    ->orWhereBetween('fechaFin', [$inicio, $fin])
-                    ->orWhere(function ($q2) use ($inicio, $fin) {
-                        $q2->where('fechaInicio', '<=', $inicio)
-                            ->where('fechaFin', '>=', $fin);
-                    });
-            })
-            ->get();
-
-        // 3. Procesar horarios originales (restando cuando alguien más lo reemplaza)
-        $filas = collect();
-        foreach ($horariosOriginales as $h) {
-            $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-            $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-            $idDiaInt = (int) $h->idDia;
-            $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-            $cantSesiones = 0;
-            $cursor = $desde->copy()->startOfDay();
-            $finalC = $hasta->copy()->startOfDay();
-
-            // Reemplazos que le hicieron a este horario
-            $reemplazos = \App\Models\AsignacionSesion::where('idHorarioMateria', $h->id)
-                ->where('tipoAsignacion', 'REEMPLAZO')
-                ->get();
-
-            while ($cursor->lte($finalC)) {
-                if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                    $esReemplazo = $reemplazos->contains(function ($r) use ($cursor) {
-                        $inicioR = \Carbon\Carbon::parse($r->fechaInicio)->startOfDay();
-                        $finR = \Carbon\Carbon::parse($r->fechaFin)->startOfDay();
-                        return $cursor->between($inicioR, $finR);
-                    });
-                    if (!$esReemplazo) {
-                        $cantSesiones++;
-                    }
-                }
-                $cursor->addDay();
-            }
-
-            if ($cantSesiones > 0) {
-                $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                $filas->push([
-                    'idFicha' => $h->idFicha,
-                    'ficha' => $h->ficha,
-                    'dia' => $diasSemana[$h->idDia] ?? $h->idDia,
-                    'horaInicial' => $h->horaInicial,
-                    'horaFinal' => $h->horaFinal,
-                    'cantSesiones' => $cantSesiones,
-                    'horasTotales' => round($duracionSesion * $cantSesiones, 2),
-                    'horarioMateria' => $h
-                ]);
-            }
-        }
-
-        // 4. Procesar reemplazos hechos (sumando horas)
-        foreach ($reemplazosHechos as $r) {
-            $h = $r->horario;
-            if (!$h) continue;
-
-            $desde = \Carbon\Carbon::parse($r->fechaInicio)->max($inicio);
-            $hasta = \Carbon\Carbon::parse($r->fechaFin)->min($fin);
-            $idDiaInt = (int) $h->idDia;
-            $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-            $cantSesiones = 0;
-            $cursor = $desde->copy()->startOfDay();
-            $finalC = $hasta->copy()->startOfDay();
-
-            while ($cursor->lte($finalC)) {
-                if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                    $cantSesiones++;
-                }
-                $cursor->addDay();
-            }
-
-            if ($cantSesiones > 0) {
-                $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                $filas->push([
-                    'idFicha' => $h->idFicha,
-                    'ficha' => $h->ficha,
-                    'dia' => ($diasSemana[$h->idDia] ?? $h->idDia) . ' (Reemplazo)',
-                    'horaInicial' => $h->horaInicial,
-                    'horaFinal' => $h->horaFinal,
-                    'cantSesiones' => $cantSesiones,
-                    'horasTotales' => round($duracionSesion * $cantSesiones, 2),
-                    'horarioMateria' => $h
-                ]);
-            }
-        }
-
-        $horariosPorFicha = $filas->groupBy('idFicha')->map(function ($grupo) {
-            $primera = $grupo->first();
-            $ficha = $primera['ficha'];
-            $programa = $ficha?->asignacion?->programa;
-
-            return [
-                'idFicha' => $primera['idFicha'],
-                'codigoFicha' => $ficha?->codigo,
-                'programaFormacion' => $programa?->nombrePrograma,
-                'filas' => $grupo->map(function ($f) {
-                    unset($f['idFicha'], $f['ficha'], $f['horarioMateria']);
-                    return $f;
-                })->values(),
-                'totalHorasFicha' => $grupo->sum('horasTotales'),
-            ];
-        })->values();
-
-        $horariosMaterias = $filas->pluck('horarioMateria')->unique('id')->values();
 
         // IDs únicos de los RAPs que se están impartiendo en el periodo
         $idMaterias = $horariosMaterias
