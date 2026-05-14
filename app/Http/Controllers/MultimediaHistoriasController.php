@@ -213,6 +213,10 @@ class MultimediaHistoriasController extends Controller
     public function destroyGrupoMultimedia($id)
     {
         $grupoMultimedia = GrupoMultimedia::findOrFail($id);
+        
+        // Limpiar referencias en la tabla de eventos antes de borrar el grupo
+        \App\Models\Evento::where('idGrupoMultimedia', $id)->update(['idGrupoMultimedia' => null]);
+
         $grupoMultimedia->gruposMultimedia()->delete();
         $grupoMultimedia->delete();
 
