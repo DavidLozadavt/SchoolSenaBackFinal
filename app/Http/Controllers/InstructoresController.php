@@ -1085,19 +1085,20 @@ class InstructoresController extends Controller
                         $horasAsignadas = 0;
 
                         foreach ($contract->horarioMateria as $h) {
-                            $desde = Carbon::parse($h->fechaInicial)->max($inicio);
-                            $hasta = Carbon::parse($h->fechaFinal ?? Carbon::now())->min($fin);
+                            $desde = Carbon::parse($h->fechaInicial)->startOfDay()->max($inicio);
+                            $hasta = Carbon::parse($h->fechaFinal ?? Carbon::now())->endOfDay()->min($fin);
 
                             if ($desde->gt($hasta))
                                 continue;
 
                             $duracionSesion = (strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600;
-                            $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                            $idDiaInt = (int) $h->idDia;
+                            $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
                             $cantSesiones = 0;
                             $cursor = $desde->copy();
 
                             while ($cursor->lte($hasta)) {
-                                if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                                if ((int) $cursor->dayOfWeek === $diaSemanaCarbon)
                                     $cantSesiones++;
                                 $cursor->addDay();
                             }
@@ -1718,12 +1719,12 @@ class InstructoresController extends Controller
                 $filas = $horarios->map(function ($h) use ($inicio, $fin, $diasSemana) {
                     $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
                     $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-                    $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                    $diaSemanaCarbon = (int) $h->idDia === 7 ? 0 : (int) $h->idDia;
                     $cantSesiones = 0;
                     $cursor = $desde->copy();
 
                     while ($cursor->lte($hasta)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                        if ((int) $cursor->dayOfWeek === $diaSemanaCarbon)
                             $cantSesiones++;
                         $cursor->addDay();
                     }
@@ -1933,12 +1934,12 @@ class InstructoresController extends Controller
                 $filas = $horarios->map(function ($h) use ($inicio, $fin, $diasSemana) {
                     $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
                     $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-                    $diaSemanaCarbon = $h->idDia === 7 ? 0 : $h->idDia;
+                    $diaSemanaCarbon = (int) $h->idDia === 7 ? 0 : (int) $h->idDia;
                     $cantSesiones = 0;
                     $cursor = $desde->copy();
 
                     while ($cursor->lte($hasta)) {
-                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                        if ((int) $cursor->dayOfWeek === $diaSemanaCarbon)
                             $cantSesiones++;
                         $cursor->addDay();
                     }
