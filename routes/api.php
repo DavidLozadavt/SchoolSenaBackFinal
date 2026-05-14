@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\EventoController;
+
+
 use App\Http\Controllers\ActividadContratoController;
 use App\Http\Controllers\AgendaEscenarioController;
 use App\Http\Controllers\AperturarProgramaController;
@@ -1555,6 +1558,15 @@ Route::middleware('auth:api')->group(function () {
     // Deezer
     Route::get('deezer/search', [MultimediaHistoriasController::class, 'searchTrack']);
     Route::get('deezer/search/{id}', [MultimediaHistoriasController::class, 'getTrack']);
+    
+    // --- EVENTOS ---
+    Route::get('eventos-multimedia', [EventoController::class, 'index']);
+    Route::get('eventos-multimedia/{id}', [EventoController::class, 'show']);
+    Route::post('eventos-multimedia', [EventoController::class, 'store']);
+    Route::post('eventos-multimedia/{id}', [EventoController::class, 'update']);
+    Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy']);
+
+
 });
 
 // Rutas para Actas
