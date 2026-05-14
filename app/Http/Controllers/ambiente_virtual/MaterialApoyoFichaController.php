@@ -6,14 +6,63 @@ use App\Http\Controllers\Controller;
 use App\Models\Ficha;
 use App\Models\MaterialApoyoRap;
 use App\Models\Materia;
+use App\Models\Person;
+use App\Util\KeyUtil;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
-/** CRUD de material de apoyo de consulta por ficha + RAP (tabla materialApoyoRap). */
+/** CRUD de biblioteca de conocimiento (tabla materialApoyoRap), listado por programa vía ficha→asignación. */
 class MaterialApoyoFichaController extends Controller
 {
+    /**
+     * Fichas que comparten el mismo programa que la ficha dada (idAsignacion → idPrograma).
+     *
+     * @return array<int, int>
+     */
+    private function fichaIdsMismoPrograma(int $idFicha): array
+    {
+        $base = [(int) $idFicha];
+        if (! Schema::hasTable('ficha') || ! Schema::hasTable('aperturarprograma')) {
+            return $base;
+        }
+        $idAsignacion = Ficha::query()->whereKey($idFicha)->value('idAsignacion');
+        if (! $idAsignacion) {
+            return $base;
+        }
+        $idPrograma = DB::table('aperturarprograma')->where('id', $idAsignacion)->value('idPrograma');
+        if (! $idPrograma) {
+            return $base;
+        }
+        $ids = DB::table('ficha as f')
+            ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
+            ->where('ap.idPrograma', $idPrograma)
+            ->pluck('f.id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        return $ids !== [] ? $ids : $base;
+    }
+
+    private function usuarioPuedeMutarMaterialApoyoRap(MaterialApoyoRap $material): bool
+    {
+        $user = KeyUtil::user();
+        if (! $user || ! $user->idpersona) {
+            return false;
+        }
+        if ($material->idPersona !== null && (int) $material->idPersona === (int) $user->idpersona) {
+            return true;
+        }
+        $permKeys = collect(KeyUtil::permissions())->map(fn ($k) => (string) $k)->all();
+
+        return in_array('GESTION_USUARIO', $permKeys, true);
+    }
+
     public function index(int $idFicha): JsonResponse
     {
         try {
@@ -22,16 +71,8 @@ class MaterialApoyoFichaController extends Controller
                 return response()->json([]);
             }
 
-            $query = MaterialApoyoRap::query()->where('idFicha', $idFicha);
-
-            $idMateria = (int) request()->query('idMateria', 0);
-            $idRap = (int) request()->query('idRap', 0);
-            if ($idMateria > 0) {
-                $query->where('idMateria', $idMateria);
-            }
-            if ($idRap > 0) {
-                $query->where('idRap', $idRap);
-            }
+            $fichaIds = $this->fichaIdsMismoPrograma($idFicha);
+            $query = MaterialApoyoRap::query()->whereIn('idFicha', $fichaIds);
 
             $rows = $query->orderByDesc('id')->get();
 
@@ -119,6 +160,9 @@ class MaterialApoyoFichaController extends Controller
                 return response()->json(['errors' => ['Se requiere al menos un recurso: documento PDF, enlace o video']], 422);
             }
 
+            $user = KeyUtil::user();
+            $idPersonaCreador = $user?->idpersona ? (int) $user->idpersona : null;
+
             $payloadCreate = [
                 'titulo' => $request->titulo ?? null,
                 'descripcion' => $request->descripcion ?? null,
@@ -128,6 +172,7 @@ class MaterialApoyoFichaController extends Controller
                 'idFicha' => $idFicha,
                 'idMateria' => (int) $request->idMateria,
                 'idRap' => (int) $request->idRap,
+                'idPersona' => $idPersonaCreador,
             ];
 
             $material = MaterialApoyoRap::create($payloadCreate);
@@ -146,7 +191,12 @@ class MaterialApoyoFichaController extends Controller
             if (! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
                 return response()->json(['error' => 'Ejecute migraciones para habilitar material de apoyo por ficha y RAP.'], 503);
             }
-            $material = MaterialApoyoRap::where('idFicha', $idFicha)->whereKey($id)->firstOrFail();
+            $fichaIds = $this->fichaIdsMismoPrograma($idFicha);
+            $material = MaterialApoyoRap::whereIn('idFicha', $fichaIds)->whereKey($id)->firstOrFail();
+
+            if (! $this->usuarioPuedeMutarMaterialApoyoRap($material)) {
+                return response()->json(['error' => 'No autorizado para editar este material.'], 403);
+            }
 
             $request->validate([
                 'titulo' => 'sometimes|required|string|max:255',
@@ -221,7 +271,12 @@ class MaterialApoyoFichaController extends Controller
             if (! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
                 return response()->json(['error' => 'Ejecute migraciones para habilitar material de apoyo por ficha y RAP.'], 503);
             }
-            $material = MaterialApoyoRap::where('idFicha', $idFicha)->whereKey($id)->firstOrFail();
+            $fichaIds = $this->fichaIdsMismoPrograma($idFicha);
+            $material = MaterialApoyoRap::whereIn('idFicha', $fichaIds)->whereKey($id)->firstOrFail();
+
+            if (! $this->usuarioPuedeMutarMaterialApoyoRap($material)) {
+                return response()->json(['error' => 'No autorizado para eliminar este material.'], 403);
+            }
 
             $this->deleteStoredPublicFileIfLocal($material->urlDocumento);
             $this->deleteStoredPublicFileIfLocal($material->urlVideo);
@@ -245,6 +300,29 @@ class MaterialApoyoFichaController extends Controller
             ];
         }
 
+        $matModel = Materia::query()->select(['id', 'nombreMateria', 'idMateriaPadre'])->find($m->idMateria);
+        $materiaNombre = $matModel?->nombreMateria;
+        $competenciaNombre = null;
+        if ($matModel && $matModel->idMateriaPadre) {
+            $competenciaNombre = Materia::query()->whereKey($matModel->idMateriaPadre)->value('nombreMateria');
+        } else {
+            $competenciaNombre = $materiaNombre;
+        }
+
+        $creador = null;
+        if ($m->idPersona) {
+            $p = Person::query()->select(['id', 'nombre1', 'nombre2', 'apellido1', 'apellido2', 'email', 'rutaFoto'])->find($m->idPersona);
+            if ($p) {
+                $creador = [
+                    'idPersona' => (int) $p->id,
+                    'nombreCompleto' => trim(implode(' ', array_filter([$p->nombre1, $p->nombre2, $p->apellido1, $p->apellido2]))),
+                    'email' => $p->email,
+                    'rutaFoto' => $p->rutaFoto,
+                    'rutaFotoUrl' => $p->rutaFotoUrl ?? null,
+                ];
+            }
+        }
+
         $out = [
             'id' => $m->id,
             'titulo' => $m->titulo,
@@ -257,7 +335,11 @@ class MaterialApoyoFichaController extends Controller
             'idFicha' => $m->idFicha,
             'idMateria' => $m->idMateria,
             'idRap' => $m->idRap,
+            'idPersona' => $m->idPersona,
+            'materiaNombre' => $materiaNombre,
+            'competenciaNombre' => $competenciaNombre,
             'rap' => $rap,
+            'creador' => $creador,
             'created_at' => $m->created_at,
             'updated_at' => $m->updated_at,
         ];

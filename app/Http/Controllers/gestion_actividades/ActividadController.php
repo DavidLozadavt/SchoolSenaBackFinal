@@ -69,11 +69,16 @@ class ActividadController extends Controller
                 return response()->json([]);
             }
 
+            /** @var array<int, int> */
+            $fichaIdsPrograma = $this->expandFichaIdsMismoPrograma($fichaIds->all());
+
             $query = DB::table($tablaMaterial . ' as mar')
                 ->leftJoin('materia as mat', 'mar.idMateria', '=', 'mat.id')
                 ->leftJoin('materia as rap', 'mar.idRap', '=', 'rap.id')
+                ->leftJoin('materia as comp', 'mat.idMateriaPadre', '=', 'comp.id')
                 ->leftJoin('ficha as f', 'mar.idFicha', '=', 'f.id')
-                ->whereIn('mar.idFicha', $fichaIds->all());
+                ->leftJoin('persona as creador', 'mar.idPersona', '=', 'creador.id')
+                ->whereIn('mar.idFicha', $fichaIdsPrograma);
 
             $idFicha = (int) $request->query('idFicha', 0);
             $idMateria = (int) $request->query('idMateria', 0);
@@ -98,10 +103,18 @@ class ActividadController extends Controller
                 'mar.idMateria',
                 'mar.idFicha',
                 'mar.idRap',
+                'mar.idPersona',
                 'mar.created_at',
                 'mat.nombreMateria as materiaNombre',
                 'rap.nombreMateria as rapNombre',
                 'f.codigo as fichaCodigo',
+                'creador.nombre1 as creadorNombre1',
+                'creador.nombre2 as creadorNombre2',
+                'creador.apellido1 as creadorApellido1',
+                'creador.apellido2 as creadorApellido2',
+                'creador.email as creadorEmail',
+                'creador.rutaFoto as creadorRutaFoto',
+                DB::raw('COALESCE(comp.nombreMateria, mat.nombreMateria) as competenciaNombre'),
             ];
             if (Schema::hasColumn($tablaMaterial, 'urlVideo')) {
                 $selectCols[] = 'mar.urlVideo';
@@ -118,6 +131,24 @@ class ActividadController extends Controller
                 $idRapResolved = (int) $row->idRap;
                 $urlVideo = $tieneColVideo ? ($row->urlVideo ?? null) : null;
 
+                $nombreCreador = trim(implode(' ', array_filter([
+                    $row->creadorNombre1 ?? '',
+                    $row->creadorNombre2 ?? '',
+                    $row->creadorApellido1 ?? '',
+                    $row->creadorApellido2 ?? '',
+                ])));
+
+                $creador = null;
+                if (! empty($row->idPersona)) {
+                    $creador = [
+                        'idPersona' => (int) $row->idPersona,
+                        'nombreCompleto' => $nombreCreador !== '' ? $nombreCreador : null,
+                        'email' => $row->creadorEmail ?? null,
+                        'rutaFoto' => $row->creadorRutaFoto ?? null,
+                        'rutaFotoUrl' => $this->resolvePersonaPublicFotoUrl($row->creadorRutaFoto ?? null),
+                    ];
+                }
+
                 return [
                     'id' => (int) $row->id,
                     'titulo' => $row->titulo,
@@ -129,12 +160,15 @@ class ActividadController extends Controller
                     'urlVideoUrl' => $this->publicUrl($urlVideo),
                     'idMateria' => (int) $row->idMateria,
                     'materiaNombre' => $row->materiaNombre,
+                    'competenciaNombre' => $row->competenciaNombre,
                     'idFicha' => (int) $row->idFicha,
                     'fichaCodigo' => $row->fichaCodigo,
                     'idRap' => $idRapResolved > 0 ? $idRapResolved : null,
                     'rapNombre' => $row->rapNombre ?: $row->materiaNombre,
                     'legacySinRap' => false,
                     'created_at' => $row->created_at,
+                    'idPersona' => $row->idPersona ? (int) $row->idPersona : null,
+                    'creador' => $creador,
                 ];
             })->values();
 
@@ -142,6 +176,50 @@ class ActividadController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Amplía las fichas del aprendiz a todas las fichas que comparten el mismo programa
+     * (ficha.idAsignacion → aperturarprograma.idPrograma), sin modificar la base de datos.
+     *
+     * @param  array<int, int>  $fichaIds
+     * @return array<int, int>
+     */
+    private function expandFichaIdsMismoPrograma(array $fichaIds): array
+    {
+        $fichaIds = array_values(array_unique(array_map('intval', $fichaIds)));
+        if ($fichaIds === []) {
+            return [];
+        }
+        if (! Schema::hasTable('ficha') || ! Schema::hasTable('aperturarprograma')) {
+            return $fichaIds;
+        }
+
+        $programIds = DB::table('ficha as f')
+            ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
+            ->whereIn('f.id', $fichaIds)
+            ->whereNotNull('ap.idPrograma')
+            ->distinct()
+            ->pluck('ap.idPrograma')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->values();
+
+        if ($programIds->isEmpty()) {
+            return $fichaIds;
+        }
+
+        $expanded = DB::table('ficha as f2')
+            ->join('aperturarprograma as ap2', 'f2.idAsignacion', '=', 'ap2.id')
+            ->whereIn('ap2.idPrograma', $programIds->all())
+            ->distinct()
+            ->pluck('f2.id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->values()
+            ->all();
+
+        return array_values(array_unique(array_merge($fichaIds, $expanded)));
     }
 
     public function actividadesAprendiz(Request $request): JsonResponse
