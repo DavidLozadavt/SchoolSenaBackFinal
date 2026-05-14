@@ -854,7 +854,10 @@ class FichaController extends Controller
      * Obtener clases asignadas de un instructor
      * Devuelve materias individuales con sus horarios específicos
      * Si no se proporciona idInstructor, se obtiene del usuario autenticado
-     * 
+     *
+     * La respuesta se deduplica por slot lógico (ficha, día, franja, jornada); la regla debe coincidir con
+     * `schoolSenaFrontFinal/src/utils/clasesAsignadasLogica.ts` y con `claveLogicaClaseAsignadaInstructor` aquí.
+     *
      * @param Request $request
      * @param int|null $idInstructor ID del contrato (instructor) - opcional
      * @return JsonResponse
@@ -897,6 +900,11 @@ class FichaController extends Controller
                     DB::raw('hm.fechaFinal as fechaFinal'),
                 ];
 
+            $hasInfraestructura = Schema::hasColumn('horarioMateria', 'idInfraestructura');
+            $selectAula = $hasInfraestructura
+                ? ['inf.nombreInfraestructura as aula_nombre']
+                : [DB::raw('NULL as aula_nombre')];
+
             // Grano: una fila por horarioMateria.id (PK). Sin GROUP BY amplio que duplique hm.id.
             $qb = DB::table('horarioMateria as hm')
                 ->select(array_merge([
@@ -904,25 +912,13 @@ class FichaController extends Controller
                     'f.codigo as ficha_codigo',
                     'p.nombrePrograma as programa_nombre',
                     'm.nombreMateria as materia_nombre',
-                    'm.idMateriaPadre',
-                    // Competencia: padre en materia, o padre vía seguimientoMateria (misma ficha), o la misma materia.
-                    DB::raw('COALESCE(
-                        CASE WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m_padre.nombreMateria END,
-                        CASE WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m_sm_padre.nombreMateria END,
-                        m.nombreMateria
-                    ) as competencia_nombre'),
-                    // RAP: nombre de la fila materia del horario solo si hay competencia padre (materia o seguimiento).
-                    DB::raw('CASE
-                        WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m.nombreMateria
-                        WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m.nombreMateria
-                        ELSE NULL
-                    END as rap_nombre'),
+                ], $this->selectCompetenciaRapIdPadreMateriaClase(), [
                     'j.nombreJornada as jornada_nombre',
                     'j.nombreJornada as jornada_tipo',
                     'd.dia as dia_semana',
-                    'hm.horaInicial',
-                    'hm.horaFinal',
-                ], $selectFechas, [
+                    'ap.fechaInicialClases as periodo_fecha_inicial_clases',
+                    'ap.fechaFinalClases as periodo_fecha_final_clases',
+                ], $this->selectHoraTimeHorarioMateria(), $selectFechas, [
                     'hm.idDia',
                     'c.id as contrato_id',
                     DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
@@ -931,24 +927,23 @@ class FichaController extends Controller
                     'hm.id as idHorarioMateria',
                     'hm.idGradoMateria as idGradoMateria',
                     'gm.idMateria as idMateria',
-                ]));
+                ], $selectAula));
             $qb = $qb
                 ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
                 ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
                 ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
                 ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
-                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
-                ->leftJoin('materia as m_padre', 'm.idMateriaPadre', '=', 'm_padre.id')
-                ->leftJoin('seguimientoMateria as sm', function ($join) {
-                    $join->whereRaw(
-                        'sm.id = (SELECT MAX(sm2.id) FROM seguimientoMateria sm2 WHERE sm2.idFicha = f.id AND sm2.idMateria = m.id)'
-                    );
-                })
-                ->leftJoin('materia as m_sm_padre', 'sm.idMateriaPadre', '=', 'm_sm_padre.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id');
+            $qb = $this->aplicarJoinsMateriaCompetenciaRapSeguimiento($qb);
+            $qb = $qb
                 ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
                 ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id');
+
+            if ($hasInfraestructura) {
+                $qb = $qb->leftJoin('infraestructura as inf', 'hm.idInfraestructura', '=', 'inf.id');
+            }
 
             if ($tieneAsignacionSesion) {
                 $qb->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
@@ -1033,101 +1028,11 @@ class FichaController extends Controller
                 return $clase;
             });
 
-            // Logs temporales para depuración
-            Log::info('=== CLASES ASIGNADAS DEL INSTRUCTOR ===', [
-                'idInstructor' => $idInstructor,
-                'total_clases' => $clases->count(),
-                'clases' => $clases->map(function ($clase) {
-                    return [
-                        'idHorarioMateria' => $clase->idHorarioMateria,
-                        'materia_nombre' => $clase->materia_nombre,
-                        'fechaInicial' => $clase->fechaInicial,
-                        'horaInicial' => $clase->horaInicial,
-                        'horaFinal' => $clase->horaFinal,
-                        'jornada_tipo' => $clase->jornada_tipo,
-                        'ficha_id' => $clase->ficha_id,
-                        'ficha_codigo' => $clase->ficha_codigo,
-                        'contrato_id' => $clase->contrato_id,
-                        'estado' => $clase->estado,
-                        'dia_semana' => $clase->dia_semana ?? null
-                    ];
-                })->toArray()
-            ]);
-
-            // Log adicional: verificar clases con la misma fecha pero diferentes horarios
-            $clasesPorFecha = $clases->groupBy('fechaInicial');
-            foreach ($clasesPorFecha as $fecha => $clasesFecha) {
-                if ($clasesFecha->count() > 1) {
-                    Log::info("=== MÚLTIPLES CLASES EN FECHA: {$fecha} ===", [
-                        'total' => $clasesFecha->count(),
-                        'clases' => $clasesFecha->map(function ($clase) {
-                            return [
-                                'idHorarioMateria' => $clase->idHorarioMateria,
-                                'materia_nombre' => $clase->materia_nombre,
-                                'horaInicial' => $clase->horaInicial,
-                                'horaFinal' => $clase->horaFinal,
-                                'jornada_tipo' => $clase->jornada_tipo,
-                                'ficha_id' => $clase->ficha_id
-                            ];
-                        })->toArray()
-                    ]);
-                }
-            }
-
-            // Log adicional: verificar clases que NO tienen el instructor asignado
-            $clasesSinInstructor = DB::table('horarioMateria as hm')
-                ->select([
-                    'hm.id as idHorarioMateria',
-                    'hm.fechaInicial',
-                    'hm.horaInicial',
-                    'hm.idContrato',
-                    'hm.idFicha'
-                ])
-                ->leftJoin('contrato as c', 'hm.idContrato', '=', 'c.id')
-                ->whereNotNull('hm.idDia')
-                ->whereNotNull('hm.horaInicial')
-                ->whereNotNull('hm.horaFinal')
-                ->where(function ($query) use ($idInstructor) {
-                    $query->whereNull('hm.idContrato')
-                        ->orWhere('hm.idContrato', '!=', $idInstructor);
-                })
-                ->whereIn('hm.fechaInicial', $clases->pluck('fechaInicial')->unique())
-                ->get();
-
-            if ($clasesSinInstructor->count() > 0) {
-                Log::info('=== CLASES CON LA MISMA FECHA PERO SIN ESTE INSTRUCTOR ===', [
-                    'total' => $clasesSinInstructor->count(),
-                    'clases' => $clasesSinInstructor->map(function ($clase) {
-                        return [
-                            'idHorarioMateria' => $clase->idHorarioMateria,
-                            'fechaInicial' => $clase->fechaInicial,
-                            'horaInicial' => $clase->horaInicial,
-                            'idContrato' => $clase->idContrato,
-                            'idFicha' => $clase->idFicha
-                        ];
-                    })->toArray()
-                ]);
-            }
-
-            // Log adicional: verificar si hay clases con la misma fecha pero diferentes horarios
-            $clasesPorFecha = $clases->groupBy('fechaInicial');
-            foreach ($clasesPorFecha as $fecha => $clasesFecha) {
-                if ($clasesFecha->count() > 1) {
-                    Log::info("=== MÚLTIPLES CLASES EN FECHA: {$fecha} ===", [
-                        'total' => $clasesFecha->count(),
-                        'clases' => $clasesFecha->map(function ($clase) {
-                            return [
-                                'idHorarioMateria' => $clase->idHorarioMateria,
-                                'materia_nombre' => $clase->materia_nombre,
-                                'horaInicial' => $clase->horaInicial,
-                                'horaFinal' => $clase->horaFinal,
-                                'jornada_tipo' => $clase->jornada_tipo,
-                                'ficha_id' => $clase->ficha_id
-                            ];
-                        })->toArray()
-                    ]);
-                }
-            }
+            // Una tarjeta por slot lógico (ficha + día + franja + jornada); conserva el menor idHorarioMateria.
+            $clases = $clases
+                ->sortBy(fn ($r) => (int) ($r->idHorarioMateria ?? PHP_INT_MAX))
+                ->unique(fn ($row) => $this->claveLogicaClaseAsignadaInstructor($row))
+                ->values();
 
             return response()->json([
                 'message' => 'Clases asignadas obtenidas correctamente',
@@ -1278,17 +1183,17 @@ class FichaController extends Controller
             // Consulta base (la que ya les devolvía datos). Sin GROUP BY: hm.id es PK → una fila;
             // ONLY_FULL_GROUP_BY en prod rompía con groupBy + columnas del SELECT.
             $claseData = DB::table('horarioMateria as hm')
-                ->select([
+                ->select(array_merge([
                     'f.id as ficha_id',
                     'f.codigo as ficha_codigo',
                     'p.nombrePrograma as programa_nombre',
                     'm.nombreMateria as materia_nombre',
                     'gm.idMateria as idMateria',
+                ], $this->selectCompetenciaRapIdPadreMateriaClase(), [
                     'j.nombreJornada as jornada_nombre',
                     'j.nombreJornada as jornada_tipo',
                     'd.dia as dia_semana',
-                    'hm.horaInicial',
-                    'hm.horaFinal',
+                ], $this->selectHoraTimeHorarioMateria(), [
                     'hm.fechaInicial as fechaInicial',
                     'hm.fechaFinal as fechaFinal',
                     'hm.idDia',
@@ -1299,16 +1204,17 @@ class FichaController extends Controller
                     'g.id as idGrado',
                     'hm.id as idHorarioMateria',
                     'gm.id as idGradoMateria',
-                    'ap.fechaInicialClases',
-                    'ap.fechaFinalClases',
-                    'ap.id as idAsignacion'
-                ])
+                    'ap.fechaInicialClases as periodo_fecha_inicial_clases',
+                    'ap.fechaFinalClases as periodo_fecha_final_clases',
+                    'ap.id as idAsignacion',
+                ]))
                 ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
                 ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
                 ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
                 ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
-                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id');
+            $claseData = $this->aplicarJoinsMateriaCompetenciaRapSeguimiento($claseData)
                 ->leftJoin('gradoPrograma as gp', 'gm.idGradoPrograma', '=', 'gp.id')
                 ->leftJoin('grado as g', 'gp.idGrado', '=', 'g.id')
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
@@ -1423,38 +1329,49 @@ class FichaController extends Controller
                 $claseDataArray['dia_semana'] = $claseData->dia_semana;
             }
 
-            // Todas las franjas del mismo instructor (misma persona en contrato): mañana + tarde, varias fichas.
-            $idPersonaInstructor = DB::table('contrato')
-                ->where('id', $claseData->contrato_id)
-                ->value('idpersona');
+            // Franjas del mismo contrato que la clase abierta (alineado con `clasesAsignadasInstructor`:
+            // `hm.idContrato` = contrato del instructor O fila enlazada en `asignacionSesion` para ese contrato).
+            // No usar solo idpersona: mezcla otros contratos del mismo docente y desvirtúa el calendario vs "Mi horario".
+            $contratoClase = (int) ($claseData->contrato_id ?? 0);
+            $tieneAsignacionSesionDetalle = Schema::hasTable('asignacionSesion');
 
-            $todasLasFechasClase = DB::table('horarioMateria as hm')
-                ->select([
+            $qbTodasFechas = DB::table('horarioMateria as hm')
+                ->select(array_merge([
                     'hm.id as idHorarioMateria',
                     'hm.fechaInicial',
                     'hm.fechaFinal',
-                    'hm.horaInicial',
-                    'hm.horaFinal',
                     'd.dia as dia_semana',
                     'hm.idDia',
                     'f.codigo as ficha_codigo',
                     'm.nombreMateria as materia_nombre',
                     'p.nombrePrograma as programa_nombre',
+                ], $this->selectCompetenciaRapIdPadreMateriaClase(), [
                     'j.nombreJornada as jornada_nombre',
-                ])
+                    'j.nombreJornada as jornada_tipo',
+                ], $this->selectHoraTimeHorarioMateria()))
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
                 ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
                 ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
                 ->leftJoin('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
                 ->leftJoin('programa as p', 'ap.idPrograma', '=', 'p.id')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
-                ->join('materia as m', 'gm.idMateria', '=', 'm.id')
-                ->join('contrato as c_instr', 'hm.idContrato', '=', 'c_instr.id')
-                ->when(
-                    $idPersonaInstructor,
-                    fn ($q) => $q->where('c_instr.idpersona', $idPersonaInstructor),
-                    fn ($q) => $q->where('hm.idContrato', $claseData->contrato_id)
-                )
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id');
+            $qbTodasFechas = $this->aplicarJoinsMateriaCompetenciaRapSeguimiento($qbTodasFechas);
+
+            if ($tieneAsignacionSesionDetalle) {
+                $qbTodasFechas->leftJoin('asignacionSesion as asig', function ($join) use ($contratoClase) {
+                    $join->on('hm.id', '=', 'asig.idHorarioMateria')
+                        ->where('asig.idContrato', '=', $contratoClase);
+                });
+            }
+
+            $todasLasFechasClase = $qbTodasFechas
+                ->where(function ($query) use ($contratoClase, $tieneAsignacionSesionDetalle) {
+                    $query->where('hm.idContrato', $contratoClase);
+                    if ($tieneAsignacionSesionDetalle) {
+                        $query->orWhereNotNull('asig.id');
+                    }
+                })
                 ->whereNotNull('hm.fechaInicial')
                 ->whereNotNull('d.dia')
                 ->orderBy('hm.fechaInicial', 'asc')
@@ -1492,6 +1409,100 @@ class FichaController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * LEFT JOINs materia padre + seguimientoMateria (misma regla que `clasesAsignadasInstructor`).
+     *
+     * @param  \Illuminate\Database\Query\Builder  $qb
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private function aplicarJoinsMateriaCompetenciaRapSeguimiento($qb)
+    {
+        return $qb
+            ->leftJoin('materia as m_padre', 'm.idMateriaPadre', '=', 'm_padre.id')
+            ->leftJoin('seguimientoMateria as sm', function ($join) {
+                $join->whereRaw(
+                    'sm.id = (SELECT MAX(sm2.id) FROM seguimientoMateria sm2 WHERE sm2.idFicha = f.id AND sm2.idMateria = m.id)'
+                );
+            })
+            ->leftJoin('materia as m_sm_padre', 'sm.idMateriaPadre', '=', 'm_sm_padre.id');
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private function selectCompetenciaRapIdPadreMateriaClase(): array
+    {
+        return [
+            'm.idMateriaPadre',
+            DB::raw('COALESCE(
+                CASE WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m_padre.nombreMateria END,
+                CASE WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m_sm_padre.nombreMateria END,
+                m.nombreMateria
+            ) as competencia_nombre'),
+            DB::raw('CASE
+                WHEN m.idMateriaPadre IS NOT NULL AND m.idMateriaPadre > 0 AND m_padre.id IS NOT NULL THEN m.nombreMateria
+                WHEN sm.id IS NOT NULL AND sm.idMateriaPadre IS NOT NULL AND sm.idMateriaPadre > 0 AND m_sm_padre.id IS NOT NULL THEN m.nombreMateria
+                ELSE NULL
+            END as rap_nombre'),
+        ];
+    }
+
+    /**
+     * @return array<int, \Illuminate\Contracts\Database\Query\Expression>
+     */
+    private function selectHoraTimeHorarioMateria(): array
+    {
+        return [
+            DB::raw('TIME(hm.horaInicial) as horaInicial'),
+            DB::raw('TIME(hm.horaFinal) as horaFinal'),
+        ];
+    }
+
+    /**
+     * Hora normalizada para la clave de deduplicación de `clasesAsignadasInstructor`.
+     * Debe coincidir con `schoolSenaFrontFinal/src/utils/clasesAsignadasLogica.ts` (`horaClaveClaseAsignada`).
+     */
+    private function horaClaveClaseAsignada(string $v): string
+    {
+        $s = trim($v);
+        if ($s === '') {
+            return '';
+        }
+        if (preg_match('/(\d{1,2}):(\d{2})/', $s, $m)) {
+            return sprintf('%02d:%02d', (int) $m[1], (int) $m[2]);
+        }
+
+        return substr($s, 0, 5);
+    }
+
+    /**
+     * Texto de jornada para la misma clave (preferir nombre; mayúsculas UTF-8).
+     * Alineado con `jornadaClaveClaseAsignada` en el front.
+     */
+    private function jornadaClaveClaseAsignada(object $row): string
+    {
+        $n = trim((string) ($row->jornada_nombre ?? ''));
+        $t = trim((string) ($row->jornada_tipo ?? ''));
+        $s = $n !== '' ? $n : $t;
+
+        return mb_strtoupper($s, 'UTF-8');
+    }
+
+    /**
+     * Clave única por slot en listados de un instructor (no usar en listados multi-instructor).
+     * Alineado con `claveLogicaClaseAsignadaInstructor` en el front.
+     */
+    private function claveLogicaClaseAsignadaInstructor(object $row): string
+    {
+        return implode('|', [
+            (int) ($row->ficha_id ?? 0),
+            (int) ($row->idDia ?? 0),
+            $this->horaClaveClaseAsignada((string) ($row->horaInicial ?? '')),
+            $this->horaClaveClaseAsignada((string) ($row->horaFinal ?? '')),
+            $this->jornadaClaveClaseAsignada($row),
+        ]);
     }
 
     /**
@@ -2373,6 +2384,7 @@ class FichaController extends Controller
                 $materias[] = [
                     'idMateria'           => (int)   $primerHorario->idMateria,
                     'materia_nombre'      => (string) ($primerHorario->materia_nombre ?? ''),
+                    'ficha_codigo'        => (string) ($primerHorario->ficha_codigo ?? ''),
                     'profesor_nombre'     => (string) trim($primerHorario->profesor_nombre ?? 'Sin asignar'),
                     'profesor_email'      => (string) ($primerHorario->profesor_email ?? ''),
                     'aula_nombre'         => (string) $aulaNombre,
