@@ -56,7 +56,7 @@ class InstructoresController extends Controller
                             'idDia',
                             'fechaInicial',
                             'fechaFinal'
-                        )->where('estado', 'ASIGNADO')
+                        )->where('estado', '!=', 'PENDIENTE')
                             ->where(function ($q) use ($inicio, $fin) {
                                 $q->whereBetween('fechaInicial', [$inicio, $fin])
                                     ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -75,7 +75,7 @@ class InstructoresController extends Controller
                 $q->where('idCentroFormacion', $validated['idCentroFormacion']);
             })
             ->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
-                $h->where('estado', 'ASIGNADO')
+                $h->where('estado', '!=', 'PENDIENTE')
                     ->where(function ($q) use ($inicio, $fin) {
                         $q->whereBetween('fechaInicial', [$inicio, $fin])
                             ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -100,11 +100,11 @@ class InstructoresController extends Controller
                 // Obtener detallesRmi PENDIENTE/RECHAZADO del periodo actual para este contrato
                 $detallesRmi = $rmi
                     ? DetalleRmi::where('idRmi', $rmi->id)
-                    ->whereIn('estado', ['PENDIENTE', 'RECHAZADO'])
-                    ->whereHas('horarioMateria', function ($q) use ($contrato) {
+                        ->whereIn('estado', ['PENDIENTE', 'RECHAZADO'])
+                        ->whereHas('horarioMateria', function ($q) use ($contrato) {
                         $q->where('idContrato', $contrato->id);
                     })
-                    ->get()
+                        ->get()
                     : collect();
 
                 // Si no tiene detallesRmi PENDIENTE/RECHAZADO en el periodo, excluir
@@ -118,32 +118,32 @@ class InstructoresController extends Controller
                 $horariosBase = $contrato->horarioMateria
                     ->filter(fn($h) => in_array($h->id, $idsConDetalle))
                     ->map(function ($h) use ($inicio, $fin) {
-                        $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-                        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
-                        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
-                        $idDiaInt = (int) $h->idDia;
-                        $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-                        $cantidadSesiones = 0;
-                        $cursor = $desde->copy();
-                        while ($cursor->lte($hasta)) {
-                            if ($cursor->dayOfWeek === $diaSemanaCarbon)
-                                $cantidadSesiones++;
-                            $cursor->addDay();
-                        }
-                        return [
-                            'id' => $h->id,
-                            'idContrato' => $h->idContrato,
-                            'horaInicial' => $h->horaInicial,
-                            'horaFinal' => $h->horaFinal,
-                            'estado' => $h->estado,
-                            'idDia' => $h->idDia,
-                            'fechaInicial' => $h->fechaInicial,
-                            'fechaFinal' => $h->fechaFinal,
-                            'duracionSesion' => (float) $duracionSesion,
-                            'cantidadSesiones' => (int) $cantidadSesiones,
-                            'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
-                        ];
-                    })->keyBy('id');
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($inicio);
+                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
+                    $idDiaInt = (int) $h->idDia;
+                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
+                    $cantidadSesiones = 0;
+                    $cursor = $desde->copy();
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon)
+                            $cantidadSesiones++;
+                        $cursor->addDay();
+                    }
+                    return [
+                        'id' => $h->id,
+                        'idContrato' => $h->idContrato,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'estado' => $h->estado,
+                        'idDia' => $h->idDia,
+                        'fechaInicial' => $h->fechaInicial,
+                        'fechaFinal' => $h->fechaFinal,
+                        'duracionSesion' => (float) $duracionSesion,
+                        'cantidadSesiones' => (int) $cantidadSesiones,
+                        'duracionHoras' => (float) round($duracionSesion * $cantidadSesiones, 2),
+                    ];
+                })->keyBy('id');
 
                 // Horas ejecutadas en el mes actual (sesiones registradas)
                 $horasEjecutadas = round(
@@ -175,26 +175,26 @@ class InstructoresController extends Controller
                 return $detallesRmi
                     ->groupBy('estado')
                     ->map(function ($grupo, $estado) use ($acu, $user, $contrato, $personaData, $horariosBase, $horasEjecutadas, $rmi) {
-                        $idsGrupo = $grupo->pluck('idHorarioMateria')->toArray();
+                    $idsGrupo = $grupo->pluck('idHorarioMateria')->toArray();
 
-                        $motivoRechazo = $estado === 'RECHAZADO'
-                            ? $grupo->first(fn($d) => !empty($d->observacion))?->observacion
-                            : null;
+                    $motivoRechazo = $estado === 'RECHAZADO'
+                        ? $grupo->first(fn($d) => !empty($d->observacion))?->observacion
+                        : null;
 
-                        return [
-                            'idActivation' => $acu->id,
-                            'emailUsuario' => $user->email,
-                            'idContrato' => $contrato->id,
-                            'idRmi' => $rmi?->id,
-                            'roles' => $acu->getRoleNames(),
-                            'estado' => $estado,
-                            'totalHoras' => $contrato->horasmes ?? 0,
-                            'totalHorasFormato' => $horasEjecutadas,
-                            'motivoRechazo' => $motivoRechazo,
-                            'horarios' => $horariosBase->only($idsGrupo)->values(),
-                            'persona' => $personaData,
-                        ];
-                    })
+                    return [
+                        'idActivation' => $acu->id,
+                        'emailUsuario' => $user->email,
+                        'idContrato' => $contrato->id,
+                        'idRmi' => $rmi?->id,
+                        'roles' => $acu->getRoleNames(),
+                        'estado' => $estado,
+                        'totalHoras' => $contrato->horasmes ?? 0,
+                        'totalHorasFormato' => $horasEjecutadas,
+                        'motivoRechazo' => $motivoRechazo,
+                        'horarios' => $horariosBase->only($idsGrupo)->values(),
+                        'persona' => $personaData,
+                    ];
+                })
                     ->values()
                     ->toArray();
             });
@@ -227,7 +227,7 @@ class InstructoresController extends Controller
                             'idDia',
                             'fechaInicial',
                             'fechaFinal'
-                        )->where('estado', 'ASIGNADO');
+                        )->where('estado', '!=', 'PENDIENTE');
 
                         $h->where(function ($q) use ($inicio, $fin) {
                             $q->whereBetween('fechaInicial', [$inicio, $fin])
@@ -248,7 +248,7 @@ class InstructoresController extends Controller
             })
             // Solo instructores con horarios en el periodo
             ->whereHas('user.persona.contracts.horarioMateria', function ($h) use ($inicio, $fin) {
-                $h->where('estado', 'ASIGNADO')
+                $h->where('estado', '!=', 'PENDIENTE')
                     ->where(function ($q) use ($inicio, $fin) {
                         $q->whereBetween('fechaInicial', [$inicio, $fin])
                             ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -395,7 +395,7 @@ class InstructoresController extends Controller
             'detallesRmi'
         ])
             ->where('idContrato', $validated['idContrato'])
-            ->where('estado', 'ASIGNADO');
+            ->where('estado', '!=', 'PENDIENTE');
 
         if (!empty($validated['periodo'])) {
             $inicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
@@ -530,7 +530,7 @@ class InstructoresController extends Controller
 
             // Obtener horarios del contrato en el periodo
             $horarios = \App\Models\HorarioMateria::where('idContrato', $contrato->id)
-                ->where('estado', 'ASIGNADO')
+                ->where('estado', '!=', 'PENDIENTE')
                 ->where(function ($q) use ($inicio, $fin) {
                     $q->whereBetween('fechaInicial', [$inicio, $fin])
                         ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -644,7 +644,7 @@ class InstructoresController extends Controller
 
             // Obtener horarios del contrato en el periodo
             $horarios = \App\Models\HorarioMateria::where('idContrato', $contrato->id)
-                ->where('estado', 'ASIGNADO')
+                ->where('estado', '!=', 'PENDIENTE')
                 ->where(function ($q) use ($inicio, $fin) {
                     $q->whereBetween('fechaInicial', [$inicio, $fin])
                         ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -770,7 +770,7 @@ class InstructoresController extends Controller
 
             // Obtener horarios del contrato en el periodo
             $horarios = \App\Models\HorarioMateria::where('idContrato', $contrato->id)
-                ->where('estado', 'ASIGNADO')
+                ->where('estado', '!=', 'PENDIENTE')
                 ->where(function ($q) use ($inicio, $fin) {
                     $q->whereBetween('fechaInicial', [$inicio, $fin])
                         ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -891,7 +891,7 @@ class InstructoresController extends Controller
                 'gradoMateria.materia.padre',
             ])
                 ->where('idContrato', $contrato->id)
-                ->where('estado', 'ASIGNADO')
+                ->where('estado', '!=', 'PENDIENTE')
                 ->where(function ($q) use ($inicio, $fin) {
                     $q->whereBetween('fechaInicial', [$inicio, $fin])
                         ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -1699,7 +1699,7 @@ class InstructoresController extends Controller
             'ficha.asignacion.programa',
         ])
             ->where('idContrato', $idContrato)
-            ->where('estado', 'ASIGNADO')
+            ->where('estado', '!=', 'PENDIENTE')
             ->where(function ($q) use ($inicio, $fin) {
                 $q->whereBetween('fechaInicial', [$inicio, $fin])
                     ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -1756,7 +1756,7 @@ class InstructoresController extends Controller
             'gradoMateria.materia.padre',
         ])
             ->where('idContrato', $idContrato)
-            ->where('estado', 'ASIGNADO')
+            ->where('estado', '!=', 'PENDIENTE')
             ->where(function ($q) use ($inicio, $fin) {
                 $q->whereBetween('fechaInicial', [$inicio, $fin])
                     ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -1811,7 +1811,7 @@ class InstructoresController extends Controller
                             'faseProyecto' => $fase?->descripcionFase,
                             'proyectoFormativo' => $fase?->proyectoFormativo?->nombreProyecto,
                             'actividades' => $fase?->actividades
-                                ?->map(fn($a) => [
+                                    ?->map(fn($a) => [
                                     'id' => $a->id,
                                     'descripcionActividad' => $a->descripcionActividad,
                                 ])->values()->toArray() ?? [],
@@ -1914,7 +1914,7 @@ class InstructoresController extends Controller
             'ficha.asignacion.programa',
         ])
             ->where('idContrato', $idContrato)
-            ->where('estado', 'ASIGNADO')
+            ->where('estado', '!=', 'PENDIENTE')
             ->where(function ($q) use ($inicio, $fin) {
                 $q->whereBetween('fechaInicial', [$inicio, $fin])
                     ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -1971,7 +1971,7 @@ class InstructoresController extends Controller
             'gradoMateria.materia.padre',
         ])
             ->where('idContrato', $idContrato)
-            ->where('estado', 'ASIGNADO')
+            ->where('estado', '!=', 'PENDIENTE')
             ->where(function ($q) use ($inicio, $fin) {
                 $q->whereBetween('fechaInicial', [$inicio, $fin])
                     ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -2026,7 +2026,7 @@ class InstructoresController extends Controller
                             'faseProyecto' => $fase?->descripcionFase,
                             'proyectoFormativo' => $fase?->proyectoFormativo?->nombreProyecto,
                             'actividades' => $fase?->actividades
-                                ?->map(fn($a) => [
+                                    ?->map(fn($a) => [
                                     'id' => $a->id,
                                     'descripcionActividad' => $a->descripcionActividad,
                                 ])->values()->toArray() ?? [],
