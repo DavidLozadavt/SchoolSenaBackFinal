@@ -76,31 +76,8 @@ class EventoController extends Controller
             $evento->save();
 
             // LÓGICA AUTOMÁTICA: Crear Historia Multimedia si se solicita
-            if ($request->boolean('crearHistoria') && $evento->url) {
-                
-                // 1. Crear el Grupo Multimedia
-                $grupo = new GrupoMultimedia();
-                $grupo->idCompany   = $idCompany;
-                $grupo->idUser      = $idUser;
-                $grupo->nombreGrupo = "Evento: " . $evento->nombre;
-                $grupo->tipo        = 'historia';
-                $grupo->descripcion = "Historia generada automáticamente desde el evento: " . $evento->nombre;
-                $grupo->save();
-
-                // 2. Crear la Historia (Item multimedia)
-                $historia = new MultimediaHistorias();
-                $historia->idCompany         = $idCompany;
-                $historia->idUser            = $idUser;
-                $historia->idGrupoMultimedia = $grupo->id;
-                $historia->nombre            = $evento->nombre; // Campo 'nombre' en multimedia_historias
-                $historia->urlMultimedia     = $evento->url;   // Campo 'urlMultimedia'
-                $historia->tipo              = 'historia'; // ENUM: 'historia' | 'reel'
-                $historia->orden             = 1;
-                $historia->save();
-
-                // 3. Vincular el grupo al evento
-                $evento->idGrupoMultimedia = $grupo->id;
-                $evento->save();
+            if (filter_var($request->input('crearHistoria'), FILTER_VALIDATE_BOOLEAN)) {
+                $this->crearHistoriaMultimedia($evento);
             }
 
             DB::commit();
@@ -151,10 +128,55 @@ class EventoController extends Controller
 
         $evento->save();
 
+        // LÓGICA AUTOMÁTICA: Crear Historia Multimedia si se solicita (durante edición)
+        if (filter_var($request->input('crearHistoria'), FILTER_VALIDATE_BOOLEAN)) {
+            $this->crearHistoriaMultimedia($evento);
+        }
+
         return response()->json([
             'message' => 'Evento actualizado',
-            'evento'  => $evento->load('area')
+            'evento'  => $evento->load('area', 'grupoMultimedia')
         ]);
+    }
+
+    /**
+     * Lógica para crear historia multimedia desde un evento
+     */
+    private function crearHistoriaMultimedia(Evento $evento)
+    {
+        // Solo si tiene URL y no tiene ya un grupo vinculado
+        if (!$evento->url || $evento->idGrupoMultimedia) {
+            return;
+        }
+
+        try {
+            // 1. Crear el Grupo Multimedia
+            $grupo = new GrupoMultimedia();
+            $grupo->idCompany   = $evento->idCompany;
+            $grupo->idUser      = $evento->idUser;
+            $grupo->nombreGrupo = $evento->nombre;
+            $grupo->tipo        = 'historia';
+            $grupo->descripcion = "Historia generada automáticamente desde el evento: " . $evento->nombre;
+            $grupo->save();
+
+            // 2. Crear la Historia (Item multimedia)
+            $historia = new MultimediaHistorias();
+            $historia->idCompany         = $evento->idCompany;
+            $historia->idUser            = $evento->idUser;
+            $historia->idGrupoMultimedia = $grupo->id;
+            $historia->nombre            = $evento->nombre;
+            $historia->urlMultimedia     = $evento->url;
+            $historia->tipo              = 'historia';
+            $historia->orden             = 1;
+            $historia->descripcion       = $evento->descripcion;
+            $historia->save();
+
+            // 3. Vincular el grupo al evento
+            $evento->idGrupoMultimedia = $grupo->id;
+            $evento->save();
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error creando historia desde evento: ' . $e->getMessage());
+        }
     }
 
     /**
