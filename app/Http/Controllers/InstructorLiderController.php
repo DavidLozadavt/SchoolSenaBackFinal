@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\Ficha;
+use App\Models\Matricula;
+use App\Models\NovedadesAprendiz;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -39,16 +41,16 @@ class InstructorLiderController extends Controller
             ->where('idFicha', $idFicha)
             ->select('idMatricula', 'id')
             ->distinct();
-        
+
         $ma = $maQuery->get();
 
         if ($ma->isEmpty()) {
             // Fallback a matricula directa
             $matriculasIds = DB::table('matricula')
                 ->where('idFicha', $idFicha)
-                ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                ->whereIn('estado', ['ACTIVO', 'INACTIVO', 'OCULTO', 'PENDIENTE', 'RECHAZADO', 'APROBADO', 'CANCELADO', 'REPROBADO', 'CERRADO', 'ACEPTADO', 'LEIDO', 'EN ESPERA', 'INSCRIPCION', 'MATRICULADO', 'ABIERTO', 'EN CURSO', 'POR ACTUALIZAR', 'CURSANDO', 'ENTREVISTA', 'SIN ENTREVISTA', 'JUSTIFICADO', 'EN FORMACION', 'RETIRO VOLUNTARIO', 'POR EVALUAR', 'TRASLADADO', 'APLAZADO', 'DESERCION', 'CONDICIONADO'])
                 ->pluck('id');
-            
+
             if ($matriculasIds->isNotEmpty()) {
                 $ma = DB::table($tableMa)
                     ->whereIn('idMatricula', $matriculasIds)
@@ -76,5 +78,38 @@ class InstructorLiderController extends Controller
             ->get();
 
         return response()->json($aprendices);
+    }
+
+    public function cambiarEstadoAprendiz(Request $request)
+    {
+        $request->validate([
+            'idMatricula' => 'required|exists:matricula,id',
+            'nuevoEstado' => 'required|string',
+            'observacion' => 'nullable|string'
+        ]);
+
+        $user = KeyUtil::user();
+
+        return DB::transaction(function () use ($request, $user) {
+            $matricula = Matricula::findOrFail($request->idMatricula);
+
+            // Guardar la novedad (testigo de quien hace el cambio)
+            NovedadesAprendiz::create([
+                'idusuario' => $user->id,
+                'idmatricula' => $matricula->id,
+                'cambio' => $request->nuevoEstado,
+                'observacion' => $request->observacion
+            ]);
+
+            // Actualizar la matricula
+            $matricula->estado = $request->nuevoEstado;
+            $matricula->save();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Estado del aprendiz actualizado correctamente',
+                'data' => $matricula
+            ]);
+        });
     }
 }

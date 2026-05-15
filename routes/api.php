@@ -1576,4 +1576,5 @@ Route::middleware('auth:api')->group(function () {
 Route::middleware('auth:api')->group(function () {
     Route::get('instructor-lider', [InstructorLiderController::class, 'getFichasLider']);
     Route::get('instructor-lider/ficha/{idFicha}/aprendices', [InstructorLiderController::class, 'getAprendicesFicha']);
+    Route::post('instructor-lider/cambiar-estado-aprendiz', [InstructorLiderController::class, 'cambiarEstadoAprendiz']);
 });
