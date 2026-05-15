@@ -725,7 +725,7 @@ class ActaController extends Controller
                     'gradoMateria.materia.padre',
                 ])
                     ->where('idFicha', $acta->idFicha)
-                    ->where('estado', 'ASIGNADO')
+                    ->where('estado', '!=', 'PENDIENTE')
                     ->where(function ($q) use ($inicio, $fin) {
                         $q->whereBetween('fechaInicial', [$inicio, $fin])
                             ->orWhereBetween('fechaFinal', [$inicio, $fin])
@@ -868,10 +868,10 @@ class ActaController extends Controller
                             : 'Estudiante no encontrado';
 
                         return [
-                            'nombre'          => $nombreCompleto,
-                            'estado'          => $ma->estado ?? 'SIN ESTADO',
-                            'identificacion'  => $persona?->identificacion ?? '—',
-                            'enFormacion'     => $ma->estado === 'EN FORMACION',
+                            'nombre' => $nombreCompleto,
+                            'estado' => $ma->matricula?->estado ?? 'SIN ESTADO',
+                            'identificacion' => $persona?->identificacion ?? '—',
+                            'enFormacion' => $ma->matricula->estado === 'EN FORMACION',
                         ];
                     })
                     ->sortBy('enFormacion') // Priorizar estados que NO sean 'EN FORMACION'
@@ -880,8 +880,8 @@ class ActaController extends Controller
                     ->values();
             }
 
-            $enFormacion  = $novedades->where('enFormacion', true)->values();
-            $conNovedad   = $novedades->where('enFormacion', false)->values();
+            $enFormacion = $novedades->where('enFormacion', true)->values();
+            $conNovedad = $novedades->where('enFormacion', false)->values();
 
             $pdf = Pdf::loadView('pdf.actasInstructores', compact('acta', 'instructoresConColor', 'instructores', 'calendario', 'enFormacion', 'conNovedad'))
                 ->setPaper('letter')
