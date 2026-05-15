@@ -725,7 +725,7 @@ class ActaController extends Controller
                     'gradoMateria.materia.padre',
                 ])
                     ->where('idFicha', $acta->idFicha)
-                    ->where('estado', 'ASIGNADO')
+                    ->where('estado', '!=', 'PENDIENTE')
                     ->where(function ($q) use ($inicio, $fin) {
                         $q->whereBetween('fechaInicial', [$inicio, $fin])
                             ->orWhereBetween('fechaFinal', [$inicio, $fin])
