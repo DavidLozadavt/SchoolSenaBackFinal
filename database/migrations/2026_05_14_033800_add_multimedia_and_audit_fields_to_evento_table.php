@@ -31,6 +31,11 @@ class AddMultimediaAndAuditFieldsToEventoTable extends Migration
             if (!Schema::hasColumn('evento', 'created_at')) {
                 $table->timestamps();
             }
+
+            // Hora final para estados dinámicos
+            if (!Schema::hasColumn('evento', 'hora_final')) {
+                $table->time('hora_final')->nullable();
+            }
         });
     }
 
@@ -43,6 +48,9 @@ class AddMultimediaAndAuditFieldsToEventoTable extends Migration
     {
         Schema::table('evento', function (Blueprint $table) {
             $table->dropColumn(['idCompany', 'idUser', 'idGrupoMultimedia']);
+            if (Schema::hasColumn('evento', 'hora_final')) {
+                $table->dropColumn('hora_final');
+            }
             $table->dropTimestamps();
         });
     }
