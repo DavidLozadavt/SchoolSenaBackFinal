@@ -44,6 +44,7 @@ class EventoController extends Controller
             'nombre'       => 'required|string|max:255',
             'fechaInicial' => 'required|date',
             'hora'         => 'required',
+            'hora_final'   => 'nullable',
             'idArea'       => 'nullable|integer',
         ]);
 
@@ -61,6 +62,7 @@ class EventoController extends Controller
             $evento->fechaInicial = $request->input('fechaInicial');
             $evento->fechaFinal   = $request->input('fechaFinal');
             $evento->hora         = $request->input('hora');
+            $evento->hora_final   = $request->input('hora_final');
             $evento->linkRegistro = $request->input('linkRegistro');
             $evento->tipoEvento   = $request->input('tipoEvento', 'PRESENCIAL');
             $evento->estado       = $request->input('estado', 'PENDIENTE');
@@ -115,6 +117,7 @@ class EventoController extends Controller
         if ($request->has('fechaInicial')) $evento->fechaInicial = $request->input('fechaInicial');
         if ($request->has('fechaFinal'))   $evento->fechaFinal   = $request->input('fechaFinal') ?: null;
         if ($request->has('hora'))         $evento->hora         = $request->input('hora');
+        if ($request->has('hora_final'))   $evento->hora_final   = $request->input('hora_final');
         if ($request->has('linkRegistro')) $evento->linkRegistro = $request->input('linkRegistro') ?: null;
         if ($request->has('tipoEvento'))   $evento->tipoEvento   = $request->input('tipoEvento');
         if ($request->has('estado'))       $evento->estado       = $request->input('estado');
