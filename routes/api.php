@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\EventoController;
+use App\Http\Controllers\LyraController;
 
 
 use App\Http\Controllers\ActividadContratoController;
@@ -1378,6 +1379,22 @@ Route::group(['middleware' => 'auth:api'], function () {
 // Red
 Route::middleware('auth:api')->group(function () {
 
+    // ── LYRA AI INTEGRATION ──
+    // All endpoints are under lyra/ prefix to avoid collisions with standard CRUD routes like fichas/{id} or actividades/{id}
+    Route::prefix('lyra')->group(function () {
+        Route::get('horario-materia/hoy', [LyraController::class, 'clasesHoy']);
+        Route::get('horario-materia/semana', [LyraController::class, 'horarioSemana']);
+        Route::get('notas/mis-notas', [LyraController::class, 'misNotas']);
+        Route::get('actividades/pendientes', [LyraController::class, 'pendientes']);
+        Route::get('dashboard/resumen', [LyraController::class, 'resumenAdmin']);
+        Route::get('fichas/activas', [LyraController::class, 'fichasActivas']);
+        Route::get('nomina/resumen', [LyraController::class, 'nominaResumen']);
+        Route::get('instructores/lista', [LyraController::class, 'listaInstructores']);
+        Route::get('contratos/vencimiento', [LyraController::class, 'contratosVencimiento']);
+        Route::get('fichas/{id}/estudiantes', [LyraController::class, 'getEstudiantesFicha']);
+        Route::get('actividades/{id}/respuestas', [LyraController::class, 'getEntregas']);
+    });
+
     Route::get('red', [RedController::class, 'index']);
     Route::get('red/{id}', [RedController::class, 'show']);
 
@@ -1385,6 +1402,7 @@ Route::middleware('auth:api')->group(function () {
     Route::put('red/{id}', [RedController::class, 'update']);
     Route::delete('red/{id}', [RedController::class, 'destroy']);
     Route::get('materias-by-contrato', [HorarioMateriaController::class, 'getMateriasByContrato']);
+
 });
 
 Route::get('estadisticas-asistencia', [AsistenciaController::class, 'getEstadisticasAsistencia']);
