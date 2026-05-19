@@ -9,7 +9,7 @@ class AsignacionCategoriaFormacionContrato extends Model
 {
     use HasFactory;
 
-    protected $table = 'asignacionCategoriaFormacionContratos';
+    protected $table = 'asignacionCategoriaFormacionContrato';
 
     public function contrato()
     {
