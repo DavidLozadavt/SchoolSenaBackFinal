@@ -9,6 +9,8 @@ class CategoriaFormacion extends Model
 {
     use HasFactory;
 
+    protected $table = 'categoriaFormacion';
+
     public function solicitudes()
     {
         return $this->hasMany(SolicitudMateria::class, 'idCategoriaFormacion', 'id');

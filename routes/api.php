@@ -158,6 +158,7 @@ use App\Http\Controllers\InstructoresController;
 use App\Http\Controllers\ProyectoFormativoController;
 use App\Http\Controllers\SancionesController;
 use App\Http\Controllers\AnexoActaController;
+use App\Http\Controllers\gestion_solicitudes_instructor\SolicitudMateriaController;
 use App\Http\Controllers\InstructorLiderController;
 
 /*
@@ -542,7 +543,7 @@ Route::group([
 Route::apiResource('tipo_contrato', TipoContratoController::class);
 Route::get('ciudades/departamento/{idDepartamento}', [CiudadController::class, 'byDepartamento']);
 
-//rutas para cargar los estudiantes y ejecutar su procedimiento almacenado
+/* //rutas para cargar los estudiantes y ejecutar su procedimiento almacenado
 Route::post('/cargar-estudiantes', [EstudianteController::class, 'cargarEstudiantesDesdeExcel'])->middleware('auth:api');
 Route::post('/procedimientoEstudiantes', [EstudianteController::class, 'ejecutarProcedimientoEstudiantes'])->middleware('auth:api');
 
@@ -559,7 +560,7 @@ Route::group([
 //infraestructuras desde archivo plano
 Route::post('/carga-infra', [MigraInfraestructuraController::class, 'cargarInfraEstructura']);
 
-
+ */
 
 //elimima la fecha de un item check
 Route::delete('delete_item_check_detail/{id}', [BoardTaskController::class, 'deleteItemCheckDetail']);
@@ -1607,4 +1608,13 @@ Route::middleware('auth:api')->group(function () {
     Route::get('instructor-lider', [InstructorLiderController::class, 'getFichasLider']);
     Route::get('instructor-lider/ficha/{idFicha}/aprendices', [InstructorLiderController::class, 'getAprendicesFicha']);
     Route::post('instructor-lider/cambiar-estado-aprendiz', [InstructorLiderController::class, 'cambiarEstadoAprendiz']);
+});
+
+// Solicitud de Instructores trasversales
+Route::middleware('auth:api')->group(function () {
+    Route::get('solicitud-materia', [SolicitudMateriaController::class, 'index']);
+    Route::post('solicitud-materia', [SolicitudMateriaController::class, 'store']);
+    Route::post('solicitud-materia/aceptar/{id}', [SolicitudMateriaController::class, 'aceptar']);
+    Route::post('solicitud-materia/rechazar/{id}', [SolicitudMateriaController::class, 'rechazar']);
+    Route::get('solicitud-materia/materias-ficha', [SolicitudMateriaController::class, 'getMateriaByFicha']);
 });

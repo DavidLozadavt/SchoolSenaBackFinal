@@ -111,7 +111,8 @@ class MateriaController extends Controller
                     'horas' => $materia->horas_programa,
                     'descripcion' => $materia->descripcion,
                     'isCompleta' => $estaFinalizada,
-                    'estado' => $estaFinalizada ? 'FINALIZADO' : 'PENDIENTE'
+                    'estado' => $estaFinalizada ? 'FINALIZADO' : 'PENDIENTE',
+                    'idCategoriaFormacion' => $materia->idCategoriaFormacion
                 ];
             })->filter()->values();
 
@@ -558,6 +559,13 @@ class MateriaController extends Controller
         // buscar materia con el area de conocimiento
         $materia = Materia::where('id', $idMateria)->with('areaConocimiento')->firstOrFail();
 
+        if ($materia->idAreaConocimiento == null) {
+            return response()->json([
+                'message' => 'Competencia sin área de conocimiento',
+                'data' => []
+            ], 400);
+        }
+
         $areaConocimientoRequerido = $materia->areaConocimiento->id;
 
         $contratos = Contract::whereHas(
@@ -567,7 +575,10 @@ class MateriaController extends Controller
             }
         )
             ->select('id', 'numeroContrato', 'idpersona')
-            ->with('persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto')
+            ->with([
+                'persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto',
+                'asignacionCategoriaFormacionContrato.categoriaFormacion'
+            ])
             ->get();
 
 
@@ -731,7 +742,7 @@ class MateriaController extends Controller
             // eliminación de las materias y sus horarios vacíos para esta ficha
             foreach ($registrosAProcesar as $registro) {
                 $registro->horarioMateria()->where('idFicha', $idFicha)->delete();
-                
+
                 // Si la relación GradoMateria ya no tiene ningún horario (es decir, ninguna otra ficha lo usa), lo eliminamos
                 if ($registro->horarioMateria()->count() === 0) {
                     $registro->delete();
@@ -744,7 +755,7 @@ class MateriaController extends Controller
                 $horariosEnTrimestre = HorarioMateria::whereHas('gradoMateria', function ($query) use ($idGradoPrograma) {
                     $query->where('idGradoPrograma', $idGradoPrograma);
                 })->count();
-                
+
                 if ($horariosEnTrimestre === 0) {
                     GradoPrograma::where('id', $idGradoPrograma)->delete();
                 }
