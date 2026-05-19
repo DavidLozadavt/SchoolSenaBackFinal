@@ -1436,6 +1436,10 @@ Route::put('update_assistance',[AsistenciaController::class, 'updateAssistance']
 Route::post('update_assistance',[AsistenciaController::class, 'updateAssistance']);
 Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
 Route::get('justificaciones-inasistencia/{id}/soporte',[AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
+Route::post('solicitar-justificacion-asistencia', [AsistenciaController::class, 'solicitarJustificacionAsistencia']);
+Route::get('justificaciones-pendientes-instructor', [AsistenciaController::class, 'justificacionesPendientesInstructor']);
+Route::post('responder-justificacion-asistencia', [AsistenciaController::class, 'responderJustificacionAsistencia']);
+Route::get('asistencias-instructor-global', [AsistenciaController::class, 'asistenciasInstructorGlobal']);
 
 //Intructores:
 Route::middleware('auth:api')->group(function () {
