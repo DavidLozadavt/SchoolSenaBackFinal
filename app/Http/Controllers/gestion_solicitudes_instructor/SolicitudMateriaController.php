@@ -207,7 +207,8 @@ class SolicitudMateriaController extends Controller
             }
 
             $materiaNombre = $solicitud->materia->nombreMateria ?? 'una materia';
-            
+            $programa = Programa::findOrFail($ficha->idPrograma);
+             
             // Solicitante
             $solicitantePersona = $solicitud->solicitante->persona ?? null;
             
@@ -218,8 +219,8 @@ class SolicitudMateriaController extends Controller
                 // Notificar al solicitante
                 if ($solicitantePersona) {
                     $nombreAsignado = $asignadoPersona ? ($asignadoPersona->nombre1 . ' ' . $asignadoPersona->apellido1) : 'un instructor';
-                    $asunto = "Solicitud Aceptada - Ficha {$ficha->codigo}";
-                    $mensaje = "Tu solicitud para la materia $materiaNombre en la ficha {$ficha->codigo} ha sido ACEPTADA. Se ha asignado al instructor $nombreAsignado.";
+                    $asunto = "Solicitud Aceptada - Ficha {$ficha->codigo} - {$programa->nombrePrograma}";
+                    $mensaje = "Tu solicitud para la materia $materiaNombre en la ficha {$ficha->codigo} - {$programa->nombrePrograma} ha sido ACEPTADA. Se ha asignado al instructor $nombreAsignado.";
                     if ($solicitud->observacion) {
                         $mensaje .= "\n\nObservación: " . $solicitud->observacion;
                     }
@@ -228,8 +229,8 @@ class SolicitudMateriaController extends Controller
 
                 // Notificar al asignado
                 if ($asignadoPersona) {
-                    $asunto = "Nueva Asignación - Ficha {$ficha->codigo}";
-                    $mensaje = "Has sido asignado para impartir la materia $materiaNombre en la ficha {$ficha->codigo}.";
+                    $asunto = "Nueva Asignación - Ficha {$ficha->codigo} - {$programa->nombrePrograma}";
+                    $mensaje = "Has sido asignado para impartir la materia $materiaNombre en la ficha {$ficha->codigo} - {$programa->nombrePrograma}.";
                     if ($solicitud->observacion) {
                         $mensaje .= "\n\nObservación: " . $solicitud->observacion;
                     }
@@ -238,8 +239,8 @@ class SolicitudMateriaController extends Controller
             } else {
                 // Notificar solo al solicitante si fue rechazada
                 if ($solicitantePersona) {
-                    $asunto = "Solicitud Rechazada - Ficha {$ficha->codigo}";
-                    $mensaje = "Tu solicitud para la materia $materiaNombre en la ficha {$ficha->codigo} ha sido RECHAZADA.";
+                    $asunto = "Solicitud Rechazada - Ficha {$ficha->codigo} - {$programa->nombrePrograma}";
+                    $mensaje = "Tu solicitud para la materia $materiaNombre en la ficha {$ficha->codigo} - {$programa->nombrePrograma} ha sido RECHAZADA.";
                     if ($solicitud->observacion) {
                         $mensaje .= "\n\nObservación: " . $solicitud->observacion;
                     }
