@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\gestion_actividades;
 
+use App\Http\Controllers\Concerns\ValidatesMaterialDocumentUpload;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Models\Actividad;
@@ -27,6 +28,8 @@ use Illuminate\Validation\ValidationException;
 
 class ActividadController extends Controller
 {
+    use ValidatesMaterialDocumentUpload;
+
     /** Rechazo mover RAP cuando el destino no es de la misma ficha o la actividad no pertenece a esa ficha. */
     private const ERROR_MOVER_RAP_FICHA_DISTINTA = 'No puedes mover esta actividad a un RAP de otra ficha.';
 
@@ -1625,12 +1628,17 @@ class ActividadController extends Controller
         try {
             $actividad = Actividad::findOrFail($idActividad);
 
-            $request->validate([
+            $validator = Validator::make($request->all(), array_merge([
                 'titulo' => 'required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
-                'documento' => 'nullable|file|mimes:pdf|max:10240',
                 'urlAdicional' => 'nullable|string|max:500',
-            ]);
+            ], $this->materialDocumentoFileRules(true)));
+            $validator->after(function ($v) use ($request) {
+                if ($request->hasFile('documento')) {
+                    $this->assertMaterialDocumentoFile($v, $request->file('documento'));
+                }
+            });
+            $validator->validate();
 
             $path = null;
             if ($request->hasFile('documento')) {
@@ -1644,7 +1652,7 @@ class ActividadController extends Controller
             }
 
             if (! $path && empty($request->urlAdicional)) {
-                return response()->json(['errors' => ['Se requiere documento PDF o enlace']], 422);
+                return response()->json(['errors' => ['Se requiere documento o enlace']], 422);
             }
 
             $material = MaterialApoyoActividad::create([
