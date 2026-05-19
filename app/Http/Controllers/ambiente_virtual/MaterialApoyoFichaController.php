@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\ambiente_virtual;
 
+use App\Http\Controllers\Concerns\ValidatesMaterialDocumentUpload;
 use App\Http\Controllers\Controller;
 use App\Models\Ficha;
 use App\Models\MaterialApoyoRap;
@@ -13,10 +14,13 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 
 /** CRUD de biblioteca de conocimiento (tabla materialApoyoRap), listado por programa vía ficha→asignación. */
 class MaterialApoyoFichaController extends Controller
 {
+    use ValidatesMaterialDocumentUpload;
+
     /**
      * Fichas que comparten el mismo programa que la ficha dada (idAsignacion → idPrograma).
      *
@@ -127,16 +131,21 @@ class MaterialApoyoFichaController extends Controller
                 return response()->json(['error' => 'Ejecute migraciones para habilitar material de apoyo por ficha y RAP.'], 503);
             }
 
-            $request->validate([
+            $validator = Validator::make($request->all(), array_merge([
                 'idMateria' => 'required|integer|exists:materia,id',
                 'idRap' => 'required|integer|exists:materia,id',
                 'titulo' => 'required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
-                'documento' => 'nullable|file|mimes:pdf|max:10240',
                 'urlAdicional' => 'nullable|string|max:500',
                 'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
                 'urlVideo' => 'nullable|string|max:500',
-            ]);
+            ], $this->materialDocumentoFileRules(true)));
+            $validator->after(function ($v) use ($request) {
+                if ($request->hasFile('documento')) {
+                    $this->assertMaterialDocumentoFile($v, $request->file('documento'));
+                }
+            });
+            $validator->validate();
 
             $materia = Materia::findOrFail((int) $request->idMateria);
             $rap = Materia::findOrFail((int) $request->idRap);
@@ -157,7 +166,7 @@ class MaterialApoyoFichaController extends Controller
             }
 
             if (! $path && empty($request->urlAdicional) && empty($urlVideoValue)) {
-                return response()->json(['errors' => ['Se requiere al menos un recurso: documento PDF, enlace o video']], 422);
+                return response()->json(['errors' => ['Se requiere al menos un recurso: documento, enlace o video']], 422);
             }
 
             $user = KeyUtil::user();
@@ -198,16 +207,21 @@ class MaterialApoyoFichaController extends Controller
                 return response()->json(['error' => 'No autorizado para editar este material.'], 403);
             }
 
-            $request->validate([
+            $validator = Validator::make($request->all(), array_merge([
                 'titulo' => 'sometimes|required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
-                'documento' => 'nullable|file|mimes:pdf|max:10240',
                 'urlAdicional' => 'nullable|string|max:500',
                 'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
                 'urlVideo' => 'nullable|string|max:500',
                 'idMateria' => 'sometimes|required|integer|exists:materia,id',
                 'idRap' => 'sometimes|required|integer|exists:materia,id',
-            ]);
+            ], $this->materialDocumentoFileRules(true)));
+            $validator->after(function ($v) use ($request) {
+                if ($request->hasFile('documento')) {
+                    $this->assertMaterialDocumentoFile($v, $request->file('documento'));
+                }
+            });
+            $validator->validate();
 
             if ($request->has('titulo')) {
                 $material->titulo = $request->titulo;
@@ -252,7 +266,7 @@ class MaterialApoyoFichaController extends Controller
             }
 
             if (! $material->urlDocumento && empty($material->urlAdicional) && empty($material->urlVideo)) {
-                return response()->json(['errors' => ['Se requiere al menos un recurso: documento PDF, enlace o video']], 422);
+                return response()->json(['errors' => ['Se requiere al menos un recurso: documento, enlace o video']], 422);
             }
 
             $material->save();
