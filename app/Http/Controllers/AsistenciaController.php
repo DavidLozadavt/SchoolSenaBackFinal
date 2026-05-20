@@ -280,15 +280,23 @@ class AsistenciaController extends Controller
     }
     public function getAllAssistance(Request $request): JsonResponse
     {
-
         $jsonData = $request->input('data');
 
         $data = json_decode($jsonData, true);
 
-        $matriculaAcademicaWithAssistance = MatriculaAcademica::with('matricula.persona.usuario.persona', 'asistencias')
-            ->where('idAsignacionPeriodoProgramaJornada', $data['idAsignacionPeriodoProgramaJornada'])
-            ->where('idMateria', $data['idMateria'])
-            ->where('idMatricula', $data['idMatricula'])
+        if (!$data) {
+            return response()->json([
+                'message' => 'Datos inválidos'
+            ], 400);
+        }
+
+        $matriculaAcademicaWithAssistance = MatriculaAcademica::with(
+            'matricula.person.usuario',
+            'asistencias'
+        )
+            ->where('idAsignacionPeriodoProgramaJornada', $data['idAsignacionPeriodoProgramaJornada'] ?? null)
+            ->where('idMateria', $data['idMateria'] ?? null)
+            ->where('idMatricula', $data['idMatricula'] ?? null)
             ->first();
 
         return response()->json($matriculaAcademicaWithAssistance, 200);
@@ -434,19 +442,82 @@ class AsistenciaController extends Controller
                         ->exists();
 
                     if (!$existe) {
-                        Asistencia::create([
+                        $nuevaAsistencia = Asistencia::create([
                             'idMatriculaAcademica' => $otraMatricula->id,
                             'idSesionMateria' => $sesionMateria->id,
                             'horaLLegada' => null,
                             'asistio' => false,
                         ]);
+
+                        // Auto-Justificación por Rango para el resto del grupo
+                        $otraPersonaId = $otraMatricula->matricula?->idPersona;
+                        if ($otraPersonaId) {
+                            $fechaSesionDate = $sesionMateria->fechaSesion ?? today()->toDateString();
+                            $rangoDetalleAprobado = \App\Models\JustificacionAsistenciaRangoDetalle::whereHas('rango', function($q) use ($otraPersonaId, $fechaSesionDate) { $q->where('idPersonaAprendiz', $otraPersonaId)->where('fechaInicial', '<=', $fechaSesionDate)->where('fechaFinal', '>=', $fechaSesionDate); })->where('idHorarioMateria', $sesionMateria->idHorarioMateria)->where('estado', 'APROBADO')->with('rango')->first(); $rangoAprobado = $rangoDetalleAprobado ? $rangoDetalleAprobado->rango : null;
+
+                            if ($rangoAprobado) {
+                                $excusa = \App\Models\Excusa::create([
+                                    'tipoExcusa' => $rangoAprobado->tipoExcusa,
+                                    'observacion' => $rangoAprobado->observacion,
+                                    'urlDocumento' => $rangoAprobado->archivoSoporte,
+                                    'fechaInicialJustificacion' => $rangoAprobado->fechaInicial,
+                                    'fechaFinalJustificacion' => $rangoAprobado->fechaFinal,
+                                ]);
+                                
+                                JustificacionInasistencia::updateOrCreate(
+                                    ['idAsistencia' => $nuevaAsistencia->id],
+                                    [
+                                        'idExcusa' => $excusa->id,
+                                        'idMatriculaAcademica' => $otraMatricula->id,
+                                        'idPersona' => $otraPersonaId,
+                                        'estado' => 'APROBADO',
+                                        'observacion' => $rangoAprobado->observacion,
+                                        'archivoSoporte' => $rangoAprobado->archivoSoporte,
+                                    ]
+                                );
+                            }
+                        }
                     }
                 }
             } catch (\Exception $e) {
                 \Illuminate\Support\Facades\Log::error('Error en auto-registro: ' . $e->getMessage());
             }
 
-            // ── Justificación de inasistencia ─────────────────────────────────────
+            // ── Auto-Justificación por Rango de Fechas Aprobado ───────────────────
+            if (!$asistio) {
+                $idPersonaAprendiz = $matriculaAcademica->matricula?->idPersona;
+                
+                if ($idPersonaAprendiz) {
+                    $fechaSesionDate = $sesionMateria->fechaSesion ?? today()->toDateString();
+                    $rangoDetalleAprobado = \App\Models\JustificacionAsistenciaRangoDetalle::whereHas('rango', function($q) use ($idPersonaAprendiz, $fechaSesionDate) { $q->where('idPersonaAprendiz', $idPersonaAprendiz)->where('fechaInicial', '<=', $fechaSesionDate)->where('fechaFinal', '>=', $fechaSesionDate); })->where('idHorarioMateria', $sesionMateria->idHorarioMateria)->where('estado', 'APROBADO')->with('rango')->first(); $rangoAprobado = $rangoDetalleAprobado ? $rangoDetalleAprobado->rango : null;
+
+                    if ($rangoAprobado) {
+                        $excusa = \App\Models\Excusa::create([
+                            'tipoExcusa' => $rangoAprobado->tipoExcusa,
+                            'observacion' => $rangoAprobado->observacion,
+                            'urlDocumento' => $rangoAprobado->archivoSoporte,
+                            'fechaInicialJustificacion' => $rangoAprobado->fechaInicial,
+                            'fechaFinalJustificacion' => $rangoAprobado->fechaFinal,
+                        ]);
+                        
+                        JustificacionInasistencia::updateOrCreate(
+                            ['idAsistencia' => $asistencia->id],
+                            [
+                                'idExcusa' => $excusa->id,
+                                'idMatriculaAcademica' => $matriculaAcademica->id,
+                                'idPersona' => $idPersonaAprendiz,
+                                'estado' => 'APROBADO',
+                                'observacion' => $rangoAprobado->observacion,
+                                'archivoSoporte' => $rangoAprobado->archivoSoporte,
+                            ]
+                        );
+                        // Prevent overriding it below if manual justification flag was sent
+                        $esJustificada = false; 
+                    }
+                }
+            }
+
+            // ── Justificación de inasistencia (Manual) ───────────────────────────
             if ($esJustificada && !$asistio) {
                 $archivoSoporte = null;
 
@@ -1574,6 +1645,58 @@ class AsistenciaController extends Controller
         ], 500);
     }
 }
+
+    public function solicitarJustificacionAsistenciaRango(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'fechaInicial' => 'required|date',
+                'fechaFinal' => 'required|date|after_or_equal:fechaInicial',
+                'tipoExcusa' => 'required|string|max:255',
+                'observacion' => 'required|string',
+                'archivoSoporte' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            ]);
+
+            $user = KeyUtil::user() ?? auth()->user();
+            $idPersonaEstudiante = $user?->idpersona ?? $user?->persona?->id;
+
+            if (!$idPersonaEstudiante) {
+                return response()->json([
+                    'message' => 'Usuario no autenticado'
+                ], 401);
+            }
+
+            $archivoSoporte = null;
+            if ($request->hasFile('archivoSoporte')) {
+                $archivoSoporte = $request->file('archivoSoporte')
+                    ->store('justificaciones_inasistencia', 'public');
+            }
+
+            $rango = \App\Models\JustificacionAsistenciaRango::create(['idPersonaAprendiz' => $idPersonaEstudiante,'fechaInicial' => $request->fechaInicial,'fechaFinal' => $request->fechaFinal,'tipoExcusa' => $request->tipoExcusa,'observacion' => $request->observacion,'archivoSoporte' => $archivoSoporte,'estado' => 'PENDIENTE']);
+
+            $matriculas = \App\Models\MatriculaAcademica::whereHas('matricula', function($q) use ($idPersonaEstudiante) { $q->where('idPersona', $idPersonaEstudiante); })->get();
+            $fichaIds = $matriculas->pluck('idFicha')->filter()->unique()->toArray();
+            $horarios = \App\Models\HorarioMateria::whereIn('idFicha', $fichaIds)->whereDate('fechaInicial', '<=', $request->fechaFinal)->whereDate('fechaFinal', '>=', $request->fechaInicial)->get();
+            foreach ($horarios as $horario) { \App\Models\JustificacionAsistenciaRangoDetalle::create(['idJustificacionAsistenciaRango' => $rango->id, 'idHorarioMateria' => $horario->id, 'idFicha' => $horario->idFicha, 'idContratoInstructor' => $horario->idContrato, 'estado' => 'PENDIENTE']); }
+
+            return response()->json([
+                'message' => 'Solicitud de justificación por rango enviada. El instructor la revisará pronto.',
+                'data' => $rango
+            ], 201);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error al solicitar justificación por rango',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     /**
      * Justificaciones pendientes para el instructor autenticado.
      */
@@ -1592,6 +1715,35 @@ class AsistenciaController extends Controller
             ], 200);
         }
 
+        $resolverUrlDocumento = function ($valor): ?string {
+            if ($valor === null || $valor === '') {
+                return null;
+            }
+
+            if (!is_string($valor) && !is_numeric($valor)) {
+                return null;
+            }
+
+            $path = trim((string) $valor);
+
+            if ($path === '') {
+                return null;
+            }
+
+            if (
+                str_starts_with($path, 'http://') ||
+                str_starts_with($path, 'https://')
+            ) {
+                return $path;
+            }
+
+            $path = str_replace('/storage/', '', $path);
+            $path = str_replace('storage/', '', $path);
+            $path = ltrim($path, '/');
+
+            return Storage::disk('public')->url($path);
+        };
+
         $items = JustificacionInasistencia::with([
             'excusa',
             'asistencia.sesionMateria.horarioMateria.ficha',
@@ -1605,97 +1757,30 @@ class AsistenciaController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        $data = $items->map(function (JustificacionInasistencia $j) {
-            $asistencia = $j->asistencia;
-            $sesion = $asistencia?->sesionMateria;
-            $horario = $sesion?->horarioMateria;
-            $persona = $asistencia?->matriculaAcademica?->matricula?->person;
-            $materia = $horario?->gradoMateria?->materia;
+        $horarios = HorarioMateria::whereIn('id', $horarioIds)->get();
+        $fichaIds = $horarios->pluck('idFicha')->filter()->unique()->values()->all();
 
-            /**
-             * Resolver archivo soporte sin romper si algún accessor devuelve objetos.
-             */
-            $resolverUrlDocumento = function ($valor): ?string {
-                if ($valor === null || $valor === '') {
-                    return null;
-                }
+        $personasPermitidas = MatriculaAcademica::with('matricula')
+            ->whereIn('idFicha', $fichaIds)
+            ->get()
+            ->pluck('matricula.idPersona')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
 
-                if (!is_string($valor) && !is_numeric($valor)) {
-                    return null;
-                }
+        $detallesRango = \App\Models\JustificacionAsistenciaRangoDetalle::with(['rango.personaAprendiz', 'horarioMateria.ficha', 'horarioMateria.gradoMateria.materia'])->where('estado', 'PENDIENTE')->whereIn('idHorarioMateria', $horarioIds)->orderByDesc('created_at')->get();
 
-                $path = trim((string) $valor);
+        $dataIndividuales = $items->map(function (\App\Models\JustificacionInasistencia $j) use ($resolverUrlDocumento) { $asistencia = $j->asistencia; $sesion = $asistencia?->sesionMateria; $horario = $sesion?->horarioMateria; $persona = $asistencia?->matriculaAcademica?->matricula?->person; $materia = $horario?->gradoMateria?->materia; $archivoJustificacion = $j->archivoSoporte; $archivoExcusa = null; if ($j->excusa) { $archivoExcusa = $j->excusa->getRawOriginal('urlDocumento'); if (!$archivoExcusa) { $archivoExcusa = $j->excusa->getAttribute('urlDocumento'); } } $urlDocumento = $resolverUrlDocumento($archivoJustificacion); if (!$urlDocumento) { $urlDocumento = $resolverUrlDocumento($archivoExcusa); } return ['id' => $j->id, 'tipo' => 'individual', 'idJustificacion' => $j->id, 'idAsistencia' => $j->idAsistencia, 'estado' => $j->estado, 'observacion' => $j->observacion, 'fechaClase' => $sesion?->fechaSesion, 'numeroSesion' => $sesion?->numeroSesion, 'nombreEstudiante' => $this->nombrePersona($persona), 'identificacionEstudiante' => $persona?->identificacion, 'codigoFicha' => $horario?->ficha?->codigo, 'idFicha' => $horario?->idFicha, 'idHorarioMateria' => $horario?->id, 'nombreMateria' => $materia?->nombreMateria, 'nombreArea' => $materia?->areaConocimiento?->nombreAreaConocimiento, 'excusa' => ['id' => $j->excusa?->id, 'tipoExcusa' => $j->excusa?->tipoExcusa, 'observacion' => $j->excusa?->observacion ?? $j->observacion, 'fechaInicialJustificacion' => $j->excusa?->fechaInicialJustificacion, 'fechaFinalJustificacion' => $j->excusa?->fechaFinalJustificacion, 'urlDocumento' => $urlDocumento, ], ]; })->values();
 
-                if ($path === '') {
-                    return null;
-                }
+        $dataRangos = $detallesRango->map(function ($d) use ($resolverUrlDocumento) { $r = $d->rango; $urlDocumento = $resolverUrlDocumento($r->archivoSoporte); return ['id' => $r->id, 'tipo' => 'rango', 'idJustificacion' => $d->id, 'estado' => $d->estado, 'observacion' => $r->observacion, 'fechaInicial' => $r->fechaInicial, 'fechaFinal' => $r->fechaFinal, 'fechaClase' => null, 'nombreEstudiante' => $this->nombrePersona($r->personaAprendiz), 'identificacionEstudiante' => $r->personaAprendiz?->identificacion, 'codigoFicha' => $d->horarioMateria?->ficha?->codigo, 'idFicha' => $d->idFicha, 'idHorarioMateria' => $d->idHorarioMateria, 'nombreMateria' => $d->horarioMateria?->gradoMateria?->materia?->nombreMateria, 'excusa' => ['tipoExcusa' => $r->tipoExcusa, 'observacion' => $r->observacion, 'fechaInicialJustificacion' => $r->fechaInicial, 'fechaFinalJustificacion' => $r->fechaFinal, 'urlDocumento' => $urlDocumento, ], ]; })->values();
 
-                if (
-                    str_starts_with($path, 'http://') ||
-                    str_starts_with($path, 'https://')
-                ) {
-                    return $path;
-                }
-
-                $path = str_replace('/storage/', '', $path);
-                $path = str_replace('storage/', '', $path);
-                $path = ltrim($path, '/');
-
-                return Storage::disk('public')->url($path);
-            };
-
-            $archivoJustificacion = $j->archivoSoporte;
-
-            $archivoExcusa = null;
-
-            if ($j->excusa) {
-                /**
-                 * getRawOriginal evita que algún accessor de Excusa retorne un objeto UrlGenerator.
-                 */
-                $archivoExcusa = $j->excusa->getRawOriginal('urlDocumento');
-
-                if (!$archivoExcusa) {
-                    $archivoExcusa = $j->excusa->getAttribute('urlDocumento');
-                }
-            }
-
-            $urlDocumento = $resolverUrlDocumento($archivoJustificacion);
-
-            if (!$urlDocumento) {
-                $urlDocumento = $resolverUrlDocumento($archivoExcusa);
-            }
-
-            return [
-                'id' => $j->id,
-                'idJustificacion' => $j->id,
-                'idAsistencia' => $j->idAsistencia,
-
-                'estado' => $j->estado,
-                'observacion' => $j->observacion,
-
-                'fechaClase' => $sesion?->fechaSesion,
-                'numeroSesion' => $sesion?->numeroSesion,
-
-                'nombreEstudiante' => $this->nombrePersona($persona),
-                'identificacionEstudiante' => $persona?->identificacion,
-
-                'codigoFicha' => $horario?->ficha?->codigo,
-                'idFicha' => $horario?->idFicha,
-                'idHorarioMateria' => $horario?->id,
-
-                'nombreMateria' => $materia?->nombreMateria,
-                'nombreArea' => $materia?->areaConocimiento?->nombreAreaConocimiento,
-
-                'excusa' => [
-                    'id' => $j->excusa?->id,
-                    'tipoExcusa' => $j->excusa?->tipoExcusa,
-                    'observacion' => $j->excusa?->observacion ?? $j->observacion,
-                    'fechaInicialJustificacion' => $j->excusa?->fechaInicialJustificacion,
-                    'fechaFinalJustificacion' => $j->excusa?->fechaFinalJustificacion,
-                    'urlDocumento' => $urlDocumento,
-                ],
-            ];
-        })->values();
+        $data = collect($dataIndividuales)
+            ->merge($dataRangos)
+            ->sortByDesc(function ($item) {
+                return $item['fechaClase'] ?? $item['fechaInicial'] ?? null;
+            })
+            ->values();
 
         return response()->json([
             'message' => 'Justificaciones pendientes',
@@ -1717,13 +1802,17 @@ class AsistenciaController extends Controller
 {
     try {
         $request->validate([
-            'idJustificacion' => 'required|integer|exists:justificacionInasistencia,id',
+            'idJustificacion' => 'required|integer',
+            'tipoJustificacion' => 'nullable|in:individual,rango',
             'accion' => 'required|in:aprobar,denegar',
             'observacionInstructor' => 'nullable|string',
         ]);
 
         $user = KeyUtil::user() ?? auth()->user();
         $idPersonaInstructor = $user?->idpersona ?? $user?->persona?->id;
+        $tipo = $request->tipoJustificacion ?? 'individual';
+
+        if ($tipo === 'rango') { $detalle = \App\Models\JustificacionAsistenciaRangoDetalle::with('rango')->findOrFail($request->idJustificacion); $justificacion = $detalle->rango; $nuevoEstado = $request->accion === 'aprobar' ? 'APROBADO' : 'RECHAZADO'; $detalle->estado = $nuevoEstado; $detalle->idPersonaAutoriza = $idPersonaInstructor; $detalle->fechaRespuesta = today(); $detalle->observacionInstructor = $request->observacionInstructor; $detalle->save(); $todosDetalles = \App\Models\JustificacionAsistenciaRangoDetalle::where('idJustificacionAsistenciaRango', $justificacion->id)->get(); $pendientes = $todosDetalles->where('estado', 'PENDIENTE')->count(); $aprobados = $todosDetalles->where('estado', 'APROBADO')->count(); $rechazados = $todosDetalles->where('estado', 'RECHAZADO')->count(); $total = $todosDetalles->count(); if ($pendientes === $total) { $justificacion->estado = 'PENDIENTE'; } elseif ($aprobados === $total) { $justificacion->estado = 'APROBADO'; } elseif ($rechazados === $total) { $justificacion->estado = 'RECHAZADO'; } else { $justificacion->estado = 'PARCIAL'; } $justificacion->save(); if ($nuevoEstado === 'APROBADO') { $matriculas = \App\Models\MatriculaAcademica::whereHas('matricula', function($q) use ($justificacion) { $q->where('idPersona', $justificacion->idPersonaAprendiz); })->get(); foreach ($matriculas as $matricula) { $asistencias = \App\Models\Asistencia::where('idMatriculaAcademica', $matricula->id)->where('asistio', false)->whereHas('sesionMateria', function($q) use ($justificacion, $detalle) { $q->where('idHorarioMateria', $detalle->idHorarioMateria)->whereDate('fechaSesion', '>=', $justificacion->fechaInicial)->whereDate('fechaSesion', '<=', $justificacion->fechaFinal); })->get(); foreach ($asistencias as $asist) { $excusa = \App\Models\Excusa::create(['tipoExcusa' => $justificacion->tipoExcusa, 'observacion' => $justificacion->observacion, 'urlDocumento' => $justificacion->archivoSoporte, 'fechaInicialJustificacion' => $justificacion->fechaInicial, 'fechaFinalJustificacion' => $justificacion->fechaFinal, ]); \App\Models\JustificacionInasistencia::updateOrCreate(['idAsistencia' => $asist->id], ['idExcusa' => $excusa->id, 'idMatriculaAcademica' => $matricula->id, 'idPersona' => $justificacion->idPersonaAprendiz, 'estado' => 'APROBADO', 'observacion' => $justificacion->observacion, 'archivoSoporte' => $justificacion->archivoSoporte, ]); } } } return response()->json(['message' => $nuevoEstado === 'APROBADO' ? 'Justificaci�n por rango aprobada' : 'Justificaci�n rechazada', 'data' => $detalle ], 200); }
 
         $justificacion = JustificacionInasistencia::with([
             'excusa',
@@ -1869,8 +1958,24 @@ class AsistenciaController extends Controller
             $sesion = $a->sesionMateria;
             $horario = $sesion?->horarioMateria;
             $materia = $horario?->gradoMateria?->materia;
+
             $justificacion = $a->justificacion;
+            $excusa = $justificacion?->excusa;
             $estadoJust = $justificacion?->estado;
+
+            $permisoRango = null;
+
+            if (!$a->asistio && $persona && $sesion?->fechaSesion) {
+                $permisoRango = \App\Models\JustificacionAsistenciaRango::with('personaAutoriza')
+                    ->where('idPersonaAprendiz', $persona->id)
+                    ->whereIn('estado', ['APROBADO', 'ACEPTADO', 'JUSTIFICADO', 'PENDIENTE', 'RECHAZADO'])
+                    ->whereDate('fechaInicial', '<=', $sesion->fechaSesion)
+                    ->whereDate('fechaFinal', '>=', $sesion->fechaSesion)
+                    ->orderByDesc('updated_at')
+                    ->first();
+            }
+
+            $estadoPermiso = $permisoRango?->estado;
 
             $estado = $a->asistio
                 ? 'Presente'
@@ -1881,25 +1986,66 @@ class AsistenciaController extends Controller
                             $estadoJust === 'PENDIENTE'
                                 ? 'Justificación pendiente'
                                 : (
-                                    $estadoJust === 'RECHAZADO'
-                                        ? 'Ausente (justificación rechazada)'
-                                        : 'Ausente'
+                                    $estadoPermiso === 'APROBADO'
+                                        ? 'Permiso aprobado'
+                                        : (
+                                            $estadoPermiso === 'PENDIENTE'
+                                                ? 'Permiso pendiente'
+                                                : (
+                                                    $estadoJust === 'RECHAZADO' || $estadoPermiso === 'RECHAZADO'
+                                                        ? 'Ausente (justificación rechazada)'
+                                                        : 'Ausente'
+                                                )
+                                        )
                                 )
                         )
                 );
+
+            $autorizadoPor = null;
+
+            if ($permisoRango?->personaAutoriza) {
+                $autorizadoPor = $this->nombrePersona($permisoRango->personaAutoriza);
+            }
 
             return [
                 'id' => $a->id,
                 'idAsistencia' => $a->id,
                 'fecha' => $sesion?->fechaSesion,
+
                 'nombreEstudiante' => $this->nombrePersona($persona),
                 'identificacion' => $persona?->identificacion,
+
                 'codigoFicha' => $horario?->ficha?->codigo,
                 'nombreArea' => $materia?->areaConocimiento?->nombreAreaConocimiento,
                 'nombreMateria' => $materia?->nombreMateria,
+
                 'asistio' => (bool) $a->asistio,
                 'estado' => $estado,
                 'estadoJustificacion' => $estadoJust,
+                'estadoPermiso' => $estadoPermiso,
+
+                'tipoJustificacion' => $permisoRango ? 'rango' : ($justificacion ? 'individual' : null),
+
+                'excusa' => [
+                    'tipoExcusa' => $permisoRango?->tipoExcusa ?? $excusa?->tipoExcusa,
+                    'observacion' => $permisoRango?->observacion ?? $excusa?->observacion ?? $justificacion?->observacion,
+                    'fechaInicialJustificacion' => $permisoRango?->fechaInicial ?? $excusa?->fechaInicialJustificacion,
+                    'fechaFinalJustificacion' => $permisoRango?->fechaFinal ?? $excusa?->fechaFinalJustificacion,
+                    'archivoSoporte' => $permisoRango?->archivoSoporte ?? $justificacion?->archivoSoporte,
+                ],
+
+                'permiso' => $permisoRango ? [
+                    'id' => $permisoRango->id,
+                    'estado' => $permisoRango->estado,
+                    'fechaInicial' => $permisoRango->fechaInicial,
+                    'fechaFinal' => $permisoRango->fechaFinal,
+                    'tipoExcusa' => $permisoRango->tipoExcusa,
+                    'observacion' => $permisoRango->observacion,
+                    'archivoSoporte' => $permisoRango->archivoSoporte,
+                    'autorizadoPor' => $autorizadoPor,
+                    'fechaRespuesta' => $permisoRango->fechaRespuesta,
+                    'observacionInstructor' => $permisoRango->observacionInstructor,
+                ] : null,
             ];
         });
 
@@ -1916,3 +2062,11 @@ class AsistenciaController extends Controller
     }
 }
 }
+
+
+
+
+
+
+
+
