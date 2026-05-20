@@ -19,14 +19,11 @@ class Excusa extends Model
 
   public function getUrlDocumentoAttribute()
   {
-    if (
-      isset($this->attributes['urlDocumento']) &&
-      isset($this->attributes['urlDocumento'][0])
-    ) {
+    if (!empty($this->attributes['urlDocumento'])) {
       return url($this->attributes['urlDocumento']);
-    } else {
-      return url();
     }
+    
+    return null;
   }
 
   /**
