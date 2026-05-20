@@ -675,6 +675,251 @@ class ActividadController extends Controller
         }
     }
 
+    /**
+     * Instructor/admin: actividades creadas o asignadas, agrupadas por actividad + ficha (una fila por grupo).
+     */
+    public function misActividadesInstructor(Request $request): JsonResponse
+    {
+        try {
+            if (! Schema::hasTable('calificacionActividad')) {
+                return response()->json(['data' => []]);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+            if (! $idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            $colFicha = Schema::hasColumn($tableMa, 'idFicha')
+                ? 'idFicha'
+                : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada')
+                    ? 'idAsignacionPeriodoProgramaJornada'
+                    : 'idFicha');
+
+            $selectHm = Schema::hasTable('horarioMateria')
+                ? DB::raw('(
+                    SELECT hm2.id FROM horarioMateria hm2
+                    INNER JOIN gradoMateria gm2 ON hm2.idGradoMateria = gm2.id
+                    WHERE hm2.idFicha = ma.'.$colFicha.' AND gm2.idMateria = a.idMateria
+                    ORDER BY hm2.id DESC LIMIT 1
+                ) as idHorarioMateria')
+                : DB::raw('NULL as idHorarioMateria');
+
+            $qb = DB::table('calificacionActividad as ca')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->join($tableMa.' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->join('ficha as f', 'ma.'.$colFicha, '=', 'f.id')
+                ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+                ->leftJoin('materia as mat_padre', 'mat.idMateriaPadre', '=', 'mat_padre.id')
+                ->leftJoin('persona as p_creador', 'a.idPersona', '=', 'p_creador.id')
+                ->where(function ($q) use ($idPersona) {
+                    $q->where('ca.idPersona', $idPersona)
+                        ->orWhere('a.idPersona', $idPersona);
+                });
+
+            $registros = (clone $qb)
+                ->select([
+                    'ca.id as idCalificacionActividad',
+                    'ca.idActividad',
+                    'ca.idGrupo',
+                    'ca.archivo',
+                    'ca.ComentarioEstudiante',
+                    'ca.ComentarioDocente',
+                    'ca.calificacionNumerica',
+                    'ca.fechaInicial',
+                    'ca.fechaFinal',
+                    'm.id as idMatricula',
+                    'ma.'.$colFicha.' as idFicha',
+                    'f.codigo as codigoFicha',
+                    'a.tituloActividad',
+                    'a.descripcionActividad',
+                    'a.tipoActividad',
+                    'a.idMateria',
+                    'mat.codigo as codigoMateria',
+                    'mat.nombreMateria',
+                    'mat.idMateriaPadre',
+                    DB::raw('CASE
+                        WHEN mat.idMateriaPadre IS NOT NULL AND mat.idMateriaPadre > 0 AND mat_padre.id IS NOT NULL THEN mat_padre.nombreMateria
+                        ELSE mat.nombreMateria
+                    END as competenciaNombre'),
+                    DB::raw('CASE
+                        WHEN mat.idMateriaPadre IS NOT NULL AND mat.idMateriaPadre > 0 AND mat_padre.id IS NOT NULL THEN mat.nombreMateria
+                        ELSE NULL
+                    END as rapNombre'),
+                    DB::raw('CASE
+                        WHEN mat.idMateriaPadre IS NOT NULL AND mat.idMateriaPadre > 0 AND mat_padre.id IS NOT NULL THEN mat.id
+                        ELSE NULL
+                    END as idRap'),
+                    DB::raw('CASE
+                        WHEN mat.idMateriaPadre IS NOT NULL AND mat.idMateriaPadre > 0 AND mat_padre.id IS NOT NULL THEN mat.codigo
+                        ELSE mat.codigo
+                    END as codigoRap'),
+                    'p_creador.id as idPersonaCreador',
+                    'p_creador.nombre1 as creadorNombre1',
+                    'p_creador.nombre2 as creadorNombre2',
+                    'p_creador.apellido1 as creadorApellido1',
+                    'p_creador.apellido2 as creadorApellido2',
+                    'p_creador.rutaFoto as creadorRutaFoto',
+                    $selectHm,
+                ])
+                ->orderByDesc('ca.id')
+                ->get();
+
+            $idsCalifCuestionarios = $registros
+                ->where('tipoActividad', 'cuestionario')
+                ->pluck('idCalificacionActividad')
+                ->unique()
+                ->filter()
+                ->values();
+            $cuestionariosConRespuestas = collect();
+            $tblRc = Schema::hasTable('respuestaCuestionarios') ? 'respuestaCuestionarios' : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            if ($tblRc && $idsCalifCuestionarios->isNotEmpty()) {
+                $cuestionariosConRespuestas = DB::table($tblRc)
+                    ->whereIn('idCalificacion', $idsCalifCuestionarios->all())
+                    ->select('idCalificacion')
+                    ->distinct()
+                    ->pluck('idCalificacion');
+            }
+
+            $grupos = [];
+            foreach ($registros as $row) {
+                $idAct = (int) $row->idActividad;
+                $idFicha = (int) ($row->idFicha ?? 0);
+                if ($idAct <= 0 || $idFicha <= 0) {
+                    continue;
+                }
+                $clave = $idAct.'_'.$idFicha;
+                if (! isset($grupos[$clave])) {
+                    $grupos[$clave] = [
+                        'meta' => $row,
+                        'vistosMatricula' => [],
+                        'estados' => [],
+                        'tieneGrupo' => false,
+                        'fechaInicial' => null,
+                        'fechaLimite' => null,
+                    ];
+                }
+                $idMat = $row->idMatricula ?? null;
+                if ($idMat !== null && isset($grupos[$clave]['vistosMatricula'][$idMat])) {
+                    continue;
+                }
+                if ($idMat !== null) {
+                    $grupos[$clave]['vistosMatricula'][$idMat] = true;
+                }
+                if (! empty($row->idGrupo)) {
+                    $grupos[$clave]['tieneGrupo'] = true;
+                }
+                $fi = $row->fechaInicial ? (string) $row->fechaInicial : null;
+                $ff = $row->fechaFinal ? (string) $row->fechaFinal : null;
+                if ($fi && ($grupos[$clave]['fechaInicial'] === null || $fi < $grupos[$clave]['fechaInicial'])) {
+                    $grupos[$clave]['fechaInicial'] = $fi;
+                }
+                if ($ff && ($grupos[$clave]['fechaLimite'] === null || $ff > $grupos[$clave]['fechaLimite'])) {
+                    $grupos[$clave]['fechaLimite'] = $ff;
+                }
+                $tieneRespuestasCuestionario = ($row->tipoActividad ?? '') === 'cuestionario'
+                    && $cuestionariosConRespuestas->contains($row->idCalificacionActividad);
+                $rowEstado = $row;
+                $comentarioEst = trim((string) ($row->ComentarioEstudiante ?? ''));
+                if ($comentarioEst !== '' && trim((string) ($row->archivo ?? '')) === ''
+                    && strtolower((string) ($row->tipoActividad ?? '')) !== 'cuestionario') {
+                    $rowEstado = (object) array_merge((array) $row, ['archivo' => $comentarioEst]);
+                }
+                $estado = $this->resolverEstadoActividadAprendiz($rowEstado, $tieneRespuestasCuestionario);
+                $grupos[$clave]['estados'][] = $estado;
+            }
+
+            $tz = config('app.timezone');
+            $now = now($tz);
+            $data = [];
+            foreach ($grupos as $g) {
+                $row = $g['meta'];
+                $estados = $g['estados'];
+                $totalAsignados = count($estados);
+                $conteo = array_count_values($estados);
+                $totalCalificados = (int) ($conteo['CALIFICADO'] ?? 0);
+                $totalPorEvaluar = (int) ($conteo['POR_EVALUAR'] ?? 0);
+                $totalPendientes = (int) ($conteo['PENDIENTE'] ?? 0);
+                $totalSinEntregar = (int) ($conteo['SIN_ENTREGAR'] ?? 0);
+                $totalCorreccion = (int) ($conteo['CORRECCION_SOLICITADA'] ?? 0);
+                $totalEntregaron = $totalPorEvaluar + $totalCalificados + $totalCorreccion;
+
+                $fechaLimite = $g['fechaLimite'];
+                $vencida = false;
+                if ($fechaLimite) {
+                    $vencida = $now->greaterThan(\Carbon\Carbon::parse($fechaLimite, $tz));
+                }
+
+                if ($totalAsignados === 0) {
+                    $estadoGeneral = 'no_asignada';
+                } elseif ($totalPorEvaluar > 0 || $totalCorreccion > 0) {
+                    $estadoGeneral = 'por_evaluar';
+                } elseif ($totalCalificados === $totalAsignados) {
+                    $estadoGeneral = 'calificada';
+                } elseif ($totalCalificados > 0) {
+                    $estadoGeneral = 'parcial';
+                } elseif ($vencida) {
+                    $estadoGeneral = 'vencida';
+                } else {
+                    $estadoGeneral = 'activa';
+                }
+
+                $nombreCreador = trim(implode(' ', array_filter([
+                    $row->creadorNombre1,
+                    $row->creadorNombre2,
+                    $row->creadorApellido1,
+                    $row->creadorApellido2,
+                ])));
+
+                $data[] = [
+                    'idActividad' => (int) $row->idActividad,
+                    'titulo' => $row->tituloActividad ?? 'Sin título',
+                    'descripcion' => $row->descripcionActividad,
+                    'idFicha' => (int) ($row->idFicha ?? 0),
+                    'codigoFicha' => $row->codigoFicha,
+                    'idMateria' => (int) ($row->idMateria ?? 0),
+                    'materiaNombre' => $row->competenciaNombre ?? $row->nombreMateria,
+                    'idRap' => $row->idRap ? (int) $row->idRap : (int) ($row->idMateria ?? 0),
+                    'rapNombre' => $row->rapNombre ?? $row->nombreMateria,
+                    'codigoRap' => $row->codigoRap,
+                    'fechaInicio' => $g['fechaInicial'],
+                    'fechaLimite' => $fechaLimite,
+                    'estadoGeneral' => $estadoGeneral,
+                    'vencida' => $vencida,
+                    'tipoActividad' => $row->tipoActividad,
+                    'modalidad' => $g['tieneGrupo'] ? 'grupal' : 'individual',
+                    'totalAsignados' => $totalAsignados,
+                    'totalEntregaron' => $totalEntregaron,
+                    'totalPendientes' => $totalPendientes,
+                    'totalCalificados' => $totalCalificados,
+                    'totalPorEvaluar' => $totalPorEvaluar,
+                    'totalSinEntregar' => $totalSinEntregar,
+                    'totalCorreccionSolicitada' => $totalCorreccion,
+                    'idHorarioMateria' => $row->idHorarioMateria ? (int) $row->idHorarioMateria : null,
+                    'creador' => [
+                        'idPersona' => $row->idPersonaCreador ? (int) $row->idPersonaCreador : null,
+                        'nombre' => $nombreCreador !== '' ? $nombreCreador : 'Instructor',
+                        'fotoPerfil' => $this->resolvePersonaPublicFotoUrl($row->creadorRutaFoto ?? null),
+                    ],
+                ];
+            }
+
+            usort($data, function ($a, $b) {
+                $fa = $a['fechaLimite'] ?? '';
+                $fb = $b['fechaLimite'] ?? '';
+
+                return strcmp($fb, $fa);
+            });
+
+            return response()->json(['data' => $data]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage(), 'data' => []], 500);
+        }
+    }
+
     public function responderActividadAprendiz(Request $request, int $idCalificacionActividad): JsonResponse
     {
         try {
