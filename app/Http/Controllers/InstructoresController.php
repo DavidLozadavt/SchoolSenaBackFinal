@@ -661,7 +661,29 @@ class InstructoresController extends Controller
                     'duracionSesion' => $duracionSesion,
                     'cantidadSesiones' => $cantidadSesiones,
                     'duracionHoras' => round($duracionSesion * $cantidadSesiones, 2),
-                    'idDia' => $h->idDia
+                    'idDia' => $h->idDia,
+                    'esCompartida' => \App\Models\AsignacionSesion::where('tipoAsignacion', 'HORARIO COMPARTIDO')
+                        ->whereHas('horario', function($q) use ($h) {
+                            $q->where('idFicha', $h->idFicha)
+                              ->where('idGradoMateria', $h->idGradoMateria);
+                        })->exists(),
+                    'compartidoCon' => \App\Models\HorarioMateria::with('contrato.persona')
+                        ->where('idFicha', $h->idFicha)
+                        ->where('idGradoMateria', $h->idGradoMateria)
+                        ->whereNotNull('idContrato')
+                        ->where('idContrato', '!=', $h->idContrato)
+                        ->get()
+                        ->map(function($otro) {
+                            if ($otro->contrato && $otro->contrato->persona) {
+                                $p = $otro->contrato->persona;
+                                return trim($p->nombre1 . ' ' . $p->apellido1);
+                            }
+                            return null;
+                        })
+                        ->filter()
+                        ->unique()
+                        ->values()
+                        ->toArray()
                 ];
             });
 
@@ -678,6 +700,8 @@ class InstructoresController extends Controller
                         'competencia' => $primero['competencia'],
                         'resultadoAprendizaje' => $primero['resultadoAprendizaje'],
                         'estadoAsociacion' => $detallesRmi->first()?->estadoAsociacion,
+                        'esCompartida' => $primero['esCompartida'] ?? false,
+                        'compartidoCon' => $primero['compartidoCon'] ?? [],
                         'horarios' => $horariosGM->map(function ($item) use ($detallesRmi) {
                             return [
                                 'idHorario' => $item['idHorario'],
