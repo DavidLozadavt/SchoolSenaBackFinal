@@ -315,12 +315,7 @@ class MultimediaHistoriasController extends Controller
 
         $reels = GrupoMultimedia::where('idCompany', $idCompany)
             ->where('tipo', 'reel')
-            ->whereHas('gruposMultimedia', function ($query) {
-                $query->where('created_at', '>=', now()->subHours(24));
-            })
-            ->with(['gruposMultimedia' => function ($query) {
-                $query->where('created_at', '>=', now()->subHours(24));
-            }])
+            ->with(['gruposMultimedia'])
             ->orderBy('created_at', 'desc')
             ->limit(10)
             ->get()
