@@ -342,32 +342,37 @@ class ActividadController extends Controller
                 }
             }
 
-            $materialesPorRap = [];
-            $tablaMar = (new MaterialApoyoRap())->getTable();
-            if ($idsActividad->isNotEmpty() && Schema::hasTable($tablaMar)) {
-                $fichaIds = $registros->pluck('idFichaContext')->filter()->map(fn ($v) => (int) $v)->unique()->values();
-                $rapIds = $registros->pluck('idMateria')->filter()->map(fn ($v) => (int) $v)->unique()->values();
+            // Material de apoyo propio de cada actividad (materialApoyoActividad + asignacionMaterialApoyoActividad).
+            // No mezclar con materialApoyoRap (Biblioteca de conocimiento).
+            if ($idsActividad->isNotEmpty()
+                && Schema::hasTable('asignacionMaterialApoyoActividad')
+                && Schema::hasTable((new MaterialApoyoActividad())->getTable())) {
+                $tablaMa = (new MaterialApoyoActividad())->getTable();
+                $filasMaterial = DB::table('asignacionMaterialApoyoActividad as ama')
+                    ->join($tablaMa.' as ma', 'ama.idMaterialApoyo', '=', 'ma.id')
+                    ->whereIn('ama.idActividad', $idsActividad->all())
+                    ->whereNotNull('ama.idMaterialApoyo')
+                    ->select([
+                        'ama.idActividad',
+                        'ma.id',
+                        'ma.titulo',
+                        'ma.descripcion',
+                        'ma.urlDocumento',
+                        'ma.urlAdicional',
+                    ])
+                    ->orderBy('ma.id')
+                    ->get();
 
-                if ($fichaIds->isNotEmpty() && $rapIds->isNotEmpty()) {
-                    $qMatRap = MaterialApoyoRap::query()
-                        ->whereIn('idFicha', $fichaIds->all())
-                        ->whereIn('idRap', $rapIds->all());
-                    $materialesRap = $qMatRap->orderByDesc('id')->get();
-
-                    foreach ($materialesRap as $mat) {
-                        $key = ((int) $mat->idFicha) . '_' . ((int) $mat->idRap);
-                        $urlVid = Schema::hasColumn($tablaMar, 'urlVideo') ? ($mat->urlVideo ?? null) : null;
-                        $materialesPorRap[$key][] = [
-                            'id' => (int) $mat->id,
-                            'titulo' => $mat->titulo,
-                            'descripcion' => $mat->descripcion,
-                            'urlDocumento' => $mat->urlDocumento,
-                            'urlDocumentoUrl' => $this->publicUrl($mat->urlDocumento),
-                            'urlAdicional' => $mat->urlAdicional,
-                            'urlVideo' => $urlVid,
-                            'urlVideoUrl' => $this->publicUrl($urlVid),
-                        ];
-                    }
+                foreach ($filasMaterial as $mat) {
+                    $idAct = (int) $mat->idActividad;
+                    $materialesPorActividad[$idAct][] = [
+                        'id' => (int) $mat->id,
+                        'titulo' => $mat->titulo,
+                        'descripcion' => $mat->descripcion,
+                        'urlDocumento' => $mat->urlDocumento,
+                        'urlDocumentoUrl' => $this->publicUrl($mat->urlDocumento),
+                        'urlAdicional' => $mat->urlAdicional,
+                    ];
                 }
             }
 
@@ -441,7 +446,7 @@ class ActividadController extends Controller
                         /** Misma regla que App\Models\Person::getRutaFotoUrl (url()), no solo Storage::url sobre /storage/… */
                         'rutaFotoUrl' => $this->resolvePersonaPublicFotoUrl($rutaFotoPersonaCruda),
                     ],
-                    'materialesApoyo' => $materialesPorRap[((int) ($row->idFichaContext ?? 0)) . '_' . ((int) ($row->idMateria ?? 0))] ?? [],
+                    'materialesApoyo' => $materialesPorActividad[(int) $row->idActividad] ?? [],
                     'estadoVisual' => $estadoVisual,
                     'fechaVencida' => $fechaVencida,
                     'fechaInactiva' => $fechaInactiva,
