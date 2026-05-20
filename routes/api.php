@@ -1589,6 +1589,11 @@ Route::middleware('auth:api')->group(function () {
     Route::post('eventos-multimedia', [EventoController::class, 'store']);
     Route::post('eventos-multimedia/{id}', [EventoController::class, 'update']);
     Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy']);
+    
+    // Rutas de inscripción
+    Route::get('eventos-multimedia/{id}/check-registration', [EventoController::class, 'checkRegistration']);
+    Route::post('eventos-multimedia/{id}/register', [EventoController::class, 'register']);
+    Route::get('eventos-multimedia/{id}/attendees', [EventoController::class, 'getAttendees']);
 
 
 });
