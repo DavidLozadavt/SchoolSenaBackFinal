@@ -1253,6 +1253,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
     Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
     Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
+    Route::get('ambiente-virtual/instructor/mis-actividades', [ActividadController::class, 'misActividadesInstructor']);
     Route::get('ambiente-virtual/material-apoyo', [ActividadController::class, 'materialApoyoAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta-cuestionario', [ActividadController::class, 'responderCuestionarioAprendiz']);
