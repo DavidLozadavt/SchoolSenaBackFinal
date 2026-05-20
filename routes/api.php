@@ -1438,6 +1438,11 @@ Route::put('update_assistance',[AsistenciaController::class, 'updateAssistance']
 Route::post('update_assistance',[AsistenciaController::class, 'updateAssistance']);
 Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
 Route::get('justificaciones-inasistencia/{id}/soporte',[AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
+Route::post('solicitar-justificacion-asistencia', [AsistenciaController::class, 'solicitarJustificacionAsistencia']);
+Route::post('solicitar-justificacion-asistencia-rango', [AsistenciaController::class, 'solicitarJustificacionAsistenciaRango']);
+Route::get('justificaciones-pendientes-instructor', [AsistenciaController::class, 'justificacionesPendientesInstructor']);
+Route::post('responder-justificacion-asistencia', [AsistenciaController::class, 'responderJustificacionAsistencia']);
+Route::get('asistencias-instructor-global', [AsistenciaController::class, 'asistenciasInstructorGlobal']);
 
 //Intructores:
 Route::middleware('auth:api')->group(function () {
@@ -1585,6 +1590,11 @@ Route::middleware('auth:api')->group(function () {
     Route::post('eventos-multimedia', [EventoController::class, 'store']);
     Route::post('eventos-multimedia/{id}', [EventoController::class, 'update']);
     Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy']);
+    
+    // Rutas de inscripción
+    Route::get('eventos-multimedia/{id}/check-registration', [EventoController::class, 'checkRegistration']);
+    Route::post('eventos-multimedia/{id}/register', [EventoController::class, 'register']);
+    Route::get('eventos-multimedia/{id}/attendees', [EventoController::class, 'getAttendees']);
 
 
 });

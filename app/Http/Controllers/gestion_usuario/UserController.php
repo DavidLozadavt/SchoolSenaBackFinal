@@ -22,10 +22,18 @@ class UserController extends Controller
 {
     public function getUsers()
     {
-        $id =  KeyUtil::idCompany();
-        $user = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
-            ->where('company_id', $id)
-            ->get();
+        $id = KeyUtil::idCompany();
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
+            ->where('company_id', $id);
+
+        $currentUser = auth('api')->user() ?? auth()->user();
+        if ($currentUser && !empty($currentUser->idCentroFormacion)) {
+            $query->whereHas('user', function ($q) use ($currentUser) {
+                $q->where('idCentroFormacion', $currentUser->idCentroFormacion);
+            });
+        }
+
+        $user = $query->get();
 
         return response()->json($user);
     }
@@ -36,24 +44,62 @@ class UserController extends Controller
         $id = KeyUtil::idCompany();
         $search = $request->input('search', '');
         $perPage = $request->input('per_page', 15);
+        $stateId = $request->input('state_id', '');
+        $roleId = $request->input('role_id', '');
+        $sortOrder = $request->input('sort_order', '1');
 
-        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado');
+        $idCentroFormacion = $request->input('idCentroFormacion');
+
+        $currentUser = auth('api')->user() ?? auth()->user();
+        if ($currentUser && !empty($currentUser->idCentroFormacion)) {
+            $idCentroFormacion = $currentUser->idCentroFormacion;
+        }
+
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
+            ->where('company_id', $id);
+
+        if (!empty($idCentroFormacion)) {
+            $query->whereHas('user', function ($q) use ($idCentroFormacion) {
+                $q->where('idCentroFormacion', $idCentroFormacion);
+            });
+        }
 
         if (!empty($search)) {
-            $query->whereHas('user.persona', function ($q) use ($search) {
-                $q->where('nombre1', 'like', "%{$search}%")
-                    ->orWhere('apellido1', 'like', "%{$search}%")
-                    ->orWhere('nombre2', 'like', "%{$search}%")
-                    ->orWhere('apellido2', 'like', "%{$search}%")
-                    ->orWhere('identificacion', 'like', "%{$search}%");
+            $query->where(function ($q) use ($search) {
+                $q->whereHas('user.persona', function ($q2) use ($search) {
+                    $q2->where('nombre1', 'like', "%{$search}%")
+                        ->orWhere('apellido1', 'like', "%{$search}%")
+                        ->orWhere('nombre2', 'like', "%{$search}%")
+                        ->orWhere('apellido2', 'like', "%{$search}%")
+                        ->orWhere('identificacion', 'like', "%{$search}%");
+                })
+                    ->orWhereHas('roles', function ($q2) use ($search) {
+                        $q2->where('name', 'like', "%{$search}%");
+                    });
             });
+        }
+
+        if (!empty($stateId)) {
+            $query->where('state_id', $stateId);
+        }
+
+        if (!empty($roleId)) {
+            $query->whereHas('roles', function ($q) use ($roleId) {
+                $q->where('id', $roleId);
+            });
+        }
+
+        if ($sortOrder === '3') {
+            $query->orderBy('id', 'asc');
+        } else {
+            $query->orderBy('id', 'desc');
         }
 
         $users = $query->paginate($perPage);
 
         return response()->json($users);
     }
-   public function updateActivationCompanyUser(Request $request, $id)
+    public function updateActivationCompanyUser(Request $request, $id)
     {
         $userData = $request->input('user');
         $personaData = $userData['persona'];
@@ -80,8 +126,8 @@ class UserController extends Controller
         $persona->identificacion = $personaData['identificacion'];
         $persona->save();
 
-      // Inicializar variable
-            $passwordUpdated = false;
+        // Inicializar variable
+        $passwordUpdated = false;
 
         // Solo actualizar contraseña si se proporciona dentro del objeto user
         if (isset($userData['contrasena']) && !empty($userData['contrasena'])) {
@@ -106,18 +152,18 @@ class UserController extends Controller
             $activacion->removeRole('DOCENTEUP');
             $activacion->assignRole('INSTRUCTOR SENA');
         }
-        
-       // $contrato = $persona->contrato;
-       // if ($contrato) {
-          //  $salario = Salario::where('rol_id', $docenteRoleId)->first();
-            //if (!$salario) {
-              //  $salario = new Salario();
-                //$salario->rol_id = $docenteRoleId;
-                //$salario->valor = 0;
-                //$salario->save();
-            //}
-            //$contrato->salario()->associate($salario);
-            //$contrato->save();
+
+        // $contrato = $persona->contrato;
+        // if ($contrato) {
+        //  $salario = Salario::where('rol_id', $docenteRoleId)->first();
+        //if (!$salario) {
+        //  $salario = new Salario();
+        //$salario->rol_id = $docenteRoleId;
+        //$salario->valor = 0;
+        //$salario->save();
+        //}
+        //$contrato->salario()->associate($salario);
+        //$contrato->save();
         //}
 
         $activacion->load(
@@ -138,21 +184,21 @@ class UserController extends Controller
         return response()->json($response, 200);
     }
 
-    
-   public function checkProfileAccess()
+
+    public function checkProfileAccess()
     {
         $user = auth()->user();
-        
+
         if (!$user) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
-        
+
         $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
-        
+
         if (!$activationUser) {
             return response()->json(['error' => 'User activation not found'], 404);
         }
-        
+
         return response()->json([
             'needs_password_update' => $activationUser->state_id == 18
         ]);
@@ -204,7 +250,7 @@ class UserController extends Controller
         if ($request->hasFile('rutaFotoFile')) {
             return '/storage/' .
                 $request->file('rutaFotoFile')
-                ->store(Person::RUTA_FOTO, ['disk' => 'public']);
+                    ->store(Person::RUTA_FOTO, ['disk' => 'public']);
         }
 
         return $rutaActual;
@@ -249,6 +295,7 @@ class UserController extends Controller
             ->delete();
         $user = ActivationCompanyUser::find($request->input('idActivation'));
         $user->assignRole($request->input('roles', []));
+        $user->load('roles');
         return $user;
     }
 
@@ -402,10 +449,18 @@ class UserController extends Controller
      */
     public function getUsersAndGroups(Request $request): JsonResponse
     {
-        $activationCompanyUsers = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
             ->where('company_id', KeyUtil::idCompany())
-            ->active()
-            ->get();
+            ->active();
+
+        $currentUser = auth('api')->user() ?? auth()->user();
+        if ($currentUser && !empty($currentUser->idCentroFormacion)) {
+            $query->whereHas('user', function ($q) use ($currentUser) {
+                $q->where('idCentroFormacion', $currentUser->idCentroFormacion);
+            });
+        }
+
+        $activationCompanyUsers = $query->get();
 
         $loggedUserId = auth()->user()->id;
         $activationUser = ActivationCompanyUser::where('user_id', $loggedUserId)->first();
@@ -420,7 +475,7 @@ class UserController extends Controller
 
         return response()->json([
             'activationCompanyUsers' => $activationCompanyUsers,
-            'groups'                 => $groups,
+            'groups' => $groups,
         ]);
     }
 

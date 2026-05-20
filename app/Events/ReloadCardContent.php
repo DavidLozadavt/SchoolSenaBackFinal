@@ -22,11 +22,11 @@ class ReloadCardContent  implements ShouldBroadcast
 
     public function broadcastOn()
     {
-      
+        return new Channel('events');
     }
 
     public function broadcastAs()
     {
-      
+        return 'reload';
     }
 }
