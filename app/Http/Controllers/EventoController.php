@@ -23,7 +23,11 @@ class EventoController extends Controller
         $archived  = filter_var($request->input('archived', false), FILTER_VALIDATE_BOOLEAN);
 
         $query = Evento::where('idCompany', $idCompany)
-            ->with(['area', 'grupoMultimedia']);
+            ->with([
+                'area',
+                'grupoMultimedia',
+                'formularioInterno:id,titulo,colorTema,estado',
+            ]);
 
         if ($archived) {
             $query->where('estado', 'FINALIZADO');
@@ -94,6 +98,7 @@ class EventoController extends Controller
             $evento->idArea       = $request->input('idArea') ?: null;
             $evento->formUrl      = $request->input('formUrl');
             $evento->formProvider = $request->input('formProvider');
+            $evento->idFormularioInterno = $request->input('idFormularioInterno');
 
             // Manejo de archivo promocional del evento
             if ($request->hasFile('archivo')) {
@@ -151,6 +156,7 @@ class EventoController extends Controller
         $evento->idArea = $request->input('idArea') ?: null;
         if ($request->has('formUrl'))      $evento->formUrl      = $request->input('formUrl');
         if ($request->has('formProvider')) $evento->formProvider = $request->input('formProvider');
+        if ($request->has('idFormularioInterno')) $evento->idFormularioInterno = $request->input('idFormularioInterno');
 
         if ($request->hasFile('archivo')) {
             $path = $request->file('archivo')->store('eventos', ['disk' => 'public']);

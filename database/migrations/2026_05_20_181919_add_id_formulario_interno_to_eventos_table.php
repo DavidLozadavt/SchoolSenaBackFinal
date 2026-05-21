@@ -1,0 +1,34 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+class AddIdFormularioInternoToEventosTable extends Migration
+{
+    /**
+     * Run the migrations.
+     *
+     * @return void
+     */
+    public function up()
+    {
+        Schema::table('evento', function (Blueprint $table) {
+            $table->unsignedBigInteger('idFormularioInterno')->nullable()->after('formUrl');
+            $table->foreign('idFormularioInterno')->references('id')->on('formularios')->onDelete('set null');
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     *
+     * @return void
+     */
+    public function down()
+    {
+        Schema::table('evento', function (Blueprint $table) {
+            $table->dropForeign(['idFormularioInterno']);
+            $table->dropColumn('idFormularioInterno');
+        });
+    }
+}

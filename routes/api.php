@@ -174,6 +174,10 @@ use App\Http\Controllers\InstructorLiderController;
 
 Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
+// Formularios Públicos
+Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
+Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
+
 Route::group([
     'middleware' => 'api',
 ], function () {
@@ -1598,6 +1602,13 @@ Route::middleware('auth:api')->group(function () {
     Route::post('eventos-multimedia/{id}/register', [EventoController::class, 'register']);
     Route::get('eventos-multimedia/{id}/attendees', [EventoController::class, 'getAttendees']);
 
+    // --- FORMULARIOS INTERNOS ---
+    Route::get('formularios', [App\Http\Controllers\FormularioController::class, 'index']);
+    Route::post('formularios', [App\Http\Controllers\FormularioController::class, 'store']);
+    Route::get('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'show']);
+    Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update']);
+    Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy']);
+    Route::get('formularios/{id}/respuestas', [App\Http\Controllers\FormularioController::class, 'respuestas']);
 
 });
 
