@@ -9,7 +9,7 @@ class JustificacionAsistenciaRangoDetalle extends Model
 {
     use HasFactory;
 
-    protected $table = 'justificacion_asistencia_rango_detalles';
+    protected $table = 'justificacionAsistenciaRangoDetalles';
 
     protected $guarded = ['id'];
 
