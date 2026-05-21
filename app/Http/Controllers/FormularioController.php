@@ -104,12 +104,25 @@ class FormularioController extends Controller
         try {
             DB::beginTransaction();
 
+            $newSlug = $formulario->slug;
+            if ($formulario->titulo !== $request->titulo) {
+                $oldSlug = $formulario->slug;
+                $parts = explode('-', $oldSlug);
+                $suffix = end($parts);
+                if (strlen($suffix) === 13) {
+                    $newSlug = \Illuminate\Support\Str::slug($request->titulo) . '-' . $suffix;
+                } else {
+                    $newSlug = \Illuminate\Support\Str::slug($request->titulo) . '-' . uniqid();
+                }
+            }
+
             $formulario->update([
                 'titulo' => $request->titulo,
                 'descripcion' => $request->descripcion,
                 'colorTema' => $request->colorTema,
                 'estado' => $request->estado,
                 'requiereAutenticacion' => $request->requiereAutenticacion,
+                'slug' => $newSlug,
             ]);
 
             if ($request->has('preguntas')) {
@@ -201,13 +214,17 @@ class FormularioController extends Controller
     }
 
     /**
-     * Ver formulario público por slug.
+     * Ver formulario público por slug o ID.
      */
-    public function showPublic($slug)
+    public function showPublic($slugOrId)
     {
-        $formulario = Formulario::with('preguntas.opciones')->where('slug', $slug)->firstOrFail();
+        $formulario = Formulario::with('preguntas.opciones')
+            ->where('slug', $slugOrId)
+            ->orWhere('id', $slugOrId)
+            ->firstOrFail();
         
-        if ($formulario->estado !== 'publicado') {
+        $isAuth = Auth::check() || Auth::guard('api')->check();
+        if ($formulario->estado !== 'publicado' && !$isAuth) {
             return response()->json(['error' => 'Formulario no disponible'], 403);
         }
 
@@ -217,22 +234,27 @@ class FormularioController extends Controller
     /**
      * Guardar respuestas del formulario.
      */
-    public function responder(Request $request, $slug)
+    public function responder(Request $request, $slugOrId)
     {
-        $formulario = Formulario::where('slug', $slug)->firstOrFail();
+        $formulario = Formulario::where('slug', $slugOrId)
+            ->orWhere('id', $slugOrId)
+            ->firstOrFail();
 
-        if ($formulario->estado !== 'publicado') {
+        $isAuth = Auth::check() || Auth::guard('api')->check();
+        $user = Auth::user() ?: Auth::guard('api')->user();
+
+        if ($formulario->estado !== 'publicado' && !$isAuth) {
             return response()->json(['error' => 'Formulario no disponible'], 403);
         }
 
-        if ($formulario->requiereAutenticacion && !Auth::check()) {
+        if ($formulario->requiereAutenticacion && !$isAuth) {
             return response()->json(['error' => 'Debe iniciar sesión para responder'], 401);
         }
 
-        $userId = Auth::check() ? Auth::id() : null;
+        $userId = $user ? $user->id : null;
 
-        // Validar si ya respondió (si requiere auth)
-        if ($formulario->requiereAutenticacion && FormularioRespuesta::where('idFormulario', $formulario->id)->where('idUser', $userId)->exists()) {
+        // Validar si ya respondió (si requiere auth y el formulario está publicado)
+        if ($formulario->estado === 'publicado' && $formulario->requiereAutenticacion && FormularioRespuesta::where('idFormulario', $formulario->id)->where('idUser', $userId)->exists()) {
             return response()->json(['error' => 'Ya has respondido este formulario'], 403);
         }
 
@@ -248,8 +270,7 @@ class FormularioController extends Controller
 
             // Auto-inscribir a evento si está asociado
             $evento = Evento::where('idFormularioInterno', $formulario->id)->first();
-            if ($evento && Auth::check()) {
-                $user = Auth::user();
+            if ($evento && $user) {
                 if ($user->idpersona) {
                     // Buscamos si el usuario ya es participante
                     $participante = ParticipanteEvento::where('idEvento', $evento->idEvento)
@@ -286,9 +307,24 @@ class FormularioController extends Controller
     public function respuestas($id)
     {
         $respuestas = FormularioRespuesta::where('idFormulario', $id)
-            ->with('usuario:id,name,email')
+            ->with(['usuario' => function($query) {
+                $query->with('persona:id,nombre1,nombre2,apellido1,apellido2');
+            }])
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->map(function ($r) {
+                if ($r->usuario) {
+                    $persona = $r->usuario->persona;
+                    $parts = array_filter([
+                        $persona->nombre1 ?? '',
+                        $persona->nombre2 ?? '',
+                        $persona->apellido1 ?? '',
+                        $persona->apellido2 ?? '',
+                    ]);
+                    $r->usuario->name = implode(' ', $parts) ?: $r->usuario->email;
+                }
+                return $r;
+            });
 
         return response()->json($respuestas);
     }
