@@ -1054,6 +1054,182 @@ class FichaController extends Controller
     }
 
     /**
+     * Historial completo de sesiones dictadas por el instructor (Mis formaciones → Completado).
+     * Incluye todas las filas en sesionMateria, aunque el RAP ya no tenga sesiones restantes en el horario.
+     */
+    public function historialSesionesInstructor(Request $request, ?int $idInstructor = null): JsonResponse
+    {
+        try {
+            if (!$idInstructor) {
+                try {
+                    $contratoActivo = KeyUtil::lastContractActive();
+                    if ($contratoActivo && $contratoActivo->id) {
+                        $idInstructor = $contratoActivo->id;
+                    } else {
+                        return response()->json([
+                            'message' => 'No se encontró un contrato activo para el usuario autenticado',
+                            'data' => [],
+                            'total' => 0,
+                        ], 200);
+                    }
+                } catch (\Throwable $e) {
+                    return response()->json([
+                        'message' => 'Error al obtener el contrato del usuario autenticado',
+                        'error' => $e->getMessage(),
+                        'data' => [],
+                        'total' => 0,
+                    ], 400);
+                }
+            }
+
+            $tieneAsignacionSesion = Schema::hasTable('asignacionSesion');
+            $hasInfraestructura = Schema::hasColumn('horarioMateria', 'idInfraestructura');
+            $selectAula = $hasInfraestructura
+                ? ['inf.nombreInfraestructura as aula_nombre']
+                : [DB::raw('NULL as aula_nombre')];
+
+            // Alias `sesm`: `aplicarJoinsMateriaCompetenciaRapSeguimiento` usa `sm` para seguimientoMateria.
+            $qb = DB::table('sesionMateria as sesm')
+                ->join('horarioMateria as hm', 'sesm.idHorarioMateria', '=', 'hm.id')
+                ->select(array_merge([
+                    'sesm.id as sesion_id',
+                    'sesm.numeroSesion as sesion_numeroSesion',
+                    'sesm.fechaSesion as sesion_fechaSesion',
+                    'sesm.estado as sesion_estado',
+                    'sesm.observacion as sesion_observacion',
+                    'f.id as ficha_id',
+                    'f.codigo as ficha_codigo',
+                    'p.nombrePrograma as programa_nombre',
+                    'm.nombreMateria as materia_nombre',
+                ], $this->selectCompetenciaRapIdPadreMateriaClase(), [
+                    'j.nombreJornada as jornada_nombre',
+                    'j.nombreJornada as jornada_tipo',
+                    'd.dia as dia_semana',
+                    'hm.horaInicial',
+                    'hm.horaFinal',
+                    'hm.fechaInicial',
+                    'hm.fechaFinal',
+                    'hm.idDia',
+                    'hm.id as idHorarioMateria',
+                    'hm.idGradoMateria',
+                    'gm.idMateria as idMateria',
+                    DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
+                ], $selectAula))
+                ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
+                ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+                ->join('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id')
+                ->join('programa as p', 'ap.idPrograma', '=', 'p.id')
+                ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+                ->join('materia as m', 'gm.idMateria', '=', 'm.id');
+            $qb = $this->aplicarJoinsMateriaCompetenciaRapSeguimiento($qb);
+            $qb = $qb
+                ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
+                ->join('contrato as c', function ($join) use ($idInstructor) {
+                    $join->on('c.id', '=', DB::raw((int) $idInstructor));
+                })
+                ->join('persona as per', 'c.idpersona', '=', 'per.id');
+
+            if ($hasInfraestructura) {
+                $qb = $qb->leftJoin('infraestructura as inf', 'hm.idInfraestructura', '=', 'inf.id');
+            }
+
+            if ($tieneAsignacionSesion) {
+                $qb->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
+                    $join->on('hm.id', '=', 'asig.idHorarioMateria')
+                        ->where('asig.idContrato', '=', $idInstructor);
+                });
+            }
+
+            $qb->whereNotNull('sesm.fechaSesion')
+                ->where(function ($query) use ($idInstructor, $tieneAsignacionSesion) {
+                    $query->where('hm.idContrato', $idInstructor);
+                    if ($tieneAsignacionSesion) {
+                        $query->orWhereNotNull('asig.id');
+                    }
+                });
+
+            $rows = $qb
+                ->orderByDesc('sesm.fechaSesion')
+                ->orderByDesc('sesm.numeroSesion')
+                ->get();
+
+            $vistos = [];
+            $data = [];
+            foreach ($rows as $row) {
+                $idHm = (int) ($row->idHorarioMateria ?? 0);
+                $fechaYmd = Carbon::parse((string) $row->sesion_fechaSesion)->format('Y-m-d');
+                $num = (int) ($row->sesion_numeroSesion ?? 0);
+                $sid = (int) ($row->sesion_id ?? 0);
+                $key = $sid > 0 ? "id:{$sid}" : "hm:{$idHm}|{$fechaYmd}|n:{$num}";
+                if (isset($vistos[$key])) {
+                    continue;
+                }
+                $vistos[$key] = true;
+
+                $fecha = Carbon::parse((string) $row->sesion_fechaSesion);
+                $materiaNombre = (string) ($row->materia_nombre ?? '');
+                $competenciaRaw = isset($row->competencia_nombre) ? trim((string) $row->competencia_nombre) : '';
+                $competenciaNombre = $competenciaRaw !== '' ? $competenciaRaw : $materiaNombre;
+                $rapRaw = isset($row->rap_nombre) ? trim((string) $row->rap_nombre) : '';
+                $rapNombre = $rapRaw !== '' && strtolower($rapRaw) !== 'null' ? $rapRaw : null;
+
+                $data[] = [
+                    'sesion' => [
+                        'id' => $sid,
+                        'numeroSesion' => $num,
+                        'fechaSesion' => $fechaYmd,
+                        'fechaFormateada' => $fecha->locale('es')->isoFormat('dddd, D [de] MMMM [de] YYYY'),
+                        'fechaCorta' => $fecha->format('d/m/Y'),
+                        'estado' => (string) ($row->sesion_estado ?? ''),
+                        'observacion' => $row->sesion_observacion,
+                        'evaluador_nombre' => null,
+                    ],
+                    'clase' => [
+                        'ficha_id' => (int) ($row->ficha_id ?? 0),
+                        'ficha_codigo' => (string) ($row->ficha_codigo ?? ''),
+                        'programa_nombre' => (string) ($row->programa_nombre ?? ''),
+                        'materia_nombre' => $materiaNombre,
+                        'competencia_nombre' => $competenciaNombre,
+                        'rap_nombre' => $rapNombre,
+                        'jornada_nombre' => (string) ($row->jornada_nombre ?? ''),
+                        'jornada_tipo' => (string) ($row->jornada_tipo ?? ''),
+                        'dia_semana' => (string) ($row->dia_semana ?? ''),
+                        'idDia' => (int) ($row->idDia ?? 0),
+                        'horaInicial' => (string) ($row->horaInicial ?? ''),
+                        'horaFinal' => (string) ($row->horaFinal ?? ''),
+                        'fechaInicial' => (string) ($row->fechaInicial ?? ''),
+                        'fechaFinal' => $row->fechaFinal != null ? (string) $row->fechaFinal : null,
+                        'idHorarioMateria' => $idHm,
+                        'idGradoMateria' => (int) ($row->idGradoMateria ?? 0),
+                        'idMateria' => (int) ($row->idMateria ?? 0),
+                        'instructor_nombre' => trim((string) ($row->instructor_nombre ?? '')),
+                        'aula_nombre' => $row->aula_nombre ?? null,
+                    ],
+                ];
+            }
+
+            return response()->json([
+                'message' => 'Historial de sesiones obtenido correctamente',
+                'data' => $data,
+                'total' => count($data),
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('Error al obtener historial de sesiones del instructor', [
+                'idInstructor' => $idInstructor,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Error al obtener el historial de sesiones',
+                'error' => $e->getMessage(),
+                'data' => [],
+                'total' => 0,
+            ], 500);
+        }
+    }
+
+    /**
      * Obtener todas las clases con instructores asignados (sin filtro)
      * Devuelve materias individuales con sus horarios específicos
      * 
@@ -1880,6 +2056,20 @@ class FichaController extends Controller
      */
     private function obtenerSesionesCompletadas(int $idHorarioMateria): array
     {
+        $horario = DB::table('horarioMateria as hm')
+            ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
+            ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+            ->where('hm.id', $idHorarioMateria)
+            ->select([
+                'hm.fechaInicial',
+                'hm.fechaFinal',
+                'hm.idDia',
+                'hm.horaInicial',
+                'hm.horaFinal',
+                'j.nombreJornada as jornada_nombre',
+            ])
+            ->first();
+
         $meta = $this->metaHorarioParaSesiones($idHorarioMateria);
         if ($meta === null) {
             return [];
@@ -1903,20 +2093,39 @@ class FichaController extends Controller
             $evaluadorNombre = trim(preg_replace('/\s+/', ' ', "{$evaluador->nombre1} {$evaluador->nombre2} {$evaluador->apellido1} {$evaluador->apellido2}"));
         }
 
+        // Todas las filas en sesionMateria + las que cuentan en sesiones_dadas (mismo criterio que el badge X/Y).
         $sesiones = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
             ->whereNotNull('fechaSesion')
             ->orderBy('fechaSesion', 'asc')
-            ->get()
-            ->unique('id')
-            ->values()
-            ->filter(function ($sesion) use ($meta) {
-                return $this->sesionMateriaContadaComoFinalizada(
-                    (string) $sesion->fechaSesion,
-                    (string) $meta->horaInicial,
-                    (string) $meta->horaFinal,
-                    $meta->jornada_nombre ?? null
-                );
-            });
+            ->get();
+
+        $fechasProgramadas = [];
+        if ($horario && !empty($horario->fechaInicial)) {
+            $fechasProgramadas = $this->obtenerFechasSesionesProgramadas(
+                (string) $horario->fechaInicial,
+                $horario->fechaFinal !== null ? (string) $horario->fechaFinal : null,
+                (int) $horario->idDia
+            );
+        }
+
+        $sesionesContadas = $sesiones->filter(function ($s) use ($fechasProgramadas, $meta) {
+            if ($fechasProgramadas === []) {
+                return true;
+            }
+            $ymd = Carbon::parse((string) $s->fechaSesion)->format('Y-m-d');
+            if (!in_array($ymd, $fechasProgramadas, true)) {
+                return false;
+            }
+
+            return $this->sesionMateriaContadaComoFinalizada(
+                (string) $s->fechaSesion,
+                (string) $meta->horaInicial,
+                (string) $meta->horaFinal,
+                $meta->jornada_nombre ?? null
+            );
+        });
+
+        $sesiones = $sesiones->merge($sesionesContadas)->unique('id')->sortBy('fechaSesion')->values();
 
         return $sesiones->map(function ($sesion) use ($evaluadorNombre) {
             $fecha = Carbon::parse($sesion->fechaSesion);
@@ -1924,7 +2133,7 @@ class FichaController extends Controller
             return [
                 'id' => $sesion->id,
                 'numeroSesion' => $sesion->numeroSesion,
-                'fechaSesion' => $sesion->fechaSesion,
+                'fechaSesion' => $fecha->format('Y-m-d'),
                 'fechaFormateada' => $fecha->locale('es')->isoFormat('dddd, D [de] MMMM [de] YYYY'),
                 'fechaCorta' => $fecha->format('d/m/Y'),
                 'estado' => $sesion->estado,
@@ -1947,43 +2156,10 @@ class FichaController extends Controller
             return [];
         }
 
-        $sesiones = SesionMateria::whereIn('idHorarioMateria', $idsHorarioMateria)
-            ->whereNotNull('fechaSesion')
-            ->orderBy('fechaSesion', 'asc')
-            ->get()
-            ->unique('id')
-            ->values();
-
-        $metasPorHm = [];
-        foreach ($idsHorarioMateria as $idHm) {
-            $metasPorHm[$idHm] = $this->metaHorarioParaSesiones($idHm);
-        }
-
+        // Misma regla que `obtenerSesionesCompletadas`: todas las filas en sesionMateria (calendario verde).
         $porHorario = [];
-        foreach ($sesiones as $sesion) {
-            $idHm = (int) $sesion->idHorarioMateria;
-            $meta = $metasPorHm[$idHm] ?? null;
-            if (
-                $meta === null
-                || !$this->sesionMateriaContadaComoFinalizada(
-                    (string) $sesion->fechaSesion,
-                    (string) $meta->horaInicial,
-                    (string) $meta->horaFinal,
-                    $meta->jornada_nombre ?? null
-                )
-            ) {
-                continue;
-            }
-            $fecha = Carbon::parse($sesion->fechaSesion);
-            $porHorario[$idHm][] = [
-                'id' => $sesion->id,
-                'numeroSesion' => $sesion->numeroSesion,
-                'fechaSesion' => $sesion->fechaSesion,
-                'fechaFormateada' => $fecha->locale('es')->isoFormat('dddd, D [de] MMMM [de] YYYY'),
-                'fechaCorta' => $fecha->format('d/m/Y'),
-                'estado' => $sesion->estado,
-                'observacion' => $sesion->observacion,
-            ];
+        foreach ($idsHorarioMateria as $idHm) {
+            $porHorario[$idHm] = $this->obtenerSesionesCompletadas($idHm);
         }
 
         return $porHorario;
