@@ -1231,6 +1231,8 @@ Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'upda
 Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
 Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
 Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+Route::get('fichas/instructor/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
+Route::get('fichas/instructor/{idInstructor}/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
 Route::get('fichas/estudiante/clases', [FichaController::class, 'clasesEstudiante']);
 Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
 Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
