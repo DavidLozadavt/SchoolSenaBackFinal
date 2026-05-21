@@ -10,13 +10,14 @@ return new class extends Migration
      * Run the migrations.
      *
      * @return void
+     * 
      */
     public function up()
     {
         Schema::create('justificacionAsistenciaRangoDetalles', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('idJustificacionAsistenciaRango');
-            $table->unsignedBigInteger('idHorarioMateria');
+            $table->unsignedBigInteger('idHorarioMateria')->nullable();
             $table->unsignedBigInteger('idFicha')->nullable();
             $table->unsignedBigInteger('idContratoInstructor')->nullable();
             $table->unsignedInteger('idPersonaInstructor')->nullable();

@@ -77,6 +77,32 @@ class MatriculaAcademicaController extends Controller
 
             $result->load('asistencias.sesionMateria');
 
+            $hoyDate = today()->toDateString();
+            foreach ($result as $item) {
+                $permiso = null;
+                $personId = $item->matricula?->person?->id;
+                if ($personId && $idFicha) {
+                    $detalle = \App\Models\JustificacionAsistenciaRangoDetalle::whereHas('rango', function($q) use ($personId, $hoyDate) {
+                        $q->where('idPersonaAprendiz', $personId)->where('fechaInicial', '<=', $hoyDate)->where('fechaFinal', '>=', $hoyDate);
+                    })->where('idFicha', $idFicha)->whereIn('estado', ['PENDIENTE', 'APROBADO'])->with(['rango', 'personaAutoriza'])->first();
+                    if ($detalle) {
+                        $permiso = [
+                            'tienePermiso' => true,
+                            'estado' => $detalle->estado,
+                            'fechaInicial' => $detalle->rango->fechaInicial,
+                            'fechaFinal' => $detalle->rango->fechaFinal,
+                            'tipoExcusa' => $detalle->rango->tipoExcusa,
+                            'observacion' => $detalle->rango->observacion,
+                            'archivoSoporteUrl' => $detalle->rango->archivoSoporte ? url('storage/' . $detalle->rango->archivoSoporte) : null,
+                            'autorizadoPor' => $detalle->personaAutoriza ? trim($detalle->personaAutoriza->nombre1 . ' ' . $detalle->personaAutoriza->apellido1) : null,
+                            'fechaRespuesta' => $detalle->fechaRespuesta,
+                            'observacionInstructor' => $detalle->observacionInstructor
+                        ];
+                    }
+                }
+                $item->permisoAsistencia = $permiso;
+            }
+
             // Calcular nota parcial y porcentaje de avance para cada matrícula
             foreach ($result as $matricula) {
                 // Debido a posibles cruces al momento de asignar actividades, buscamos por todas las matrículas académicas del estudiante
@@ -174,8 +200,7 @@ class MatriculaAcademicaController extends Controller
                 ->paginate($perPage, ['*'], 'page', $page);
 
             // Calcular nota parcial y porcentaje de avance
-            $result->getCollection()->transform(function ($matricula) {
-                // Debido a posibles cruces al momento de asignar actividades, buscamos por todas las matrículas académicas del estudiante
+            $result->getCollection()->transform(function ($matricula) use ($hoy) { $permiso = null; $idPersona = $matricula->matricula?->idPersona; $idFicha = $matricula->idFicha; if ($idPersona && $idFicha) { $detalle = \App\Models\JustificacionAsistenciaRangoDetalle::whereHas('rango', function($q) use ($idPersona, $hoy) { $q->where('idPersonaAprendiz', $idPersona)->whereDate('fechaInicial', '<=', $hoy)->whereDate('fechaFinal', '>=', $hoy); })->where('idFicha', $idFicha)->with(['rango', 'personaAutoriza'])->first(); if ($detalle) { $permiso = [ 'tienePermiso' => true, 'estado' => $detalle->estado, 'fechaInicial' => $detalle->rango->fechaInicial, 'fechaFinal' => $detalle->rango->fechaFinal, 'tipoExcusa' => $detalle->rango->tipoExcusa, 'observacion' => $detalle->rango->observacion, 'archivoSoporteUrl' => $detalle->rango->archivoSoporte ? url('storage/' . $detalle->rango->archivoSoporte) : null, 'autorizadoPor' => $detalle->personaAutoriza ? trim($detalle->personaAutoriza->nombre1 . ' ' . $detalle->personaAutoriza->apellido1) : null, 'fechaRespuesta' => $detalle->fechaRespuesta, 'observacionInstructor' => $detalle->observacionInstructor ]; } } $matricula->permisoAsistencia = $permiso; // Debido a posibles cruces al momento de asignar actividades, buscamos por todas las matrículas académicas del estudiante
                 $idsMaEstudiante = \DB::table('matriculaAcademica')
                     ->where('idMatricula', $matricula->idMatricula)
                     ->pluck('id');
@@ -451,3 +476,4 @@ class MatriculaAcademicaController extends Controller
 
 
 }
+
