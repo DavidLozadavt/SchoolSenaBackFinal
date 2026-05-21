@@ -1,0 +1,295 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Formulario;
+use App\Models\FormularioPregunta;
+use App\Models\FormularioOpcion;
+use App\Models\FormularioRespuesta;
+use App\Models\Evento;
+use App\Models\ParticipanteEvento;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
+
+class FormularioController extends Controller
+{
+    /**
+     * Listar formularios de la empresa actual.
+     */
+    public function index(Request $request)
+    {
+        $idCompany = $request->user()->idempresa ?? 1; // Ajustar según cómo se obtiene la empresa
+
+        $formularios = Formulario::where('idCompany', $idCompany)
+            ->withCount(['preguntas', 'respuestas'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($formularios);
+    }
+
+    /**
+     * Crear un nuevo formulario con sus preguntas y opciones.
+     */
+    public function store(Request $request)
+    {
+        $request->validate([
+            'titulo' => 'required|string|max:255',
+            'preguntas' => 'array'
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $user = $request->user();
+            
+            $formulario = Formulario::create([
+                'idCompany' => $user->idempresa ?? 1, // Obtener empresa del usuario
+                'idUser' => $user->id,
+                'titulo' => $request->titulo,
+                'descripcion' => $request->descripcion,
+                'colorTema' => $request->colorTema ?? '#6366f1',
+                'estado' => $request->estado ?? 'borrador',
+                'requiereAutenticacion' => $request->requiereAutenticacion ?? false,
+            ]);
+
+            if ($request->has('preguntas')) {
+                foreach ($request->preguntas as $p) {
+                    $pregunta = $formulario->preguntas()->create([
+                        'tipo' => $p['tipo'],
+                        'titulo' => $p['titulo'],
+                        'descripcion' => $p['descripcion'] ?? null,
+                        'esObligatoria' => $p['esObligatoria'] ?? false,
+                        'orden' => $p['orden'],
+                        'configuracion' => $p['configuracion'] ?? null,
+                    ]);
+
+                    if (isset($p['opciones']) && is_array($p['opciones'])) {
+                        foreach ($p['opciones'] as $o) {
+                            $pregunta->opciones()->create([
+                                'texto' => $o['texto'],
+                                'orden' => $o['orden'],
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            DB::commit();
+
+            return response()->json($formulario->load('preguntas.opciones'), 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Obtener un formulario específico con preguntas y opciones.
+     */
+    public function show($id)
+    {
+        $formulario = Formulario::with('preguntas.opciones')->findOrFail($id);
+        return response()->json($formulario);
+    }
+
+    /**
+     * Actualizar un formulario existente.
+     */
+    public function update(Request $request, $id)
+    {
+        $formulario = Formulario::findOrFail($id);
+
+        try {
+            DB::beginTransaction();
+
+            $formulario->update([
+                'titulo' => $request->titulo,
+                'descripcion' => $request->descripcion,
+                'colorTema' => $request->colorTema,
+                'estado' => $request->estado,
+                'requiereAutenticacion' => $request->requiereAutenticacion,
+            ]);
+
+            if ($request->has('preguntas')) {
+                // Sincronizar preguntas
+                $preguntasActualesIds = [];
+
+                foreach ($request->preguntas as $p) {
+                    if (isset($p['id']) && strpos($p['id'], 'new') === false) {
+                        // Actualizar pregunta existente
+                        $pregunta = FormularioPregunta::find($p['id']);
+                        if ($pregunta) {
+                            $pregunta->update([
+                                'tipo' => $p['tipo'],
+                                'titulo' => $p['titulo'],
+                                'descripcion' => $p['descripcion'] ?? null,
+                                'esObligatoria' => $p['esObligatoria'] ?? false,
+                                'orden' => $p['orden'],
+                                'configuracion' => $p['configuracion'] ?? null,
+                            ]);
+                            $preguntasActualesIds[] = $pregunta->id;
+                            
+                            // Sincronizar opciones
+                            if (isset($p['opciones']) && in_array($p['tipo'], ['opcion_multiple', 'casillas', 'desplegable'])) {
+                                $opcionesActualesIds = [];
+                                foreach ($p['opciones'] as $o) {
+                                    if (isset($o['id']) && strpos($o['id'], 'new') === false) {
+                                        $opcion = FormularioOpcion::find($o['id']);
+                                        if ($opcion) {
+                                            $opcion->update(['texto' => $o['texto'], 'orden' => $o['orden']]);
+                                            $opcionesActualesIds[] = $opcion->id;
+                                        }
+                                    } else {
+                                        $nuevaOpcion = $pregunta->opciones()->create(['texto' => $o['texto'], 'orden' => $o['orden']]);
+                                        $opcionesActualesIds[] = $nuevaOpcion->id;
+                                    }
+                                }
+                                // Eliminar opciones que ya no están
+                                FormularioOpcion::where('idFormularioPregunta', $pregunta->id)
+                                    ->whereNotIn('id', $opcionesActualesIds)
+                                    ->delete();
+                            }
+                        }
+                    } else {
+                        // Crear nueva pregunta
+                        $pregunta = $formulario->preguntas()->create([
+                            'tipo' => $p['tipo'],
+                            'titulo' => $p['titulo'],
+                            'descripcion' => $p['descripcion'] ?? null,
+                            'esObligatoria' => $p['esObligatoria'] ?? false,
+                            'orden' => $p['orden'],
+                            'configuracion' => $p['configuracion'] ?? null,
+                        ]);
+                        $preguntasActualesIds[] = $pregunta->id;
+
+                        if (isset($p['opciones']) && is_array($p['opciones'])) {
+                            foreach ($p['opciones'] as $o) {
+                                $pregunta->opciones()->create([
+                                    'texto' => $o['texto'],
+                                    'orden' => $o['orden'],
+                                ]);
+                            }
+                        }
+                    }
+                }
+
+                // Eliminar preguntas que ya no están
+                FormularioPregunta::where('idFormulario', $formulario->id)
+                    ->whereNotIn('id', $preguntasActualesIds)
+                    ->delete();
+            }
+
+            DB::commit();
+
+            return response()->json($formulario->load('preguntas.opciones'));
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Eliminar formulario.
+     */
+    public function destroy($id)
+    {
+        $formulario = Formulario::findOrFail($id);
+        $formulario->delete();
+        return response()->json(['message' => 'Formulario eliminado.']);
+    }
+
+    /**
+     * Ver formulario público por slug.
+     */
+    public function showPublic($slug)
+    {
+        $formulario = Formulario::with('preguntas.opciones')->where('slug', $slug)->firstOrFail();
+        
+        if ($formulario->estado !== 'publicado') {
+            return response()->json(['error' => 'Formulario no disponible'], 403);
+        }
+
+        return response()->json($formulario);
+    }
+
+    /**
+     * Guardar respuestas del formulario.
+     */
+    public function responder(Request $request, $slug)
+    {
+        $formulario = Formulario::where('slug', $slug)->firstOrFail();
+
+        if ($formulario->estado !== 'publicado') {
+            return response()->json(['error' => 'Formulario no disponible'], 403);
+        }
+
+        if ($formulario->requiereAutenticacion && !Auth::check()) {
+            return response()->json(['error' => 'Debe iniciar sesión para responder'], 401);
+        }
+
+        $userId = Auth::check() ? Auth::id() : null;
+
+        // Validar si ya respondió (si requiere auth)
+        if ($formulario->requiereAutenticacion && FormularioRespuesta::where('idFormulario', $formulario->id)->where('idUser', $userId)->exists()) {
+            return response()->json(['error' => 'Ya has respondido este formulario'], 403);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $respuesta = FormularioRespuesta::create([
+                'idFormulario' => $formulario->id,
+                'idUser' => $userId,
+                'ipAddress' => $request->ip(),
+                'respuestas' => $request->respuestas ?? [],
+            ]);
+
+            // Auto-inscribir a evento si está asociado
+            $evento = Evento::where('idFormularioInterno', $formulario->id)->first();
+            if ($evento && Auth::check()) {
+                $user = Auth::user();
+                if ($user->idpersona) {
+                    // Buscamos si el usuario ya es participante
+                    $participante = ParticipanteEvento::where('idEvento', $evento->idEvento)
+                        ->where('idPersona', $user->idpersona)
+                        ->first();
+                    
+                    if (!$participante) {
+                        $participante = ParticipanteEvento::create([
+                            'idEvento' => $evento->idEvento,
+                            'idPersona' => $user->idpersona,
+                            'estado' => 'CONFIRMADO' // Ajustar al valor real
+                        ]);
+                    } else {
+                        // Actualizamos estado a CONFIRMADO
+                        $participante->update([
+                            'estado' => 'CONFIRMADO' 
+                        ]);
+                    }
+                }
+            }
+
+            DB::commit();
+
+            return response()->json(['message' => 'Respuesta guardada con éxito', 'data' => $respuesta]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Obtener respuestas de un formulario (para el builder).
+     */
+    public function respuestas($id)
+    {
+        $respuestas = FormularioRespuesta::where('idFormulario', $id)
+            ->with('usuario:id,name,email')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($respuestas);
+    }
+}

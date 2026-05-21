@@ -94,6 +94,7 @@ class EventoController extends Controller
             $evento->idArea       = $request->input('idArea') ?: null;
             $evento->formUrl      = $request->input('formUrl');
             $evento->formProvider = $request->input('formProvider');
+            $evento->idFormularioInterno = $request->input('idFormularioInterno');
 
             // Manejo de archivo promocional del evento
             if ($request->hasFile('archivo')) {
@@ -151,6 +152,7 @@ class EventoController extends Controller
         $evento->idArea = $request->input('idArea') ?: null;
         if ($request->has('formUrl'))      $evento->formUrl      = $request->input('formUrl');
         if ($request->has('formProvider')) $evento->formProvider = $request->input('formProvider');
+        if ($request->has('idFormularioInterno')) $evento->idFormularioInterno = $request->input('idFormularioInterno');
 
         if ($request->hasFile('archivo')) {
             $path = $request->file('archivo')->store('eventos', ['disk' => 'public']);
