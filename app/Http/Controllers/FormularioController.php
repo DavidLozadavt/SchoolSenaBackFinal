@@ -209,6 +209,14 @@ class FormularioController extends Controller
     public function destroy($id)
     {
         $formulario = Formulario::findOrFail($id);
+        
+        // Desvincular formulario de los eventos asociados
+        Evento::where('idFormularioInterno', $id)->update([
+            'idFormularioInterno' => null,
+            'formUrl' => null,
+            'formProvider' => null
+        ]);
+
         $formulario->delete();
         return response()->json(['message' => 'Formulario eliminado.']);
     }
