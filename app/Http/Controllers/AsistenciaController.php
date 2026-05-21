@@ -1604,9 +1604,11 @@ class AsistenciaController extends Controller
 
         $materiaNombre = $horario?->gradoMateria?->materia?->nombreMateria ?? 'clase';
 
-        if ($horario?->idContrato) {
+        $idContratoInstructorId = $horario?->idContrato ?? $horario?->ficha?->idInstructorLider;
+
+        if ($idContratoInstructorId) {
             $contratoInstructor = \App\Models\Contract::with('persona.usuario')
-                ->find($horario->idContrato);
+                ->find($idContratoInstructorId);
 
             $idUsuarioInstructor = $this->usuarioIdPorPersona(
                 $contratoInstructor?->persona?->id ?? $contratoInstructor?->idpersona
@@ -1676,7 +1678,7 @@ class AsistenciaController extends Controller
 
             $matriculas = \App\Models\MatriculaAcademica::whereHas('matricula', function($q) use ($idPersonaEstudiante) { $q->where('idPersona', $idPersonaEstudiante); })->get();
             $fichaIds = $matriculas->pluck('idFicha')->filter()->unique()->toArray();
-            $fichas = \App\Models\Ficha::whereIn('id', $fichaIds)->get(); foreach ($fichas as $ficha) { \App\Models\JustificacionAsistenciaRangoDetalle::create([ 'idJustificacionAsistenciaRango' => $rango->id, 'idHorarioMateria' => null, 'idFicha' => $ficha->id, 'idContratoInstructor' => $ficha->idInstructorLider, 'estado' => 'PENDIENTE' ]); if ($ficha->idInstructorLider) { $idPersonaLider = \App\Models\Contract::where('id', $ficha->idInstructorLider)->value('idpersona'); if ($idPersonaLider) { $idUsuarioLider = \App\Models\User::where('idpersona', $idPersonaLider)->value('id'); if ($idUsuarioLider) { $nombreEstudiante = $this->nombrePersona($user?->persona ?? $user?->person); $this->enviarNotificacion((int) $idUsuarioLider, (int) ($user->id ?? 0), 'Solicitud de justificaci贸n por rango', $nombreEstudiante . ' solicit贸 justificar su inasistencia por rango de fechas.', '/ambiente-virtual/historial-raps'); } } } }
+            $fichas = \App\Models\Ficha::whereIn('id', $fichaIds)->get(); foreach ($fichas as $ficha) { \App\Models\JustificacionAsistenciaRangoDetalle::create([ 'idJustificacionAsistenciaRango' => $rango->id, 'idHorarioMateria' => null, 'idFicha' => $ficha->id, 'idContratoInstructor' => $ficha->idInstructorLider, 'estado' => 'PENDIENTE' ]); if ($ficha->idInstructorLider) { $idPersonaLider = \App\Models\Contract::where('id', $ficha->idInstructorLider)->value('idpersona'); if ($idPersonaLider) { $idUsuarioLider = \App\Models\User::where('idpersona', $idPersonaLider)->value('id'); if ($idUsuarioLider) { $nombreEstudiante = $this->nombrePersona($user?->persona ?? $user?->person); $this->enviarNotificacion((int) $idUsuarioLider, (int) ($user->id ?? 0), 'Solicitud de justificaci贸n por rango', $nombreEstudiante . ' solicit贸 justificar su inasistencia por rango de fechas.', '/ambiente-virtual/justificaciones-pendientes'); } } } }
 
             return response()->json([
                 'message' => 'Solicitud de justificaci贸n por rango enviada. El instructor la revisar谩 pronto.',
@@ -1967,11 +1969,12 @@ class AsistenciaController extends Controller
             $permisoRango = null;
 
             if (!$a->asistio && $persona && $sesion?->fechaSesion) {
+                $fechaCorta = substr($sesion->fechaSesion, 0, 10);
                 $permisoRango = \App\Models\JustificacionAsistenciaRango::with('personaAutoriza')
                     ->where('idPersonaAprendiz', $persona->id)
                     ->whereIn('estado', ['APROBADO', 'ACEPTADO', 'JUSTIFICADO', 'PENDIENTE', 'RECHAZADO'])
-                    ->whereDate('fechaInicial', '<=', $sesion->fechaSesion)
-                    ->whereDate('fechaFinal', '>=', $sesion->fechaSesion)
+                    ->whereDate('fechaInicial', '<=', $fechaCorta)
+                    ->whereDate('fechaFinal', '>=', $fechaCorta)
                     ->orderByDesc('updated_at')
                     ->first();
             }
@@ -1985,7 +1988,7 @@ class AsistenciaController extends Controller
                         ? 'Inasistencia justificada'
                         : (
                             $estadoJust === 'PENDIENTE'
-                                ? 'Justificaci贸n pendiente'
+                                ? 'Justificaci髇 pendiente'
                                 : (
                                     $estadoPermiso === 'APROBADO'
                                         ? 'Permiso aprobado'
@@ -1994,7 +1997,7 @@ class AsistenciaController extends Controller
                                                 ? 'Permiso pendiente'
                                                 : (
                                                     $estadoJust === 'RECHAZADO' || $estadoPermiso === 'RECHAZADO'
-                                                        ? 'Ausente (justificaci贸n rechazada)'
+                                                        ? 'Ausente (justificaci髇 rechazada)'
                                                         : 'Ausente'
                                                 )
                                         )
@@ -2063,22 +2066,3 @@ class AsistenciaController extends Controller
     }
 }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
