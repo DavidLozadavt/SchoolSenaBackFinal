@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\EventoController;
+use App\Http\Controllers\GestionEventoHermanoController;
+use App\Http\Controllers\GestionEventoItemController;
 use App\Http\Controllers\LyraController;
 
 
@@ -1642,3 +1644,29 @@ Route::middleware('auth:api')->group(function () {
     Route::post('solicitud-materia/rechazar/{id}', [SolicitudMateriaController::class, 'rechazar']);
     Route::get('solicitud-materia/materias-ficha', [SolicitudMateriaController::class, 'getMateriaByFicha']);
 });
+
+// Eventos y Control de Actividades (QR Scanner)
+Route::get('/items', [GestionEventoItemController::class, 'index']);
+Route::post('/items', [GestionEventoItemController::class, 'store']);
+Route::get('/items/{id}', [GestionEventoItemController::class, 'show']);
+Route::put('/items/{id}', [GestionEventoItemController::class, 'update']);
+Route::delete('/items/{id}', [GestionEventoItemController::class, 'destroy']);
+
+Route::get('evento/invitado/{token}', [GestionEventoHermanoController::class, 'getByToken']);
+Route::get('/items/{itemId}/estado', [GestionEventoHermanoController::class, 'estadoPorItem']);
+
+Route::prefix('invitado')->group(function () {
+    Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']); 
+    Route::get('/', [GestionEventoHermanoController::class, 'index']);
+    Route::get('/token/{token}', [GestionEventoHermanoController::class, 'getByToken']);
+    Route::get('/token/{token}/items', [GestionEventoHermanoController::class, 'getItemsByToken']);
+    Route::get('/token/{token}/auto-claim', [GestionEventoHermanoController::class, 'autoClaimByToken']);
+    Route::post('/', [GestionEventoHermanoController::class, 'store']);
+    Route::post('/generar-qrs', [GestionEventoHermanoController::class, 'generarQrs']);
+    Route::post('/{id}/qr', [GestionEventoHermanoController::class, 'guardarQrImagen']);
+    Route::post('/token/{token}/item/{itemId}/toggle', [GestionEventoHermanoController::class, 'toggleItem']);
+    Route::get('/{id}', [GestionEventoHermanoController::class, 'show']); 
+    Route::put('/{id}', [GestionEventoHermanoController::class, 'update']);
+    Route::delete('/{id}', [GestionEventoHermanoController::class, 'destroy']);
+});
+
