@@ -6,6 +6,7 @@ use App\Models\Evento;
 use App\Models\GrupoMultimedia;
 use App\Models\MultimediaHistorias;
 use App\Models\ParticipanteEvento;
+use App\Models\Person;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -227,11 +228,69 @@ class EventoController extends Controller
     }
 
     /**
+     * Asegura que el usuario logueado tenga una persona asociada
+     */
+    private function obtenerOAsociarPersona()
+    {
+        $user = auth()->user();
+        if (!$user) {
+            return null;
+        }
+
+        if ($user->idpersona) {
+            return $user->idpersona;
+        }
+
+        // Buscar si ya existe una persona con el mismo email
+        $persona = Person::where('email', $user->email)->first();
+
+        if (!$persona) {
+            // Obtener primeros IDs válidos para evitar fallos de claves foráneas
+            $tipoId = DB::table('tipoIdentificacion')->value('id') ?? 1;
+            $ciudadId = DB::table('ciudad')->value('id') ?? 1;
+
+            $identificacion = 'ADMIN_' . $user->id . '_' . time();
+            $nameParts = explode(' ', $user->name ?: 'Admin Sistema');
+            $nombre1 = $nameParts[0] ?? 'Admin';
+            $nombre2 = $nameParts[1] ?? '';
+            $apellido1 = $nameParts[2] ?? 'Sistema';
+            $apellido2 = $nameParts[3] ?? '';
+
+            $persona = new Person();
+            $persona->identificacion = $identificacion;
+            $persona->nombre1 = $nombre1;
+            $persona->nombre2 = $nombre2;
+            $persona->apellido1 = $apellido1;
+            $persona->apellido2 = $apellido2;
+            $persona->fechaNac = '1990-01-01';
+            $persona->direccion = 'Calle Falsa 123';
+            $persona->email = $user->email ?? 'admin@virtualt.org';
+            $persona->telefonoFijo = '5555555';
+            $persona->celular = '3000000000';
+            $persona->perfil = 'N/A';
+            $persona->sexo = 'M';
+            $persona->rh = 'O+';
+            $persona->rutaFoto = '/default/user.svg';
+            $persona->idTipoIdentificacion = $tipoId;
+            $persona->idCiudad = $ciudadId;
+            $persona->idCiudadNac = $ciudadId;
+            $persona->idCiudadUbicacion = $ciudadId;
+            $persona->save();
+        }
+
+        // Vincular persona al usuario
+        $user->idpersona = $persona->id;
+        $user->save();
+
+        return $persona->id;
+    }
+
+    /**
      * Verificar si el usuario actual está inscrito en el evento
      */
     public function checkRegistration($id)
     {
-        $idPersona = auth()->user()->idpersona;
+        $idPersona = $this->obtenerOAsociarPersona();
         
         if (!$idPersona) return response()->json(['inscrito' => false]);
 
@@ -247,7 +306,7 @@ class EventoController extends Controller
      */
     public function register(Request $request, $id)
     {
-        $idPersona = auth()->user()->idpersona;
+        $idPersona = $this->obtenerOAsociarPersona();
 
         if (!$idPersona) {
             return response()->json(['message' => 'El usuario no tiene una persona asociada'], 400);
