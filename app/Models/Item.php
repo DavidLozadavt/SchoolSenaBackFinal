@@ -14,6 +14,7 @@ class Item extends Model
         'descripcion',   // 🔥 nuevo
         'hora_inicio',   // 🔥 nuevo
         'hora_fin',      // 🔥 nuevo
+        'idEvento',      // 🔗 Relación con Evento
     ];
 
     protected $casts = [
@@ -38,5 +39,10 @@ class Item extends Model
     public function ejecuciones()
     {
         return $this->hasMany(EjecucionItem::class, 'idItem');
+    }
+
+    public function evento()
+    {
+        return $this->belongsTo(Evento::class, 'idEvento');
     }
 }

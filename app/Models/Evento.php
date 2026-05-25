@@ -54,4 +54,12 @@ class Evento extends Model
     {
         return $this->belongsTo(Formulario::class, 'idFormularioInterno');
     }
+
+    /**
+     * Relación con las actividades / items del evento
+     */
+    public function items()
+    {
+        return $this->hasMany(Item::class, 'idEvento');
+    }
 }

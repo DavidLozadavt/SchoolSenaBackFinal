@@ -8,11 +8,15 @@ use App\Models\Item;
 class GestionEventoItemController extends Controller
 {
     // 🔹 Listar
-    public function index()
+    public function index(Request $request)
     {
-        return response()->json(
-            Item::orderBy('hora_inicio')->get()
-        );
+        $query = Item::orderBy('hora_inicio');
+        
+        if ($request->has('idEvento')) {
+            $query->where('idEvento', $request->query('idEvento'));
+        }
+
+        return response()->json($query->get());
     }
 
     // 🔹 Ver uno
@@ -31,6 +35,7 @@ class GestionEventoItemController extends Controller
             'descripcion' => 'nullable|string',
             'hora_inicio' => 'nullable|date',
             'hora_fin' => 'nullable|date|after_or_equal:hora_inicio',
+            'idEvento' => 'nullable|integer|exists:evento,idEvento',
         ]);
 
         $item = Item::create([
@@ -38,6 +43,7 @@ class GestionEventoItemController extends Controller
             'descripcion' => $request->descripcion,
             'hora_inicio' => $request->hora_inicio,
             'hora_fin' => $request->hora_fin,
+            'idEvento' => $request->idEvento,
             'seleccionar' => false
         ]);
 
@@ -57,6 +63,7 @@ class GestionEventoItemController extends Controller
             'descripcion' => 'nullable|string',
             'hora_inicio' => 'nullable|date',
             'hora_fin' => 'nullable|date|after_or_equal:hora_inicio',
+            'idEvento' => 'nullable|integer|exists:evento,idEvento',
             'seleccionar' => 'nullable|boolean'
         ]);
 
@@ -65,6 +72,7 @@ class GestionEventoItemController extends Controller
             'descripcion',
             'hora_inicio',
             'hora_fin',
+            'idEvento',
             'seleccionar'
         ]));
 
