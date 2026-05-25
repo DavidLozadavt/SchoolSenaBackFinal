@@ -158,7 +158,7 @@ class GestionEventoHermanoController extends Controller
         ]);
     }
 
-    public function getItemsByToken($token)
+    public function getItemsByToken(Request $request, $token)
     {
         $hermano = Hermano::where('qr_token', $token)->first();
 
@@ -173,8 +173,13 @@ class GestionEventoHermanoController extends Controller
             ->get()
             ->keyBy('idItem');
 
-        // 🔥 traer todos los items (NO filtrar por seleccionar si quieres ver todo)
-        $items = Item::all()->map(function ($item) use ($ejecuciones) {
+        // 🔥 filtrar items por evento si se especifica
+        $query = Item::query();
+        if ($request->has('idEvento')) {
+            $query->where('idEvento', $request->query('idEvento'));
+        }
+
+        $items = $query->get()->map(function ($item) use ($ejecuciones) {
 
             $ejecucion = $ejecuciones->get($item->id);
 
