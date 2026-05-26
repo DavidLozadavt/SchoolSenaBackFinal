@@ -35,6 +35,14 @@ class MultimediaHistoriasController extends Controller
                 // Historias de menos de 24 horas
                 $query->where('created_at', '>=', now()->subHours(24));
             }
+        } elseif ($tipo === 'reel') {
+            if ($archived) {
+                // Reels de más de 72 horas
+                $query->where('created_at', '<', now()->subHours(72));
+            } else {
+                // Reels de menos de 72 horas
+                $query->where('created_at', '>=', now()->subHours(72));
+            }
         }
 
         return response()->json($query->orderBy('created_at', 'desc')->get());
@@ -315,7 +323,12 @@ class MultimediaHistoriasController extends Controller
 
         $reels = GrupoMultimedia::where('idCompany', $idCompany)
             ->where('tipo', 'reel')
-            ->with(['gruposMultimedia'])
+            ->whereHas('gruposMultimedia', function ($query) {
+                $query->where('created_at', '>=', now()->subHours(72));
+            })
+            ->with(['gruposMultimedia' => function ($query) {
+                $query->where('created_at', '>=', now()->subHours(72));
+            }])
             ->orderBy('created_at', 'desc')
             ->limit(10)
             ->get()

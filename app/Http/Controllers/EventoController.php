@@ -23,6 +23,17 @@ class EventoController extends Controller
         $search    = $request->input('search');
         $archived  = filter_var($request->input('archived', false), FILTER_VALIDATE_BOOLEAN);
 
+        // Auto-finalize events that have already ended
+        $endDatetimeSql = "CASE 
+            WHEN hora_final IS NOT NULL THEN CONCAT(COALESCE(fechaFinal, fechaInicial), ' ', hora_final)
+            ELSE DATE_ADD(CONCAT(fechaInicial, ' ', hora), INTERVAL 2 HOUR)
+        END";
+
+        Evento::where('idCompany', $idCompany)
+            ->where('estado', '!=', 'FINALIZADO')
+            ->whereRaw("{$endDatetimeSql} < ?", [Carbon::now()])
+            ->update(['estado' => 'FINALIZADO']);
+
         $query = Evento::where('idCompany', $idCompany)
             ->with([
                 'area',
