@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Storage;
 use App\Models\Item;
 use App\Models\EjecucionItem;
 use Carbon\Carbon;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class GestionEventoHermanoController extends Controller
 {
@@ -236,31 +237,44 @@ class GestionEventoHermanoController extends Controller
         ]);
     }
 
-    public function autoClaimByToken($token)
+    public function autoClaimByToken(Request $request, $token)
     {
         $hermano = Hermano::where('qr_token', $token)->firstOrFail();
 
         $now = Carbon::now();
 
-        // Items en ventana actual
-        $items = Item::where('hora_inicio', '<=', $now)
-            ->where('hora_fin', '>=', $now)
-            ->get();
+        $query = Item::query();
+
+        // 🎯 Filtrar estrictamente por evento si se proporciona
+        if ($request->has('idEvento') && $request->query('idEvento') !== '') {
+            $query->where('idEvento', $request->query('idEvento'));
+        }
+
+        // ⏳ Ventana de tolerancia profesional:
+        // - Permite check-in desde 20 minutos antes de iniciar.
+        // - Permite check-in hasta 15 minutos después de finalizar.
+        $items = $query->get()->filter(function ($item) use ($now) {
+            if (!$item->hora_inicio) return false;
+            
+            $start = Carbon::parse($item->hora_inicio)->subMinutes(20);
+            $end = $item->hora_fin 
+                ? Carbon::parse($item->hora_fin)->addMinutes(15)
+                : Carbon::parse($item->hora_inicio)->addHours(2);
+                
+            return $now->between($start, $end);
+        });
 
         foreach ($items as $item) {
-
-            // 🔒 verificar si YA fue reclamado en esta ventana
+            // 🔒 Verificar si ya fue reclamado para no duplicar fechas de escaneo
             $yaReclamado = EjecucionItem::where('idHermano', $hermano->id)
                 ->where('idItem', $item->id)
                 ->where('recibido', true)
-                ->whereBetween('fecha_scan', [$item->hora_inicio, $item->hora_fin])
                 ->exists();
 
             if ($yaReclamado) {
-                continue; // ❌ ya fue reclamado en esta ventana
+                continue;
             }
 
-            // 🟢 crear o actualizar
             EjecucionItem::updateOrCreate(
                 [
                     'idHermano' => $hermano->id,
@@ -274,8 +288,39 @@ class GestionEventoHermanoController extends Controller
         }
 
         return response()->json([
-            'message' => 'Items reclamados sin duplicar por ventana horaria',
-            'items' => $items
+            'message' => 'Items reclamados exitosamente en la ventana actual',
+            'items' => $items->values()
+        ]);
+    }
+
+    public function claimAllItemsByToken(Request $request, $token)
+    {
+        $hermano = Hermano::where('qr_token', $token)->firstOrFail();
+        
+        $query = Item::query();
+        if ($request->has('idEvento') && $request->query('idEvento') !== '') {
+            $query->where('idEvento', $request->query('idEvento'));
+        }
+        
+        $items = $query->get();
+        $now = Carbon::now();
+        
+        foreach ($items as $item) {
+            EjecucionItem::updateOrCreate(
+                [
+                    'idHermano' => $hermano->id,
+                    'idItem' => $item->id,
+                ],
+                [
+                    'recibido' => true,
+                    'fecha_scan' => $now,
+                ]
+            );
+        }
+        
+        return response()->json([
+            'message' => 'Asistencia completa registrada con éxito',
+            'total' => $items->count()
         ]);
     }
 
@@ -355,5 +400,92 @@ class GestionEventoHermanoController extends Controller
             'message' => 'Abono realizado correctamente',
             'data' => $hermano
         ]);
+    }
+
+    /**
+     * Dashboard stats for the guest management module.
+     */
+    public function stats()
+    {
+        $hermanos = Hermano::all();
+        $totalHermanos = $hermanos->count();
+        $totalPago = $hermanos->sum('pago');
+        $totalSaldo = $hermanos->sum('saldo');
+        $conQr = $hermanos->whereNotNull('qr_token')->count();
+
+        // Attendance: unique hermanos that have at least 1 recibido=true
+        $asistentes = EjecucionItem::where('recibido', true)
+            ->distinct('idHermano')
+            ->count('idHermano');
+
+        return response()->json([
+            'total_invitados' => $totalHermanos,
+            'total_recaudado' => round($totalPago, 2),
+            'saldo_pendiente' => round($totalSaldo, 2),
+            'con_qr' => $conQr,
+            'sin_qr' => $totalHermanos - $conQr,
+            'asistencia_confirmada' => $asistentes,
+            'porcentaje_asistencia' => $totalHermanos > 0
+                ? round(($asistentes / $totalHermanos) * 100, 1)
+                : 0,
+        ]);
+    }
+
+    /**
+     * Export guest list + attendance as CSV.
+     */
+    public function exportCsv(Request $request)
+    {
+        $hermanos = Hermano::orderBy('nombre')->get();
+
+        // Build items query
+        $itemsQuery = Item::query();
+        if ($request->has('idEvento') && $request->query('idEvento') !== '') {
+            $itemsQuery->where('idEvento', $request->query('idEvento'));
+        }
+        $items = $itemsQuery->orderBy('hora_inicio')->get();
+
+        $ejecuciones = EjecucionItem::where('recibido', true)->get();
+        $ejecMap = [];
+        foreach ($ejecuciones as $e) {
+            $ejecMap[$e->idHermano][$e->idItem] = $e->fecha_scan;
+        }
+
+        $response = new StreamedResponse(function () use ($hermanos, $items, $ejecMap) {
+            $handle = fopen('php://output', 'w');
+            fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF)); // UTF-8 BOM
+
+            // Header
+            $header = ['Nombre', 'Email', 'Celular', 'Pago', 'Saldo', 'Forma Pago', 'QR'];
+            foreach ($items as $item) {
+                $header[] = $item->nombreItem;
+            }
+            fputcsv($handle, $header);
+
+            // Rows
+            foreach ($hermanos as $h) {
+                $row = [
+                    $h->nombre,
+                    $h->email ?? '',
+                    $h->celularContacto ?? '',
+                    $h->pago ?? 0,
+                    $h->saldo ?? 0,
+                    $h->formaPago ?? '',
+                    $h->qr_token ? 'Sí' : 'No',
+                ];
+                foreach ($items as $item) {
+                    $row[] = isset($ejecMap[$h->id][$item->id]) ? '✓' : '—';
+                }
+                fputcsv($handle, $row);
+            }
+
+            fclose($handle);
+        });
+
+        $filename = 'invitados_' . date('Y-m-d_His') . '.csv';
+        $response->headers->set('Content-Type', 'text/csv; charset=UTF-8');
+        $response->headers->set('Content-Disposition', "attachment; filename=\"$filename\"");
+
+        return $response;
     }
 }

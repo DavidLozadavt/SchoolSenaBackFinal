@@ -1656,11 +1656,14 @@ Route::get('evento/invitado/{token}', [GestionEventoHermanoController::class, 'g
 Route::get('/items/{itemId}/estado', [GestionEventoHermanoController::class, 'estadoPorItem']);
 
 Route::prefix('invitado')->group(function () {
+    Route::get('/stats', [GestionEventoHermanoController::class, 'stats']);
+    Route::get('/export-csv', [GestionEventoHermanoController::class, 'exportCsv']);
     Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']); 
     Route::get('/', [GestionEventoHermanoController::class, 'index']);
     Route::get('/token/{token}', [GestionEventoHermanoController::class, 'getByToken']);
     Route::get('/token/{token}/items', [GestionEventoHermanoController::class, 'getItemsByToken']);
     Route::get('/token/{token}/auto-claim', [GestionEventoHermanoController::class, 'autoClaimByToken']);
+    Route::post('/token/{token}/claim-all', [GestionEventoHermanoController::class, 'claimAllItemsByToken']);
     Route::post('/', [GestionEventoHermanoController::class, 'store']);
     Route::post('/generar-qrs', [GestionEventoHermanoController::class, 'generarQrs']);
     Route::post('/{id}/qr', [GestionEventoHermanoController::class, 'guardarQrImagen']);
