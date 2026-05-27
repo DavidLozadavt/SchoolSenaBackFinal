@@ -63,6 +63,7 @@ use App\Http\Controllers\gestion_nomina\TipoIncapacidadController;
 use App\Http\Controllers\gestion_afiliacion\TipoVehiculoController;
 use App\Http\Controllers\gestion_chat\ComentarioArchivosController;
 use App\Http\Controllers\gestion_rol_permisos\AsignacionRolPermiso;
+use App\Http\Controllers\gestion_rol_permisos\PermissionHierarchyController;
 use App\Http\Controllers\gestion_transporte\AgendarViajeController;
 use App\Http\Controllers\gestion_nomina\SolicitudVacacionController;
 use App\Http\Controllers\gestion_afiliacion\TipoAfiliacionController;
@@ -212,7 +213,12 @@ Route::post('company_update', [CompanyController::class, 'update']);
 //permisos
 Route::get('permisos', [AsignacionRolPermiso::class, 'index']);
 Route::get('permisos_rol', [AsignacionRolPermiso::class, 'permissionsByRole']);
+Route::match(['put', 'post'], 'permisos/{id}', [PermissionHierarchyController::class, 'update'])->whereNumber('id');
 Route::put('asignar_rol_permiso', [AsignacionRolPermiso::class, 'assignFunctionality']);
+
+// jerarquía de permisos
+Route::get('permisos_jerarquia', [PermissionHierarchyController::class, 'index']);
+Route::post('permissions/{id}/set-parent', [PermissionHierarchyController::class, 'setParent'])->whereNumber('id');
 
 // notificaciones
 Route::resource('notificaciones', NotificacionController::class);
