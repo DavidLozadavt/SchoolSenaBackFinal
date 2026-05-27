@@ -400,7 +400,7 @@ class MateriaController extends Controller
                 },
                 'horarioMateria' => function ($q) use ($idFicha) {
                     $q->where('idFicha', $idFicha)
-                        ->with(['dia', 'contrato.persona', 'asignacionSesion.contrato.persona'])
+                        ->with(['dia', 'contrato.persona', 'asignacionSesion.contrato.persona', 'horariosCompartidos.contratoSecundario.persona'])
                         ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($sq) {
                             $sq->whereNotNull('fechaSesion');
                         }]);
@@ -428,7 +428,7 @@ class MateriaController extends Controller
 
         // Cargamos todos los horarios de la ficha con sus conteos de sesiones (igual que getTrimestresFicha)
         $todosHorariosFicha = HorarioMateria::where('idFicha', $idFicha)
-            ->with(['gradoMateria', 'dia', 'contrato.persona', 'asignacionSesion.contrato.persona'])
+            ->with(['gradoMateria', 'dia', 'contrato.persona', 'asignacionSesion.contrato.persona', 'horariosCompartidos.contratoSecundario.persona'])
             ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($q) {
                 $q->whereNotNull('fechaSesion');
             }])
@@ -516,7 +516,7 @@ class MateriaController extends Controller
                                 'fechaFinal' => $h->fechaFinal,
                                 'estado' => $h->estado,
                                 'instructor' => $h->contrato->persona ?? null,
-                                'asignacionSesion' => $h->asignacionSesion ?? []
+                                'asignacionSesion' => \App\Models\HorarioMateria::asignacionesEspecialesApi($h),
                             ];
                         })->values(),
                     'sinAsignar' => $gradoMateria->horarioMateria
@@ -538,7 +538,7 @@ class MateriaController extends Controller
                                 'fechaFinal' => $h->fechaFinal,
                                 'estado' => $h->estado,
                                 'instructor' => null,
-                                'asignacionSesion' => $h->asignacionSesion ?? []
+                                'asignacionSesion' => \App\Models\HorarioMateria::asignacionesEspecialesApi($h),
                             ];
                         })->values()
                 ]
