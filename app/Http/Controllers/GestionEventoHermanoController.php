@@ -460,7 +460,7 @@ class GestionEventoHermanoController extends Controller
             foreach ($items as $item) {
                 $header[] = $item->nombreItem;
             }
-            fputcsv($handle, $header);
+            fputcsv($handle, $header, ';');
 
             // Rows
             foreach ($hermanos as $h) {
@@ -476,7 +476,7 @@ class GestionEventoHermanoController extends Controller
                 foreach ($items as $item) {
                     $row[] = isset($ejecMap[$h->id][$item->id]) ? '✓' : '—';
                 }
-                fputcsv($handle, $row);
+                fputcsv($handle, $row, ';');
             }
 
             fclose($handle);
