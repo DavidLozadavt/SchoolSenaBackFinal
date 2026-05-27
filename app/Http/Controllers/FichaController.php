@@ -888,12 +888,13 @@ class FichaController extends Controller
                 }
             }
 
-            $tieneAsignacionSesion = Schema::hasTable('asignacionSesion');
+            $tieneReemplazoHorario = Schema::hasColumn('reemplazo', 'idHorarioMateria');
+            $tieneHorarioCompartido = Schema::hasTable('horarioCompartido');
 
-            $selectFechas = $tieneAsignacionSesion
+            $selectFechas = $tieneReemplazoHorario
                 ? [
-                    DB::raw('COALESCE(asig.fechaInicio, hm.fechaInicial) as fechaInicial'),
-                    DB::raw('COALESCE(asig.fechaFin, hm.fechaFinal) as fechaFinal'),
+                    DB::raw('COALESCE(asig.fechaInicial, hm.fechaInicial) as fechaInicial'),
+                    DB::raw('COALESCE(asig.fechaFinal, hm.fechaFinal) as fechaFinal'),
                 ]
                 : [
                     DB::raw('hm.fechaInicial as fechaInicial'),
@@ -945,10 +946,18 @@ class FichaController extends Controller
                 $qb = $qb->leftJoin('infraestructura as inf', 'hm.idInfraestructura', '=', 'inf.id');
             }
 
-            if ($tieneAsignacionSesion) {
-                $qb->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
+            if ($tieneReemplazoHorario) {
+                $qb->leftJoin('reemplazo as asig', function ($join) use ($idInstructor) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
-                        ->where('asig.idContrato', '=', $idInstructor);
+                        ->where('asig.idContratoRemplazo', '=', $idInstructor)
+                        ->whereNotNull('asig.idHorarioMateria');
+                });
+            }
+
+            if ($tieneHorarioCompartido) {
+                $qb->leftJoin('horarioCompartido as hc', function ($join) use ($idInstructor) {
+                    $join->on('hm.id', '=', 'hc.idHorarioMateria')
+                        ->where('hc.idContratoSecundario', '=', $idInstructor);
                 });
             }
 
@@ -957,10 +966,13 @@ class FichaController extends Controller
                     $join->on('c.id', '=', DB::raw((int) $idInstructor));
                 })
                 ->join('persona as per', 'c.idpersona', '=', 'per.id')
-                ->where(function ($query) use ($idInstructor, $tieneAsignacionSesion) {
+                ->where(function ($query) use ($idInstructor, $tieneReemplazoHorario, $tieneHorarioCompartido) {
                     $query->where('hm.idContrato', $idInstructor);
-                    if ($tieneAsignacionSesion) {
+                    if ($tieneReemplazoHorario) {
                         $query->orWhereNotNull('asig.id');
+                    }
+                    if ($tieneHorarioCompartido) {
+                        $query->orWhereNotNull('hc.id');
                     }
                 })
                 ->whereNotNull('hm.idDia')
@@ -976,7 +988,7 @@ class FichaController extends Controller
                 ->values();
 
             // Procesar resultados para calcular estado, total_sesiones y sesiones_restantes
-            $clases = $clases->map(function ($clase) {
+            $clases = $clases->map(function ($clase) use ($idInstructor) {
                 // Calcular estado usando el método helper
                 $estado = $this->calcularEstadoHorario(
                     $clase->fechaInicial,
@@ -1025,14 +1037,21 @@ class FichaController extends Controller
                 $clase->sesiones_restantes = $sesionesRestantes;
                 $clase->sesiones_completadas = $sesionesCompletadas;
 
+                try {
+                    $idHm = (int) ($clase->idHorarioMateria ?? 0);
+                    if ($idHm > 0) {
+                        foreach ($this->resolverModalidadRap($idHm, (int) $idInstructor) as $k => $v) {
+                            $clase->{$k} = $v;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // silenciar error de modalidad para no romper el listado
+                }
+
                 return $clase;
             });
 
-            // Una tarjeta por slot lógico (ficha + día + franja + jornada); conserva el menor idHorarioMateria.
-            $clases = $clases
-                ->sortBy(fn ($r) => (int) ($r->idHorarioMateria ?? PHP_INT_MAX))
-                ->unique(fn ($row) => $this->claveLogicaClaseAsignadaInstructor($row))
-                ->values();
+            $clases = $this->dedupeClasesAsignadasInstructorPorClaveLogica($clases)->values();
 
             return response()->json([
                 'message' => 'Clases asignadas obtenidas correctamente',
@@ -1082,7 +1101,8 @@ class FichaController extends Controller
                 }
             }
 
-            $tieneAsignacionSesion = Schema::hasTable('asignacionSesion');
+            $tieneReemplazoHorario = Schema::hasColumn('reemplazo', 'idHorarioMateria');
+            $tieneHorarioCompartido = Schema::hasTable('horarioCompartido');
             $hasInfraestructura = Schema::hasColumn('horarioMateria', 'idInfraestructura');
             $selectAula = $hasInfraestructura
                 ? ['inf.nombreInfraestructura as aula_nombre']
@@ -1112,8 +1132,9 @@ class FichaController extends Controller
                     'hm.idDia',
                     'hm.id as idHorarioMateria',
                     'hm.idGradoMateria',
+                    'hm.idContrato as contrato_id',
                     'gm.idMateria as idMateria',
-                    DB::raw("CONCAT(per.nombre1, ' ', per.apellido1) as instructor_nombre"),
+                    DB::raw("TRIM(CONCAT(COALESCE(per_hm.nombre1,''), ' ', COALESCE(per_hm.apellido1,''))) as instructor_nombre"),
                 ], $selectAula))
                 ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
                 ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
@@ -1124,27 +1145,38 @@ class FichaController extends Controller
             $qb = $this->aplicarJoinsMateriaCompetenciaRapSeguimiento($qb);
             $qb = $qb
                 ->leftJoin('dia as d', 'hm.idDia', '=', 'd.id')
-                ->join('contrato as c', function ($join) use ($idInstructor) {
-                    $join->on('c.id', '=', DB::raw((int) $idInstructor));
-                })
-                ->join('persona as per', 'c.idpersona', '=', 'per.id');
+                ->leftJoin('contrato as c_hm', 'hm.idContrato', '=', 'c_hm.id')
+                ->leftJoin('persona as per_hm', 'c_hm.idpersona', '=', 'per_hm.id');
 
             if ($hasInfraestructura) {
                 $qb = $qb->leftJoin('infraestructura as inf', 'hm.idInfraestructura', '=', 'inf.id');
             }
 
-            if ($tieneAsignacionSesion) {
-                $qb->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
+            if ($tieneReemplazoHorario) {
+                $qb->leftJoin('reemplazo as asig', function ($join) use ($idInstructor) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
-                        ->where('asig.idContrato', '=', $idInstructor);
+                        ->where('asig.idContratoRemplazo', '=', $idInstructor)
+                        ->whereNotNull('asig.idHorarioMateria');
+                });
+            }
+
+            if ($tieneHorarioCompartido) {
+                $qb->leftJoin('horarioCompartido as hc', function ($join) use ($idInstructor) {
+                    $join->where(function ($q) {
+                        $q->whereColumn('hm.id', 'hc.idHorarioMateria')
+                            ->orWhereColumn('hm.id', 'hc.idHorarioMateriaSecundario');
+                    })->where('hc.idContratoSecundario', '=', $idInstructor);
                 });
             }
 
             $qb->whereNotNull('sesm.fechaSesion')
-                ->where(function ($query) use ($idInstructor, $tieneAsignacionSesion) {
+                ->where(function ($query) use ($idInstructor, $tieneReemplazoHorario, $tieneHorarioCompartido) {
                     $query->where('hm.idContrato', $idInstructor);
-                    if ($tieneAsignacionSesion) {
+                    if ($tieneReemplazoHorario) {
                         $query->orWhereNotNull('asig.id');
+                    }
+                    if ($tieneHorarioCompartido) {
+                        $query->orWhereNotNull('hc.id');
                     }
                 });
 
@@ -1160,7 +1192,17 @@ class FichaController extends Controller
                 $fechaYmd = Carbon::parse((string) $row->sesion_fechaSesion)->format('Y-m-d');
                 $num = (int) ($row->sesion_numeroSesion ?? 0);
                 $sid = (int) ($row->sesion_id ?? 0);
-                $key = $sid > 0 ? "id:{$sid}" : "hm:{$idHm}|{$fechaYmd}|n:{$num}";
+                $fichaId = (int) ($row->ficha_id ?? 0);
+                $idDia = (int) ($row->idDia ?? 0);
+                $claveLogica = $this->claveLogicaSesionHistorial(
+                    $fichaId,
+                    $idDia,
+                    (string) ($row->horaInicial ?? ''),
+                    (string) ($row->horaFinal ?? ''),
+                    $fechaYmd,
+                    $num
+                );
+                $key = "slot:{$claveLogica}";
                 if (isset($vistos[$key])) {
                     continue;
                 }
@@ -1173,6 +1215,37 @@ class FichaController extends Controller
                 $rapRaw = isset($row->rap_nombre) ? trim((string) $row->rap_nombre) : '';
                 $rapNombre = $rapRaw !== '' && strtolower($rapRaw) !== 'null' ? $rapRaw : null;
 
+                $clasePayload = [
+                    'ficha_id' => $fichaId,
+                    'ficha_codigo' => (string) ($row->ficha_codigo ?? ''),
+                    'programa_nombre' => (string) ($row->programa_nombre ?? ''),
+                    'materia_nombre' => $materiaNombre,
+                    'competencia_nombre' => $competenciaNombre,
+                    'rap_nombre' => $rapNombre,
+                    'jornada_nombre' => (string) ($row->jornada_nombre ?? ''),
+                    'jornada_tipo' => (string) ($row->jornada_tipo ?? ''),
+                    'dia_semana' => (string) ($row->dia_semana ?? ''),
+                    'idDia' => $idDia,
+                    'horaInicial' => (string) ($row->horaInicial ?? ''),
+                    'horaFinal' => (string) ($row->horaFinal ?? ''),
+                    'fechaInicial' => (string) ($row->fechaInicial ?? ''),
+                    'fechaFinal' => $row->fechaFinal != null ? (string) $row->fechaFinal : null,
+                    'idHorarioMateria' => $idHm,
+                    'idGradoMateria' => (int) ($row->idGradoMateria ?? 0),
+                    'idMateria' => (int) ($row->idMateria ?? 0),
+                    'contrato_id' => (int) ($row->contrato_id ?? 0),
+                    'instructor_nombre' => trim((string) ($row->instructor_nombre ?? '')),
+                    'aula_nombre' => $row->aula_nombre ?? null,
+                ];
+
+                try {
+                    foreach ($this->resolverModalidadRap($idHm, (int) $idInstructor, $fechaYmd) as $k => $v) {
+                        $clasePayload[$k] = $v;
+                    }
+                } catch (\Throwable $e) {
+                    // silenciar error de modalidad
+                }
+
                 $data[] = [
                     'sesion' => [
                         'id' => $sid,
@@ -1184,27 +1257,7 @@ class FichaController extends Controller
                         'observacion' => $row->sesion_observacion,
                         'evaluador_nombre' => null,
                     ],
-                    'clase' => [
-                        'ficha_id' => (int) ($row->ficha_id ?? 0),
-                        'ficha_codigo' => (string) ($row->ficha_codigo ?? ''),
-                        'programa_nombre' => (string) ($row->programa_nombre ?? ''),
-                        'materia_nombre' => $materiaNombre,
-                        'competencia_nombre' => $competenciaNombre,
-                        'rap_nombre' => $rapNombre,
-                        'jornada_nombre' => (string) ($row->jornada_nombre ?? ''),
-                        'jornada_tipo' => (string) ($row->jornada_tipo ?? ''),
-                        'dia_semana' => (string) ($row->dia_semana ?? ''),
-                        'idDia' => (int) ($row->idDia ?? 0),
-                        'horaInicial' => (string) ($row->horaInicial ?? ''),
-                        'horaFinal' => (string) ($row->horaFinal ?? ''),
-                        'fechaInicial' => (string) ($row->fechaInicial ?? ''),
-                        'fechaFinal' => $row->fechaFinal != null ? (string) $row->fechaFinal : null,
-                        'idHorarioMateria' => $idHm,
-                        'idGradoMateria' => (int) ($row->idGradoMateria ?? 0),
-                        'idMateria' => (int) ($row->idMateria ?? 0),
-                        'instructor_nombre' => trim((string) ($row->instructor_nombre ?? '')),
-                        'aula_nombre' => $row->aula_nombre ?? null,
-                    ],
+                    'clase' => $clasePayload,
                 ];
             }
 
@@ -1498,6 +1551,20 @@ class FichaController extends Controller
             // Agregar datos del instructor a claseData
             $claseDataArray = (array) $claseData;
             $claseDataArray['instructor'] = $instructorClase;
+
+            try {
+                $idContratoVista = null;
+                try {
+                    $cv = KeyUtil::lastContractActive();
+                    if ($cv && $cv->id) $idContratoVista = (int) $cv->id;
+                } catch (\Throwable $e) {}
+                if (!$idContratoVista && !empty($claseData->contrato_id)) $idContratoVista = (int) $claseData->contrato_id;
+                foreach ($this->resolverModalidadRap($idHorarioMateria, $idContratoVista) as $k => $v) {
+                    $claseDataArray[$k] = $v;
+                }
+            } catch (\Throwable $e) {
+                // No romper el detalle si falla la modalidad
+            }
             // Cast (array) de stdClass puede dejar claves raras según driver; fijar campos críticos para el calendario.
             $claseDataArray['idDia'] = isset($claseData->idDia) ? (int) $claseData->idDia : null;
             $claseDataArray['idHorarioMateria'] = (int) ($claseData->idHorarioMateria ?? $idHorarioMateria);
@@ -1506,10 +1573,11 @@ class FichaController extends Controller
             }
 
             // Franjas del mismo contrato que la clase abierta (alineado con `clasesAsignadasInstructor`:
-            // `hm.idContrato` = contrato del instructor O fila enlazada en `asignacionSesion` para ese contrato).
+            // `hm.idContrato` = contrato del instructor O fila enlazada en `reemplazo` para ese contrato).
             // No usar solo idpersona: mezcla otros contratos del mismo docente y desvirtúa el calendario vs "Mi horario".
             $contratoClase = (int) ($claseData->contrato_id ?? 0);
-            $tieneAsignacionSesionDetalle = Schema::hasTable('asignacionSesion');
+            $tieneReemplazoHorarioDetalle = Schema::hasColumn('reemplazo', 'idHorarioMateria');
+            $tieneHorarioCompartidoDetalle = Schema::hasTable('horarioCompartido');
 
             $qbTodasFechas = DB::table('horarioMateria as hm')
                 ->select(array_merge([
@@ -1534,18 +1602,29 @@ class FichaController extends Controller
                 ->join('materia as m', 'gm.idMateria', '=', 'm.id');
             $qbTodasFechas = $this->aplicarJoinsMateriaCompetenciaRapSeguimiento($qbTodasFechas);
 
-            if ($tieneAsignacionSesionDetalle) {
-                $qbTodasFechas->leftJoin('asignacionSesion as asig', function ($join) use ($contratoClase) {
+            if ($tieneReemplazoHorarioDetalle) {
+                $qbTodasFechas->leftJoin('reemplazo as asig', function ($join) use ($contratoClase) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
-                        ->where('asig.idContrato', '=', $contratoClase);
+                        ->where('asig.idContratoRemplazo', '=', $contratoClase)
+                        ->whereNotNull('asig.idHorarioMateria');
+                });
+            }
+
+            if ($tieneHorarioCompartidoDetalle) {
+                $qbTodasFechas->leftJoin('horarioCompartido as hc', function ($join) use ($contratoClase) {
+                    $join->on('hm.id', '=', 'hc.idHorarioMateria')
+                        ->where('hc.idContratoSecundario', '=', $contratoClase);
                 });
             }
 
             $todasLasFechasClase = $qbTodasFechas
-                ->where(function ($query) use ($contratoClase, $tieneAsignacionSesionDetalle) {
+                ->where(function ($query) use ($contratoClase, $tieneReemplazoHorarioDetalle, $tieneHorarioCompartidoDetalle) {
                     $query->where('hm.idContrato', $contratoClase);
-                    if ($tieneAsignacionSesionDetalle) {
+                    if ($tieneReemplazoHorarioDetalle) {
                         $query->orWhereNotNull('asig.id');
+                    }
+                    if ($tieneHorarioCompartidoDetalle) {
+                        $query->orWhereNotNull('hc.id');
                     }
                 })
                 ->whereNotNull('hm.fechaInicial')
@@ -1679,6 +1758,50 @@ class FichaController extends Controller
             $this->horaClaveClaseAsignada((string) ($row->horaFinal ?? '')),
             $this->jornadaClaveClaseAsignada($row),
         ]);
+    }
+
+    /**
+     * Prioriza franja vigente hoy y fechaFinal más reciente (alineado con el front).
+     */
+    private function puntajeClaseParaDedupeInstructor(object $row, Carbon $ref): int
+    {
+        $hoy = $ref->copy()->startOfDay();
+        $score = 0;
+
+        $ini = !empty($row->fechaInicial) ? Carbon::parse($row->fechaInicial)->startOfDay() : null;
+        $fin = !empty($row->fechaFinal) ? Carbon::parse($row->fechaFinal)->startOfDay() : null;
+
+        if ($ini && $fin && $ini->lte($hoy) && $fin->gte($hoy)) {
+            $score += 1_000_000_000;
+        }
+
+        $rest = (int) ($row->sesiones_restantes ?? 0);
+        if ($rest > 0) {
+            $score += 100_000_000;
+        }
+
+        if ($fin) {
+            $score += (int) $fin->timestamp;
+        }
+
+        $score += (int) ($row->idHorarioMateria ?? 0);
+
+        return $score;
+    }
+
+    private function dedupeClasesAsignadasInstructorPorClaveLogica(\Illuminate\Support\Collection $clases): \Illuminate\Support\Collection
+    {
+        $hoy = Carbon::today();
+        $porClave = [];
+
+        foreach ($clases as $c) {
+            $key = $this->claveLogicaClaseAsignadaInstructor($c);
+            if (!isset($porClave[$key]) || $this->puntajeClaseParaDedupeInstructor($c, $hoy) > $this->puntajeClaseParaDedupeInstructor($porClave[$key], $hoy)) {
+                $porClave[$key] = $c;
+            }
+        }
+
+        return collect(array_values($porClave));
     }
 
     /**
@@ -2614,5 +2737,195 @@ class FichaController extends Controller
         } catch (\Exception $e) {
             return null;
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Modalidad RAP: compartido / reemplazo  (solo Mis formaciones + detalle)
+    // ──────────────────────────────────────────────────────────────
+
+    private function idsHorarioMateriaMismoSlot(int $idHorarioMateria): array
+    {
+        $hm = DB::table('horarioMateria')->where('id', $idHorarioMateria)->first();
+        if (!$hm) return [$idHorarioMateria];
+
+        return DB::table('horarioMateria')
+            ->where('idFicha', $hm->idFicha)
+            ->where('idGradoMateria', $hm->idGradoMateria)
+            ->where('idDia', $hm->idDia)
+            ->where('horaInicial', $hm->horaInicial)
+            ->where('horaFinal', $hm->horaFinal)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()->values()->all();
+    }
+
+    private function reemplazosVigentesEnSlot(array $slotIds, ?Carbon $ref = null): \Illuminate\Support\Collection
+    {
+        if (!Schema::hasColumn('reemplazo', 'idHorarioMateria') || empty($slotIds)) {
+            return collect();
+        }
+
+        $ref = $ref ?? Carbon::today();
+
+        return DB::table('reemplazo')
+            ->whereIn('idHorarioMateria', $slotIds)
+            ->whereNotNull('idHorarioMateria')
+            ->whereDate('fechaInicial', '<=', $ref)
+            ->whereDate('fechaFinal', '>=', $ref)
+            ->get();
+    }
+
+    private function horariosCompartidosVigentesEnSlot(array $slotIds, ?Carbon $ref = null): \Illuminate\Support\Collection
+    {
+        if (!Schema::hasTable('horarioCompartido') || empty($slotIds)) {
+            return collect();
+        }
+
+        $ref = $ref ?? Carbon::today();
+
+        return DB::table('horarioCompartido')
+            ->whereIn('idHorarioMateria', $slotIds)
+            ->whereIn('estado', ['PENDIENTE', 'ACTIVO', 'FINALIZADO'])
+            ->whereDate('fechaInicial', '<=', $ref)
+            ->whereDate('fechaFinal', '>=', $ref)
+            ->get();
+    }
+
+    /** Clave lógica de sesión (misma franja ficha+día+horas): evita duplicar titular/clon compartido. */
+    private function claveLogicaSesionHistorial(
+        int $fichaId,
+        int $idDia,
+        string $horaInicial,
+        string $horaFinal,
+        string $fechaYmd,
+        int $numeroSesion
+    ): string {
+        $hi = substr((string) $horaInicial, 0, 5);
+        $hf = substr((string) $horaFinal, 0, 5);
+
+        return implode('|', [$fichaId, $idDia, $hi, $hf, $fechaYmd, $numeroSesion]);
+    }
+
+    private function contratosActivosEnSlot(array $slotIds): array
+    {
+        if (empty($slotIds)) return [];
+        return DB::table('horarioMateria')
+            ->whereIn('id', $slotIds)
+            ->whereNotNull('idContrato')
+            ->pluck('idContrato')
+            ->map(fn ($id) => (int) $id)
+            ->unique()->values()->all();
+    }
+
+    private function instructoresRapPayload(array $contratoIdsConRol): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(
+            fn ($item) => (int) ($item['id'] ?? 0), $contratoIdsConRol
+        ))));
+        if (empty($ids)) return [];
+
+        $rows = DB::table('contrato as c')
+            ->join('persona as per', 'c.idpersona', '=', 'per.id')
+            ->whereIn('c.id', $ids)
+            ->select([
+                'c.id as idContrato',
+                DB::raw("TRIM(CONCAT(COALESCE(per.nombre1,''), ' ', COALESCE(per.nombre2,''), ' ', COALESCE(per.apellido1,''), ' ', COALESCE(per.apellido2,''))) as nombre"),
+                'per.rutaFoto as rutaFotoUrl',
+            ])
+            ->get()->keyBy('idContrato');
+
+        $out = [];
+        foreach ($contratoIdsConRol as $item) {
+            $id = (int) ($item['id'] ?? 0);
+            if ($id <= 0 || !isset($rows[$id])) continue;
+            $r = $rows[$id];
+            $out[] = [
+                'idContrato' => $id,
+                'nombre'     => trim((string) ($r->nombre ?? '')) ?: 'Instructor',
+                'rutaFotoUrl'=> $r->rutaFotoUrl ?? null,
+                'rol'        => (string) ($item['rol'] ?? 'titular'),
+            ];
+        }
+        return $out;
+    }
+
+    private function resolverModalidadRap(int $idHorarioMateria, ?int $idContratoVista, ?string $fechaReferenciaYmd = null): array
+    {
+        $default = [
+            'tipo_asignacion' => null, 'modalidad_rap' => 'TITULAR',
+            'asignacion_vigente' => false,
+            'asignacion_fecha_inicio' => null, 'asignacion_fecha_fin' => null,
+            'reemplazo_vigente_por_otro' => false, 'es_reemplazante' => false,
+            'instructores_rap' => [],
+        ];
+
+        $hm = DB::table('horarioMateria')->where('id', $idHorarioMateria)->first();
+        if (!$hm) return $default;
+
+        $ref = $fechaReferenciaYmd
+            ? Carbon::parse($fechaReferenciaYmd)->startOfDay()
+            : Carbon::today();
+
+        $horarioContratoId = $hm->idContrato ? (int) $hm->idContrato : null;
+        $slotIds = $this->idsHorarioMateriaMismoSlot($idHorarioMateria);
+        $reemplazosVigentes = $this->reemplazosVigentesEnSlot($slotIds, $ref);
+        $compartidosVigentes = $this->horariosCompartidosVigentesEnSlot($slotIds, $ref);
+        $contratosSlot = $this->contratosActivosEnSlot($slotIds);
+
+        $titularId = $horarioContratoId ?: (
+            DB::table('horarioMateria')->whereIn('id', $slotIds)
+                ->whereNotNull('idContrato')->orderBy('id')->value('idContrato')
+                ? (int) DB::table('horarioMateria')->whereIn('id', $slotIds)
+                    ->whereNotNull('idContrato')->orderBy('id')->value('idContrato')
+                : null
+        );
+
+        $reemplazo = $reemplazosVigentes->first();
+        if ($reemplazo && $reemplazo->idContratoRemplazo) {
+            $idReemplazante = (int) $reemplazo->idContratoRemplazo;
+            return [
+                'tipo_asignacion' => 'REEMPLAZO',
+                'modalidad_rap' => ($idContratoVista !== null && $idContratoVista === $idReemplazante) ? 'REEMPLAZO' : 'TITULAR',
+                'asignacion_vigente' => true,
+                'asignacion_fecha_inicio' => $reemplazo->fechaInicial ?? null,
+                'asignacion_fecha_fin' => $reemplazo->fechaFinal ?? null,
+                'reemplazo_vigente_por_otro' => $titularId && $idContratoVista !== null && $idContratoVista === $titularId && $idReemplazante !== $titularId,
+                'es_reemplazante' => $idContratoVista !== null && $idContratoVista === $idReemplazante,
+                'instructores_rap' => $this->instructoresRapPayload(array_filter([
+                    ['id' => $idReemplazante, 'rol' => 'reemplazante'],
+                    $titularId && $titularId !== $idReemplazante ? ['id' => $titularId, 'rol' => 'titular'] : null,
+                ])),
+            ];
+        }
+
+        if ($compartidosVigentes->isNotEmpty() || count($contratosSlot) > 1) {
+            $roles = [];
+            foreach ($contratosSlot as $cid) {
+                $roles[] = ['id' => $cid, 'rol' => 'compartido'];
+            }
+            foreach ($compartidosVigentes as $compartido) {
+                $cid = (int) ($compartido->idContratoSecundario ?? 0);
+                if ($cid > 0 && !in_array($cid, $contratosSlot, true)) {
+                    $roles[] = ['id' => $cid, 'rol' => 'compartido'];
+                }
+            }
+            $first = $compartidosVigentes->first();
+
+            return [
+                'tipo_asignacion' => $compartidosVigentes->isNotEmpty() ? 'HORARIO COMPARTIDO' : null,
+                'modalidad_rap' => 'COMPARTIDO',
+                'asignacion_vigente' => true,
+                'asignacion_fecha_inicio' => $first?->fechaInicial ?? null,
+                'asignacion_fecha_fin' => $first?->fechaFinal ?? null,
+                'reemplazo_vigente_por_otro' => false,
+                'es_reemplazante' => false,
+                'instructores_rap' => $this->instructoresRapPayload($roles),
+            ];
+        }
+
+        $cid = $horarioContratoId ?: $idContratoVista;
+        return array_merge($default, [
+            'instructores_rap' => $cid ? $this->instructoresRapPayload([['id' => (int) $cid, 'rol' => 'titular']]) : [],
+        ]);
     }
 }

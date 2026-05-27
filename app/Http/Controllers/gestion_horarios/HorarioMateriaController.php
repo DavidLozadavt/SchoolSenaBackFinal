@@ -13,6 +13,7 @@ use App\Models\GradoMateria;
 use Illuminate\Http\Request;
 use App\Models\SesionMateria;
 use App\Models\AsignacionSesion;
+use App\Models\HorarioCompartido;
 use App\Models\HorarioMateria;
 use App\Models\Materia;
 use App\Traits\CalculateEndDate;
@@ -95,23 +96,24 @@ class HorarioMateriaController extends Controller
                 return response()->json(['message' => 'Faltan datos obligatorios'], 400);
             }
 
-            // Buscamos las asignaciones de sesión de tipo compartido que tengan idContrato null
-            $asignaciones = AsignacionSesion::whereIn('idHorarioMateria', $horarioIds)
-                ->where('tipoAsignacion', 'HORARIO COMPARTIDO')
-                ->whereNull('idContrato')
+            $compartidos = HorarioCompartido::whereIn('idHorarioMateria', $horarioIds)
+                ->whereNull('idContratoSecundario')
+                ->where('estado', 'PENDIENTE')
                 ->get();
 
-            if ($asignaciones->isEmpty()) {
+            if ($compartidos->isEmpty()) {
                 return response()->json(['message' => 'No se encontraron horarios compartidos pendientes de asignación'], 404);
             }
 
-            foreach ($asignaciones as $asignacion) {
-                $asignacion->update(['idContrato' => $idContrato]);
-                
-                // Duplicar el horario para el segundo profe
-                $clon = HorarioMateria::duplicarParaAsignacion($asignacion);
+            foreach ($compartidos as $compartido) {
+                $compartido->update([
+                    'idContratoSecundario' => $idContrato,
+                    'estado'               => 'ACTIVO',
+                ]);
+
+                $clon = HorarioMateria::duplicarParaHorarioCompartido($compartido);
                 if ($clon) {
-                    $asignacion->update(['idHorarioMateria' => $clon->id]);
+                    $compartido->update(['idHorarioMateriaSecundario' => $clon->id]);
                 }
             }
 
@@ -193,13 +195,12 @@ class HorarioMateriaController extends Controller
                     $this->generatePastSessions($horarioBase);
 
                     if ($esCompartido) {
-                        AsignacionSesion::create([
-                            'tipoAsignacion'   => 'HORARIO COMPARTIDO',
-                            'fechaInicio'      => $fechaInicio,
-                            'fechaFin'         => $fechaFin,
-                            'idContrato'       => null,
-                            'idHorarioMateria' => $horarioBase->id,
-                            'observacion'      => $observacion,
+                        HorarioCompartido::create([
+                            'idHorarioMateria'     => $horarioBase->id,
+                            'fechaInicial'         => $fechaInicio,
+                            'fechaFinal'           => $fechaFin,
+                            'observacion'          => $observacion,
+                            'estado'               => 'PENDIENTE',
                         ]);
                     }
 
@@ -209,13 +210,12 @@ class HorarioMateriaController extends Controller
                     $this->generatePastSessions($newHorario);
 
                     if ($esCompartido) {
-                        AsignacionSesion::create([
-                            'tipoAsignacion'   => 'HORARIO COMPARTIDO',
-                            'fechaInicio'      => $fechaInicio,
-                            'fechaFin'         => $fechaFin,
-                            'idContrato'       => null,
-                            'idHorarioMateria' => $newHorario->id,
-                            'observacion'      => $observacion,
+                        HorarioCompartido::create([
+                            'idHorarioMateria'     => $newHorario->id,
+                            'fechaInicial'         => $fechaInicio,
+                            'fechaFinal'           => $fechaFin,
+                            'observacion'          => $observacion,
+                            'estado'               => 'PENDIENTE',
                         ]);
                     }
 
@@ -503,6 +503,10 @@ class HorarioMateriaController extends Controller
             foreach ($horariosRelacionados as $hr) {
                 // 1. Eliminar vinculaciones de sesiones especiales (compartido/reemplazo)
                 AsignacionSesion::where('idHorarioMateria', $hr->id)->delete();
+                HorarioCompartido::where(function ($q) use ($hr) {
+                    $q->where('idHorarioMateria', $hr->id)
+                        ->orWhere('idHorarioMateriaSecundario', $hr->id);
+                })->delete();
 
                 // 2. Eliminar sesiones y sus asistencias (solo si no tienen asistencias reales, ya validado)
                 $hr->sesionMaterias()->each(function($sesion) {
@@ -1324,6 +1328,7 @@ class HorarioMateriaController extends Controller
                 ->with('gradoMateria.materia')
                 ->with('contrato.persona')
                 ->with('asignacionSesion.contrato.persona')
+                ->with('horariosCompartidos.contratoSecundario.persona')
                 ->get();
 
             if ($materias->isEmpty()) {
@@ -1387,7 +1392,8 @@ class HorarioMateriaController extends Controller
                 'gradoMateria.gradoPrograma',
                 'dia',
                 'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email',
-                'asignacionSesion.contrato.persona'
+                'asignacionSesion.contrato.persona',
+                'horariosCompartidos.contratoSecundario.persona',
             ])
             ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($q) {
                 $q->whereNotNull('fechaSesion');
@@ -1547,7 +1553,7 @@ class HorarioMateriaController extends Controller
                                                 'fechaFinal' => $h->fechaFinal,
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => $h->contrato->persona ?? null,
-                                                'asignacionSesion' => $h->asignacionSesion ?? [],
+                                                'asignacionSesion' => HorarioMateria::asignacionesEspecialesApi($h),
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values(),
@@ -1564,7 +1570,7 @@ class HorarioMateriaController extends Controller
                                                 'fechaFinal' => $h->fechaFinal,
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => null,
-                                                'asignacionSesion' => $h->asignacionSesion ?? [],
+                                                'asignacionSesion' => HorarioMateria::asignacionesEspecialesApi($h),
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values()

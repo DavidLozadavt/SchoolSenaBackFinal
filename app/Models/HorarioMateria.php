@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\AsignacionSesion;
+use App\Models\HorarioCompartido;
 
 class HorarioMateria extends Model
 {
@@ -46,15 +47,38 @@ class HorarioMateria extends Model
         return $this->hasMany(SesionMateria::class, 'idHorarioMateria', 'id');
     }
 
+    /** Reemplazos de clase vinculados a este horario (tabla reemplazo). */
     public function asignacionSesion(): HasMany
     {
         return $this->hasMany(AsignacionSesion::class, 'idHorarioMateria', 'id');
+    }
+
+    /** Horarios compartidos donde este registro es el horario base (titular). */
+    public function horariosCompartidos(): HasMany
+    {
+        return $this->hasMany(HorarioCompartido::class, 'idHorarioMateria', 'id');
     }
 
     public function detallesRmi(): HasMany
     {
         return $this->hasMany(DetalleRmi::class, 'idHorarioMateria', 'id');
     }
+
+    public static function asignacionesEspecialesApi(self $horario): array
+    {
+        $reemplazos = ($horario->relationLoaded('asignacionSesion')
+            ? $horario->asignacionSesion
+            : $horario->asignacionSesion()->with('contrato.persona')->get()
+        )->map(fn (AsignacionSesion $r) => $r->toAsignacionSesionApi());
+
+        $compartidos = ($horario->relationLoaded('horariosCompartidos')
+            ? $horario->horariosCompartidos
+            : $horario->horariosCompartidos()->with('contratoSecundario.persona')->get()
+        )->map(fn (HorarioCompartido $c) => $c->toAsignacionSesionApi());
+
+        return $reemplazos->concat($compartidos)->values()->all();
+    }
+
     // En HorarioMateria.php - ejecutar al crear/actualizar un horario
     public static function generarRmis(HorarioMateria $horario): void
     {
@@ -89,17 +113,15 @@ class HorarioMateria extends Model
     }
 
     /**
-     * Duplica un horario para una asignación compartida.
-     * Esto permite que el instructor secundario tenga su propio registro
-     * para el seguimiento de RMI y sesiones.
+     * Duplica un horario para el instructor secundario de un horario compartido.
      */
-    public static function duplicarParaAsignacion(AsignacionSesion $asignacion)
+    public static function duplicarParaHorarioCompartido(HorarioCompartido $compartido): ?self
     {
-        $original = self::find($asignacion->idHorarioMateria);
-        if (!$original) return null;
+        $original = self::find($compartido->idHorarioMateria);
+        if (!$original || !$compartido->idContratoSecundario) {
+            return null;
+        }
 
-        // Intentar reciclar un horario existente para este mismo slot que no tenga contrato (placeholder)
-        // Esto evita crear múltiples duplicados para el mismo bloque compartido
         $clon = self::where('idFicha', $original->idFicha)
             ->where('idGradoMateria', $original->idGradoMateria)
             ->where('idDia', $original->idDia)
@@ -111,22 +133,20 @@ class HorarioMateria extends Model
             ->first();
 
         if (!$clon) {
-            // Si no hay ninguno para reciclar, lo replicamos del original
             $clon = $original->replicate();
         }
 
-        $clon->idContrato = $asignacion->idContrato;
-        $clon->fechaInicial = $asignacion->fechaInicio;
-        $clon->fechaFinal = $asignacion->fechaFin;
+        $clon->idContrato = $compartido->idContratoSecundario;
+        $clon->fechaInicial = $compartido->fechaInicial;
+        $clon->fechaFinal = $compartido->fechaFinal;
         $clon->estado = 'ASIGNADO';
-        
-        if ($asignacion->observacion) {
-            $clon->observacion = $asignacion->observacion;
+
+        if ($compartido->observacion) {
+            $clon->observacion = $compartido->observacion;
         }
-        
+
         $clon->save();
 
-        // Generar RMIs para el nuevo contrato en este horario
         self::generarRmis($clon);
 
         return $clon;
