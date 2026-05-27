@@ -1658,6 +1658,7 @@ Route::get('/items/{itemId}/estado', [GestionEventoHermanoController::class, 'es
 Route::prefix('invitado')->group(function () {
     Route::get('/stats', [GestionEventoHermanoController::class, 'stats']);
     Route::get('/export-csv', [GestionEventoHermanoController::class, 'exportCsv']);
+    Route::get('/historial-scan', [GestionEventoHermanoController::class, 'historialScan']);
     Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']); 
     Route::get('/', [GestionEventoHermanoController::class, 'index']);
     Route::get('/token/{token}', [GestionEventoHermanoController::class, 'getByToken']);

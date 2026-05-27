@@ -488,4 +488,80 @@ class GestionEventoHermanoController extends Controller
 
         return $response;
     }
+
+    /**
+     * Historial completo de escaneos QR.
+     * Devuelve todos los hermanos con sus items escaneados y pendientes.
+     */
+    public function historialScan(Request $request)
+    {
+        $query = Item::query();
+        if ($request->has('idEvento') && $request->query('idEvento') !== '') {
+            $query->where('idEvento', $request->query('idEvento'));
+        }
+        $items = $query->orderBy('hora_inicio')->get();
+        $itemIds = $items->pluck('id');
+
+        $hermanos = Hermano::whereNotNull('qr_token')->orderBy('nombre')->get();
+
+        $ejecuciones = EjecucionItem::whereIn('idItem', $itemIds)->get();
+        $ejecMap = [];
+        foreach ($ejecuciones as $e) {
+            $ejecMap[$e->idHermano][$e->idItem] = $e;
+        }
+
+        $resultado = [];
+
+        foreach ($hermanos as $h) {
+            $escaneados = [];
+            $pendientes = [];
+
+            foreach ($items as $item) {
+                $ejec = $ejecMap[$h->id][$item->id] ?? null;
+
+                $itemData = [
+                    'idItem'      => $item->id,
+                    'nombreItem'  => $item->nombreItem,
+                    'hora_inicio' => $item->hora_inicio,
+                    'hora_fin'    => $item->hora_fin,
+                ];
+
+                if ($ejec && $ejec->recibido) {
+                    $itemData['fecha_scan'] = $ejec->fecha_scan;
+                    $escaneados[] = $itemData;
+                } else {
+                    $pendientes[] = $itemData;
+                }
+            }
+
+            $resultado[] = [
+                'id'        => $h->id,
+                'nombre'    => $h->nombre,
+                'email'     => $h->email,
+                'celular'   => $h->celularContacto,
+                'qr_token'  => $h->qr_token,
+                'escaneados'   => $escaneados,
+                'pendientes'   => $pendientes,
+                'total_escaneados' => count($escaneados),
+                'total_pendientes' => count($pendientes),
+                'total_items'      => count($escaneados) + count($pendientes),
+            ];
+        }
+
+        // Ordenar: los que tienen escaneos recientes primero
+        usort($resultado, function ($a, $b) {
+            $lastA = !empty($a['escaneados']) ? $a['escaneados'][count($a['escaneados'])-1]['fecha_scan'] : null;
+            $lastB = !empty($b['escaneados']) ? $b['escaneados'][count($b['escaneados'])-1]['fecha_scan'] : null;
+            if (!$lastA && !$lastB) return 0;
+            if (!$lastA) return 1;
+            if (!$lastB) return -1;
+            return strcmp($lastB, $lastA);
+        });
+
+        return response()->json([
+            'data'  => $resultado,
+            'total' => count($resultado),
+            'total_items' => $items->count(),
+        ]);
+    }
 }
