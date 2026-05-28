@@ -281,13 +281,13 @@ class FormularioController extends Controller
             if ($evento && $user) {
                 if ($user->idpersona) {
                     // Buscamos si el usuario ya es participante
-                    $participante = ParticipanteEvento::where('idEvento', $evento->idEvento)
+                    $participante = ParticipanteEvento::where('idEvento', $evento->id)
                         ->where('idPersona', $user->idpersona)
                         ->first();
                     
                     if (!$participante) {
                         $participante = ParticipanteEvento::create([
-                            'idEvento' => $evento->idEvento,
+                            'idEvento' => $evento->id,
                             'idPersona' => $user->idpersona,
                             'estado' => 'CONFIRMADO' // Ajustar al valor real
                         ]);

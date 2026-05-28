@@ -122,7 +122,7 @@ class EventoController extends Controller
 
             // LÓGICA AUTOMÁTICA: Crear Historia Multimedia si se solicita
             if (filter_var($request->input('crearHistoria'), FILTER_VALIDATE_BOOLEAN)) {
-                $this->crearHistoriaMultimedia($evento);
+                $this->crearHistoriaMultimedia($evento, $request->input('cancion'));
             }
 
             DB::commit();
@@ -178,7 +178,7 @@ class EventoController extends Controller
         $evento->save();
 
         if (filter_var($request->input('crearHistoria'), FILTER_VALIDATE_BOOLEAN)) {
-            $this->crearHistoriaMultimedia($evento);
+            $this->crearHistoriaMultimedia($evento, $request->input('cancion'));
         }
 
         return response()->json([
@@ -190,7 +190,7 @@ class EventoController extends Controller
     /**
      * Lógica para crear historia multimedia desde un evento
      */
-    private function crearHistoriaMultimedia(Evento $evento)
+    private function crearHistoriaMultimedia(Evento $evento, $cancion = null)
     {
         // Solo si tiene URL y no tiene ya un grupo vinculado
         if (!$evento->url || $evento->idGrupoMultimedia) {
@@ -217,6 +217,9 @@ class EventoController extends Controller
             $historia->tipo              = 'historia';
             $historia->orden             = 1;
             $historia->descripcion       = $evento->descripcion;
+            if ($cancion) {
+                $historia->cancion = is_string($cancion) ? $cancion : json_encode($cancion);
+            }
             $historia->save();
 
             // 3. Vincular el grupo al evento
