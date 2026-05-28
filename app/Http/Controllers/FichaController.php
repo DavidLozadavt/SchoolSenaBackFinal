@@ -888,13 +888,12 @@ class FichaController extends Controller
                 }
             }
 
-            $tieneReemplazoHorario = Schema::hasColumn('reemplazo', 'idHorarioMateria');
-            $tieneHorarioCompartido = Schema::hasTable('horarioCompartido');
+            $tieneAsignacionSesion = Schema::hasTable('asignacionsesion');
 
-            $selectFechas = $tieneReemplazoHorario
+            $selectFechas = $tieneAsignacionSesion
                 ? [
-                    DB::raw('COALESCE(asig.fechaInicial, hm.fechaInicial) as fechaInicial'),
-                    DB::raw('COALESCE(asig.fechaFinal, hm.fechaFinal) as fechaFinal'),
+                    DB::raw("COALESCE(CASE WHEN asig.tipoAsignacion = 'REEMPLAZO' THEN asig.fechaInicio END, hm.fechaInicial) as fechaInicial"),
+                    DB::raw("COALESCE(CASE WHEN asig.tipoAsignacion = 'REEMPLAZO' THEN asig.fechaFin END, hm.fechaFinal) as fechaFinal"),
                 ]
                 : [
                     DB::raw('hm.fechaInicial as fechaInicial'),
@@ -946,18 +945,10 @@ class FichaController extends Controller
                 $qb = $qb->leftJoin('infraestructura as inf', 'hm.idInfraestructura', '=', 'inf.id');
             }
 
-            if ($tieneReemplazoHorario) {
-                $qb->leftJoin('reemplazo as asig', function ($join) use ($idInstructor) {
+            if ($tieneAsignacionSesion) {
+                $qb->leftJoin('asignacionsesion as asig', function ($join) use ($idInstructor) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
-                        ->where('asig.idContratoRemplazo', '=', $idInstructor)
-                        ->whereNotNull('asig.idHorarioMateria');
-                });
-            }
-
-            if ($tieneHorarioCompartido) {
-                $qb->leftJoin('horarioCompartido as hc', function ($join) use ($idInstructor) {
-                    $join->on('hm.id', '=', 'hc.idHorarioMateria')
-                        ->where('hc.idContratoSecundario', '=', $idInstructor);
+                        ->where('asig.idContrato', '=', $idInstructor);
                 });
             }
 
@@ -966,13 +957,10 @@ class FichaController extends Controller
                     $join->on('c.id', '=', DB::raw((int) $idInstructor));
                 })
                 ->join('persona as per', 'c.idpersona', '=', 'per.id')
-                ->where(function ($query) use ($idInstructor, $tieneReemplazoHorario, $tieneHorarioCompartido) {
+                ->where(function ($query) use ($idInstructor, $tieneAsignacionSesion) {
                     $query->where('hm.idContrato', $idInstructor);
-                    if ($tieneReemplazoHorario) {
+                    if ($tieneAsignacionSesion) {
                         $query->orWhereNotNull('asig.id');
-                    }
-                    if ($tieneHorarioCompartido) {
-                        $query->orWhereNotNull('hc.id');
                     }
                 })
                 ->whereNotNull('hm.idDia')
@@ -1101,8 +1089,7 @@ class FichaController extends Controller
                 }
             }
 
-            $tieneReemplazoHorario = Schema::hasColumn('reemplazo', 'idHorarioMateria');
-            $tieneHorarioCompartido = Schema::hasTable('horarioCompartido');
+            $tieneAsignacionSesion = Schema::hasTable('asignacionsesion');
             $hasInfraestructura = Schema::hasColumn('horarioMateria', 'idInfraestructura');
             $selectAula = $hasInfraestructura
                 ? ['inf.nombreInfraestructura as aula_nombre']
@@ -1152,31 +1139,18 @@ class FichaController extends Controller
                 $qb = $qb->leftJoin('infraestructura as inf', 'hm.idInfraestructura', '=', 'inf.id');
             }
 
-            if ($tieneReemplazoHorario) {
-                $qb->leftJoin('reemplazo as asig', function ($join) use ($idInstructor) {
+            if ($tieneAsignacionSesion) {
+                $qb->leftJoin('asignacionsesion as asig', function ($join) use ($idInstructor) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
-                        ->where('asig.idContratoRemplazo', '=', $idInstructor)
-                        ->whereNotNull('asig.idHorarioMateria');
-                });
-            }
-
-            if ($tieneHorarioCompartido) {
-                $qb->leftJoin('horarioCompartido as hc', function ($join) use ($idInstructor) {
-                    $join->where(function ($q) {
-                        $q->whereColumn('hm.id', 'hc.idHorarioMateria')
-                            ->orWhereColumn('hm.id', 'hc.idHorarioMateriaSecundario');
-                    })->where('hc.idContratoSecundario', '=', $idInstructor);
+                        ->where('asig.idContrato', '=', $idInstructor);
                 });
             }
 
             $qb->whereNotNull('sesm.fechaSesion')
-                ->where(function ($query) use ($idInstructor, $tieneReemplazoHorario, $tieneHorarioCompartido) {
+                ->where(function ($query) use ($idInstructor, $tieneAsignacionSesion) {
                     $query->where('hm.idContrato', $idInstructor);
-                    if ($tieneReemplazoHorario) {
+                    if ($tieneAsignacionSesion) {
                         $query->orWhereNotNull('asig.id');
-                    }
-                    if ($tieneHorarioCompartido) {
-                        $query->orWhereNotNull('hc.id');
                     }
                 });
 
@@ -1573,11 +1547,10 @@ class FichaController extends Controller
             }
 
             // Franjas del mismo contrato que la clase abierta (alineado con `clasesAsignadasInstructor`:
-            // `hm.idContrato` = contrato del instructor O fila enlazada en `reemplazo` para ese contrato).
+            // `hm.idContrato` = contrato del instructor O fila en `asignacionsesion` para ese contrato).
             // No usar solo idpersona: mezcla otros contratos del mismo docente y desvirtúa el calendario vs "Mi horario".
             $contratoClase = (int) ($claseData->contrato_id ?? 0);
-            $tieneReemplazoHorarioDetalle = Schema::hasColumn('reemplazo', 'idHorarioMateria');
-            $tieneHorarioCompartidoDetalle = Schema::hasTable('horarioCompartido');
+            $tieneAsignacionSesionDetalle = Schema::hasTable('asignacionsesion');
 
             $qbTodasFechas = DB::table('horarioMateria as hm')
                 ->select(array_merge([
@@ -1602,29 +1575,18 @@ class FichaController extends Controller
                 ->join('materia as m', 'gm.idMateria', '=', 'm.id');
             $qbTodasFechas = $this->aplicarJoinsMateriaCompetenciaRapSeguimiento($qbTodasFechas);
 
-            if ($tieneReemplazoHorarioDetalle) {
-                $qbTodasFechas->leftJoin('reemplazo as asig', function ($join) use ($contratoClase) {
+            if ($tieneAsignacionSesionDetalle) {
+                $qbTodasFechas->leftJoin('asignacionsesion as asig', function ($join) use ($contratoClase) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
-                        ->where('asig.idContratoRemplazo', '=', $contratoClase)
-                        ->whereNotNull('asig.idHorarioMateria');
-                });
-            }
-
-            if ($tieneHorarioCompartidoDetalle) {
-                $qbTodasFechas->leftJoin('horarioCompartido as hc', function ($join) use ($contratoClase) {
-                    $join->on('hm.id', '=', 'hc.idHorarioMateria')
-                        ->where('hc.idContratoSecundario', '=', $contratoClase);
+                        ->where('asig.idContrato', '=', $contratoClase);
                 });
             }
 
             $todasLasFechasClase = $qbTodasFechas
-                ->where(function ($query) use ($contratoClase, $tieneReemplazoHorarioDetalle, $tieneHorarioCompartidoDetalle) {
+                ->where(function ($query) use ($contratoClase, $tieneAsignacionSesionDetalle) {
                     $query->where('hm.idContrato', $contratoClase);
-                    if ($tieneReemplazoHorarioDetalle) {
+                    if ($tieneAsignacionSesionDetalle) {
                         $query->orWhereNotNull('asig.id');
-                    }
-                    if ($tieneHorarioCompartidoDetalle) {
-                        $query->orWhereNotNull('hc.id');
                     }
                 })
                 ->whereNotNull('hm.fechaInicial')
@@ -2761,33 +2723,33 @@ class FichaController extends Controller
 
     private function reemplazosVigentesEnSlot(array $slotIds, ?Carbon $ref = null): \Illuminate\Support\Collection
     {
-        if (!Schema::hasColumn('reemplazo', 'idHorarioMateria') || empty($slotIds)) {
+        if (!Schema::hasTable('asignacionsesion') || empty($slotIds)) {
             return collect();
         }
 
         $ref = $ref ?? Carbon::today();
 
-        return DB::table('reemplazo')
+        return DB::table('asignacionsesion')
             ->whereIn('idHorarioMateria', $slotIds)
-            ->whereNotNull('idHorarioMateria')
-            ->whereDate('fechaInicial', '<=', $ref)
-            ->whereDate('fechaFinal', '>=', $ref)
+            ->where('tipoAsignacion', 'REEMPLAZO')
+            ->whereDate('fechaInicio', '<=', $ref)
+            ->whereDate('fechaFin', '>=', $ref)
             ->get();
     }
 
     private function horariosCompartidosVigentesEnSlot(array $slotIds, ?Carbon $ref = null): \Illuminate\Support\Collection
     {
-        if (!Schema::hasTable('horarioCompartido') || empty($slotIds)) {
+        if (!Schema::hasTable('asignacionsesion') || empty($slotIds)) {
             return collect();
         }
 
         $ref = $ref ?? Carbon::today();
 
-        return DB::table('horarioCompartido')
+        return DB::table('asignacionsesion')
             ->whereIn('idHorarioMateria', $slotIds)
-            ->whereIn('estado', ['PENDIENTE', 'ACTIVO', 'FINALIZADO'])
-            ->whereDate('fechaInicial', '<=', $ref)
-            ->whereDate('fechaFinal', '>=', $ref)
+            ->where('tipoAsignacion', 'HORARIO COMPARTIDO')
+            ->whereDate('fechaInicio', '<=', $ref)
+            ->whereDate('fechaFin', '>=', $ref)
             ->get();
     }
 
@@ -2881,14 +2843,14 @@ class FichaController extends Controller
         );
 
         $reemplazo = $reemplazosVigentes->first();
-        if ($reemplazo && $reemplazo->idContratoRemplazo) {
-            $idReemplazante = (int) $reemplazo->idContratoRemplazo;
+        if ($reemplazo && $reemplazo->idContrato) {
+            $idReemplazante = (int) $reemplazo->idContrato;
             return [
                 'tipo_asignacion' => 'REEMPLAZO',
                 'modalidad_rap' => ($idContratoVista !== null && $idContratoVista === $idReemplazante) ? 'REEMPLAZO' : 'TITULAR',
                 'asignacion_vigente' => true,
-                'asignacion_fecha_inicio' => $reemplazo->fechaInicial ?? null,
-                'asignacion_fecha_fin' => $reemplazo->fechaFinal ?? null,
+                'asignacion_fecha_inicio' => $reemplazo->fechaInicio ?? null,
+                'asignacion_fecha_fin' => $reemplazo->fechaFin ?? null,
                 'reemplazo_vigente_por_otro' => $titularId && $idContratoVista !== null && $idContratoVista === $titularId && $idReemplazante !== $titularId,
                 'es_reemplazante' => $idContratoVista !== null && $idContratoVista === $idReemplazante,
                 'instructores_rap' => $this->instructoresRapPayload(array_filter([
@@ -2904,23 +2866,51 @@ class FichaController extends Controller
                 $roles[] = ['id' => $cid, 'rol' => 'compartido'];
             }
             foreach ($compartidosVigentes as $compartido) {
-                $cid = (int) ($compartido->idContratoSecundario ?? 0);
+                $cid = (int) ($compartido->idContrato ?? 0);
                 if ($cid > 0 && !in_array($cid, $contratosSlot, true)) {
                     $roles[] = ['id' => $cid, 'rol' => 'compartido'];
                 }
             }
-            $first = $compartidosVigentes->first();
 
-            return [
-                'tipo_asignacion' => $compartidosVigentes->isNotEmpty() ? 'HORARIO COMPARTIDO' : null,
-                'modalidad_rap' => 'COMPARTIDO',
-                'asignacion_vigente' => true,
-                'asignacion_fecha_inicio' => $first?->fechaInicial ?? null,
-                'asignacion_fecha_fin' => $first?->fechaFinal ?? null,
-                'reemplazo_vigente_por_otro' => false,
-                'es_reemplazante' => false,
-                'instructores_rap' => $this->instructoresRapPayload($roles),
-            ];
+            $contratosUnicos = [];
+            foreach ($roles as $rol) {
+                $id = (int) ($rol['id'] ?? 0);
+                if ($id > 0) {
+                    $contratosUnicos[$id] = true;
+                }
+            }
+
+            // Compartido solo si hay al menos dos instructores distintos en el cupo.
+            if (count($contratosUnicos) >= 2) {
+                $first = $compartidosVigentes->first();
+
+                return [
+                    'tipo_asignacion' => $compartidosVigentes->isNotEmpty() ? 'HORARIO COMPARTIDO' : null,
+                    'modalidad_rap' => 'COMPARTIDO',
+                    'asignacion_vigente' => true,
+                    'asignacion_fecha_inicio' => $first?->fechaInicio ?? null,
+                    'asignacion_fecha_fin' => $first?->fechaFin ?? null,
+                    'reemplazo_vigente_por_otro' => false,
+                    'es_reemplazante' => false,
+                    'instructores_rap' => $this->instructoresRapPayload($roles),
+                ];
+            }
+
+            // Hay fila de horario compartido pero aún sin co-instructor → no mostrar badge Compartido.
+            if ($compartidosVigentes->isNotEmpty()) {
+                $first = $compartidosVigentes->first();
+                $cidTitular = $titularId ?: $horarioContratoId ?: $idContratoVista;
+
+                return array_merge($default, [
+                    'tipo_asignacion' => 'HORARIO COMPARTIDO',
+                    'asignacion_vigente' => true,
+                    'asignacion_fecha_inicio' => $first?->fechaInicio ?? null,
+                    'asignacion_fecha_fin' => $first?->fechaFin ?? null,
+                    'instructores_rap' => $cidTitular
+                        ? $this->instructoresRapPayload([['id' => (int) $cidTitular, 'rol' => 'titular']])
+                        : [],
+                ]);
+            }
         }
 
         $cid = $horarioContratoId ?: $idContratoVista;

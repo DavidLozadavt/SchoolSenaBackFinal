@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\AsignacionSesion;
-use App\Models\HorarioCompartido;
 
 class HorarioMateria extends Model
 {
@@ -47,16 +46,9 @@ class HorarioMateria extends Model
         return $this->hasMany(SesionMateria::class, 'idHorarioMateria', 'id');
     }
 
-    /** Reemplazos de clase vinculados a este horario (tabla reemplazo). */
     public function asignacionSesion(): HasMany
     {
         return $this->hasMany(AsignacionSesion::class, 'idHorarioMateria', 'id');
-    }
-
-    /** Horarios compartidos donde este registro es el horario base (titular). */
-    public function horariosCompartidos(): HasMany
-    {
-        return $this->hasMany(HorarioCompartido::class, 'idHorarioMateria', 'id');
     }
 
     public function detallesRmi(): HasMany
@@ -66,20 +58,16 @@ class HorarioMateria extends Model
 
     public static function asignacionesEspecialesApi(self $horario): array
     {
-        $reemplazos = ($horario->relationLoaded('asignacionSesion')
+        $asignaciones = $horario->relationLoaded('asignacionSesion')
             ? $horario->asignacionSesion
-            : $horario->asignacionSesion()->with('contrato.persona')->get()
-        )->map(fn (AsignacionSesion $r) => $r->toAsignacionSesionApi());
+            : $horario->asignacionSesion()->with('contrato.persona')->get();
 
-        $compartidos = ($horario->relationLoaded('horariosCompartidos')
-            ? $horario->horariosCompartidos
-            : $horario->horariosCompartidos()->with('contratoSecundario.persona')->get()
-        )->map(fn (HorarioCompartido $c) => $c->toAsignacionSesionApi());
-
-        return $reemplazos->concat($compartidos)->values()->all();
+        return $asignaciones
+            ->map(fn (AsignacionSesion $a) => $a->toAsignacionSesionApi())
+            ->values()
+            ->all();
     }
 
-    // En HorarioMateria.php - ejecutar al crear/actualizar un horario
     public static function generarRmis(HorarioMateria $horario): void
     {
         $inicio = \Carbon\Carbon::parse($horario->fechaInicial)->startOfMonth();
@@ -90,13 +78,11 @@ class HorarioMateria extends Model
         while ($cursor->lte($fin)) {
             $periodo = $cursor->format('Y-m');
 
-            // Busca o crea el RMI para ese periodo
             $rmi = Rmi::firstOrCreate(
                 ['periodo' => $periodo],
                 ['estado' => 'PENDIENTE', 'observacion' => null]
             );
 
-            // Crea el detalle si no existe
             DetalleRmi::firstOrCreate(
                 [
                     'idRmi'            => $rmi->id,
@@ -115,10 +101,10 @@ class HorarioMateria extends Model
     /**
      * Duplica un horario para el instructor secundario de un horario compartido.
      */
-    public static function duplicarParaHorarioCompartido(HorarioCompartido $compartido): ?self
+    public static function duplicarParaAsignacionCompartida(AsignacionSesion $asignacion): ?self
     {
-        $original = self::find($compartido->idHorarioMateria);
-        if (!$original || !$compartido->idContratoSecundario) {
+        $original = self::find($asignacion->idHorarioMateria);
+        if (!$original || !$asignacion->idContrato) {
             return null;
         }
 
@@ -128,7 +114,7 @@ class HorarioMateria extends Model
             ->where('horaInicial', $original->horaInicial)
             ->where('horaFinal', $original->horaFinal)
             ->where('fechaInicial', $original->fechaInicial)
-            ->whereNull('idContrato')
+            ->where('idContrato', $asignacion->idContrato)
             ->where('id', '!=', $original->id)
             ->first();
 
@@ -136,13 +122,13 @@ class HorarioMateria extends Model
             $clon = $original->replicate();
         }
 
-        $clon->idContrato = $compartido->idContratoSecundario;
-        $clon->fechaInicial = $compartido->fechaInicial;
-        $clon->fechaFinal = $compartido->fechaFinal;
+        $clon->idContrato = $asignacion->idContrato;
+        $clon->fechaInicial = $asignacion->fechaInicio;
+        $clon->fechaFinal = $asignacion->fechaFin;
         $clon->estado = 'ASIGNADO';
 
-        if ($compartido->observacion) {
-            $clon->observacion = $compartido->observacion;
+        if ($asignacion->observacion) {
+            $clon->observacion = $asignacion->observacion;
         }
 
         $clon->save();

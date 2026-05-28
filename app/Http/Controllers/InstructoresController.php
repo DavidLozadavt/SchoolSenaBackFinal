@@ -89,11 +89,11 @@ class InstructoresController extends Controller
                 })
                 ->orWhereHas('user.persona.contracts.asignacionSesion', function ($a) use ($inicio, $fin) {
                     $a->where(function ($q) use ($inicio, $fin) {
-                        $q->whereBetween('fechaInicial', [$inicio, $fin])
-                            ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                        $q->whereBetween('fechaInicio', [$inicio, $fin])
+                            ->orWhereBetween('fechaFin', [$inicio, $fin])
                             ->orWhere(function ($q2) use ($inicio, $fin) {
-                                $q2->where('fechaInicial', '<=', $inicio)
-                                    ->where('fechaFinal', '>=', $fin);
+                                $q2->where('fechaInicio', '<=', $inicio)
+                                    ->where('fechaFin', '>=', $fin);
                             });
                     });
                 });
@@ -113,10 +113,11 @@ class InstructoresController extends Controller
 
                 // Reemplazos que este instructor está realizando
                 $reemplazosHechos = AsignacionSesion::with('horario')
-                    ->where('idContratoRemplazo', $contrato->id)
+                    ->where('idContrato', $contrato->id)
+                    ->where('tipoAsignacion', 'REEMPLAZO')
                     ->where(function ($q) use ($inicio, $fin) {
-                        $q->whereBetween('fechaInicial', [$inicio, $fin])
-                          ->orWhereBetween('fechaFinal', [$inicio, $fin]);
+                        $q->whereBetween('fechaInicio', [$inicio, $fin])
+                          ->orWhereBetween('fechaFin', [$inicio, $fin]);
                     })->get();
 
                 // Obtener detallesRmi PENDIENTE/RECHAZADO del periodo actual para este contrato
@@ -150,7 +151,9 @@ class InstructoresController extends Controller
                     $finalC = $hasta->copy()->startOfDay();
 
                     // Reemplazos que le hicieron a este horario
-                    $reemplazosQueLeHicieron = AsignacionSesion::where('idHorarioMateria', $h->id)->get();
+                    $reemplazosQueLeHicieron = AsignacionSesion::where('idHorarioMateria', $h->id)
+                        ->where('tipoAsignacion', 'REEMPLAZO')
+                        ->get();
 
                     while ($cursor->lte($finalC)) {
                         if ($cursor->dayOfWeek === $diaSemanaCarbon) {
@@ -233,23 +236,23 @@ class InstructoresController extends Controller
                                     // Y NO hubo un reemplazo en la fecha de la sesión
                                     ->whereNotExists(function ($sub) {
                                         $sub->select(DB::raw(1))
-                                            ->from('reemplazo')
-                                            ->whereColumn('reemplazo.idHorarioMateria', 'horarioMateria.id')
-                                            ->whereNotNull('reemplazo.idHorarioMateria')
-                                            ->whereColumn('sesionMateria.fechaSesion', '>=', 'reemplazo.fechaInicial')
-                                            ->whereColumn('sesionMateria.fechaSesion', '<=', 'reemplazo.fechaFinal');
+                                        ->from('asignacionsesion')
+                                        ->whereColumn('asignacionsesion.idHorarioMateria', 'horarioMateria.id')
+                                        ->where('asignacionsesion.tipoAsignacion', 'REEMPLAZO')
+                                        ->whereColumn('sesionMateria.fechaSesion', '>=', 'asignacionsesion.fechaInicio')
+                                        ->whereColumn('sesionMateria.fechaSesion', '<=', 'asignacionsesion.fechaFin');
                                     });
                             })
                             ->orWhere(function ($q2) use ($contrato) {
                                 // Caso 2: El instructor es el reemplazo asignado para esa fecha
                                 $q2->whereExists(function ($sub) use ($contrato) {
                                     $sub->select(DB::raw(1))
-                                        ->from('reemplazo')
-                                        ->whereColumn('reemplazo.idHorarioMateria', 'horarioMateria.id')
-                                        ->where('reemplazo.idContratoRemplazo', $contrato->id)
-                                        ->whereNotNull('reemplazo.idHorarioMateria')
-                                        ->whereColumn('sesionMateria.fechaSesion', '>=', 'reemplazo.fechaInicial')
-                                        ->whereColumn('sesionMateria.fechaSesion', '<=', 'reemplazo.fechaFinal');
+                                        ->from('asignacionsesion')
+                                        ->whereColumn('asignacionsesion.idHorarioMateria', 'horarioMateria.id')
+                                        ->where('asignacionsesion.idContrato', $contrato->id)
+                                        ->where('asignacionsesion.tipoAsignacion', 'REEMPLAZO')
+                                        ->whereColumn('sesionMateria.fechaSesion', '>=', 'asignacionsesion.fechaInicio')
+                                        ->whereColumn('sesionMateria.fechaSesion', '<=', 'asignacionsesion.fechaFin');
                                 });
                             });
                         })
@@ -374,11 +377,11 @@ class InstructoresController extends Controller
                 })
                 ->orWhereHas('user.persona.contracts.asignacionSesion', function ($a) use ($inicio, $fin) {
                     $a->where(function ($q) use ($inicio, $fin) {
-                        $q->whereBetween('fechaInicial', [$inicio, $fin])
-                            ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                        $q->whereBetween('fechaInicio', [$inicio, $fin])
+                            ->orWhereBetween('fechaFin', [$inicio, $fin])
                             ->orWhere(function ($q2) use ($inicio, $fin) {
-                                $q2->where('fechaInicial', '<=', $inicio)
-                                    ->where('fechaFinal', '>=', $fin);
+                                $q2->where('fechaInicio', '<=', $inicio)
+                                    ->where('fechaFin', '>=', $fin);
                             });
                     });
                 });
@@ -397,10 +400,11 @@ class InstructoresController extends Controller
                 $reemplazosHechos = collect();
                 if ($contrato) {
                     $reemplazosHechos = AsignacionSesion::with('horario')
-                    ->where('idContratoRemplazo', $contrato->id)
+                    ->where('idContrato', $contrato->id)
+                    ->where('tipoAsignacion', 'REEMPLAZO')
                     ->where(function ($q) use ($inicio, $fin) {
-                            $q->whereBetween('fechaInicial', [$inicio, $fin])
-                              ->orWhereBetween('fechaFinal', [$inicio, $fin]);
+                            $q->whereBetween('fechaInicio', [$inicio, $fin])
+                              ->orWhereBetween('fechaFin', [$inicio, $fin]);
                     })->get();
                 }
 
@@ -418,7 +422,9 @@ class InstructoresController extends Controller
                         $finalC = $hasta->copy()->startOfDay();
 
                         // Reemplazos que le hicieron a este horario
-                        $reemplazosQueLeHicieron = AsignacionSesion::where('idHorarioMateria', $h->id)->get();
+                        $reemplazosQueLeHicieron = AsignacionSesion::where('idHorarioMateria', $h->id)
+                        ->where('tipoAsignacion', 'REEMPLAZO')
+                        ->get();
 
                         while ($cursor->lte($finalC)) {
                             if ($cursor->dayOfWeek === $diaSemanaCarbon) {
@@ -654,8 +660,8 @@ class InstructoresController extends Controller
                     'cantidadSesiones' => $cantidadSesiones,
                     'duracionHoras' => round($duracionSesion * $cantidadSesiones, 2),
                     'idDia' => $h->idDia,
-                    'esCompartida' => \App\Models\HorarioCompartido::where('idHorarioMateria', $h->id)
-                        ->whereIn('estado', ['PENDIENTE', 'ACTIVO'])
+                    'esCompartida' => \App\Models\AsignacionSesion::where('idHorarioMateria', $h->id)
+                        ->where('tipoAsignacion', 'HORARIO COMPARTIDO')
                         ->exists(),
                     'compartidoCon' => \App\Models\HorarioMateria::with('contrato.persona')
                         ->where('idFicha', $h->idFicha)
@@ -1925,13 +1931,14 @@ class InstructoresController extends Controller
 
         // 2. Obtener reemplazos realizados por este instructor
         $reemplazosHechos = \App\Models\AsignacionSesion::with(['horario.ficha.asignacion.programa', 'horario.gradoMateria.materia.padre'])
-            ->where('idContratoRemplazo', $idContrato)
+            ->where('idContrato', $idContrato)
+            ->where('tipoAsignacion', 'REEMPLAZO')
             ->where(function ($q) use ($inicio, $fin) {
-                $q->whereBetween('fechaInicial', [$inicio, $fin])
-                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                $q->whereBetween('fechaInicio', [$inicio, $fin])
+                    ->orWhereBetween('fechaFin', [$inicio, $fin])
                     ->orWhere(function ($q2) use ($inicio, $fin) {
-                        $q2->where('fechaInicial', '<=', $inicio)
-                            ->where('fechaFinal', '>=', $fin);
+                        $q2->where('fechaInicio', '<=', $inicio)
+                            ->where('fechaFin', '>=', $fin);
                     });
             })
             ->get();
@@ -1947,7 +1954,9 @@ class InstructoresController extends Controller
             $finalC = $hasta->copy()->startOfDay();
 
             // Reemplazos que le hicieron a este horario
-            $reemplazos = \App\Models\AsignacionSesion::where('idHorarioMateria', $h->id)->get();
+            $reemplazos = \App\Models\AsignacionSesion::where('idHorarioMateria', $h->id)
+                ->where('tipoAsignacion', 'REEMPLAZO')
+                ->get();
 
             while ($cursor->lte($finalC)) {
                 if ((int) $cursor->dayOfWeek === $diaSemanaCarbon) {
@@ -2196,13 +2205,14 @@ class InstructoresController extends Controller
 
         // 2. Obtener reemplazos realizados por este instructor
         $reemplazosHechos = \App\Models\AsignacionSesion::with(['horario.ficha.asignacion.programa', 'horario.gradoMateria.materia.padre'])
-            ->where('idContratoRemplazo', $idContrato)
+            ->where('idContrato', $idContrato)
+            ->where('tipoAsignacion', 'REEMPLAZO')
             ->where(function ($q) use ($inicio, $fin) {
-                $q->whereBetween('fechaInicial', [$inicio, $fin])
-                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
+                $q->whereBetween('fechaInicio', [$inicio, $fin])
+                    ->orWhereBetween('fechaFin', [$inicio, $fin])
                     ->orWhere(function ($q2) use ($inicio, $fin) {
-                        $q2->where('fechaInicial', '<=', $inicio)
-                            ->where('fechaFinal', '>=', $fin);
+                        $q2->where('fechaInicio', '<=', $inicio)
+                            ->where('fechaFin', '>=', $fin);
                     });
             })
             ->get();
@@ -2219,7 +2229,9 @@ class InstructoresController extends Controller
             $finalC = $hasta->copy()->startOfDay();
 
             // Reemplazos que le hicieron a este horario
-            $reemplazos = \App\Models\AsignacionSesion::where('idHorarioMateria', $h->id)->get();
+            $reemplazos = \App\Models\AsignacionSesion::where('idHorarioMateria', $h->id)
+                ->where('tipoAsignacion', 'REEMPLAZO')
+                ->get();
 
             while ($cursor->lte($finalC)) {
                 if ($cursor->dayOfWeek === $diaSemanaCarbon) {
