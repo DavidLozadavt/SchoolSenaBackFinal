@@ -18,8 +18,7 @@ return new class extends Migration
             // Foreign key self-referencing
             $table->foreign('idPermissionPadre')
                   ->references('id')
-                  ->on('permissions')
-                  ->onDelete('set null');
+                  ->on('permissions');
         });
     }
 
