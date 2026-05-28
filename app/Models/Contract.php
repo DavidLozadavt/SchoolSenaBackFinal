@@ -223,12 +223,7 @@ class Contract extends Model
 
     public function asignacionSesion(): HasMany
     {
-        return $this->hasMany(AsignacionSesion::class, 'idContratoRemplazo', 'id');
-    }
-
-    public function horariosCompartidosSecundario(): HasMany
-    {
-        return $this->hasMany(HorarioCompartido::class, 'idContratoSecundario', 'id');
+        return $this->hasMany(AsignacionSesion::class, 'idContrato', 'id');
     }
     public function actas()
     {
