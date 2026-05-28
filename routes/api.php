@@ -213,12 +213,19 @@ Route::post('company_update', [CompanyController::class, 'update']);
 //permisos
 Route::get('permisos', [AsignacionRolPermiso::class, 'index']);
 Route::get('permisos_rol', [AsignacionRolPermiso::class, 'permissionsByRole']);
-Route::match(['put', 'post'], 'permisos/{id}', [PermissionHierarchyController::class, 'update'])->whereNumber('id');
 Route::put('asignar_rol_permiso', [AsignacionRolPermiso::class, 'assignFunctionality']);
+
+Route::middleware('auth:api')->group(function () {
+    // Endpoint to create a permission (used by frontend)
+    Route::post('permisos/crear', [PermissionHierarchyController::class, 'store']);
+    Route::match(['put', 'post'], 'permisos/{id}', [PermissionHierarchyController::class, 'update'])->whereNumber('id');
+
+});
 
 // jerarquía de permisos
 Route::get('permisos_jerarquia', [PermissionHierarchyController::class, 'index']);
 Route::post('permissions/{id}/set-parent', [PermissionHierarchyController::class, 'setParent'])->whereNumber('id');
+Route::get('menu/dynamic', [PermissionHierarchyController::class, 'getAllPermissionsHierarchy']);
 
 // notificaciones
 Route::resource('notificaciones', NotificacionController::class);

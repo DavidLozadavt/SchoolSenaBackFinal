@@ -17,11 +17,17 @@ class PermissionHierarchyController extends Controller
      */
     public function index(): JsonResponse
     {
-        $permissions = Permission::with('children')
-            ->orderBy('name')
+        // Construir el árbol completo empezando por permisos raíz
+        $rootPermissions = Permission::whereNull('idPermissionPadre')
+            ->orderBy('id', 'desc')
             ->get();
 
-        return response()->json($permissions);
+        $permissionsTree = $this->buildFullPermissionsTree($rootPermissions);
+
+        // Mapear el árbol a la forma que espera el frontend
+        $menuTree = $this->mapTreeToFrontend($permissionsTree);
+
+        return response()->json($menuTree);
     }
 
     /**
@@ -72,31 +78,144 @@ class PermissionHierarchyController extends Controller
     /**
      * PUT|POST /api/permisos/{id}
      *
-     * Updates simple attributes of a permission (e.g. description).
+     * Updates simple attributes of a permission (e.g. description, icon, path, etc.).
      */
     public function update(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
             'description' => ['nullable', 'string'],
             'descripcion' => ['nullable', 'string'],
+            'icon' => ['nullable', 'string'],
+            'path' => ['nullable', 'string']
         ]);
 
         $permission = Permission::findOrFail($id);
 
         $newDescription = $data['description'] ?? $data['descripcion'] ?? null;
 
-        if ($newDescription === null) {
+        if ($newDescription === null && !isset($data['icon']) && !isset($data['path'])) {
             return response()->json([
                 'message' => 'No hay campos para actualizar.'
             ], 400);
         }
 
-        $permission->description = $newDescription;
+        if ($newDescription !== null) {
+            $permission->description = $newDescription;
+        }
+
+        if (isset($data['icon'])) {
+            $permission->icon = $data['icon'];
+        }
+        if (isset($data['path'])) {
+            $permission->path = $data['path'];
+        }
+
         $permission->save();
 
         return response()->json([
-            'message' => 'Descripción actualizada correctamente.',
+            'message' => 'Permiso actualizado correctamente.',
             'permission' => $permission->load('parent', 'children'),
         ]);
+    }
+
+    /**
+     * POST /api/permisos/crear
+     *
+     * Creates a new permission.
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name'              => ['required', 'string', 'unique:permissions,name'],
+            'guard_name'        => ['nullable', 'string'],
+            'description'       => ['nullable', 'string'],
+            'idPermissionPadre' => ['nullable', 'integer', 'exists:permissions,id'],
+            'icon'              => ['nullable', 'string'],
+            'path'              => ['nullable', 'string']
+        ]);
+
+        $permission = Permission::create([
+            'name'              => $data['name'],
+            'guard_name'        => $data['guard_name'] ?? 'web',
+            'description'       => $data['description'] ?? null,
+            'idPermissionPadre' => $data['idPermissionPadre'] ?? null,
+            'icon'              => $data['icon'] ?? null,
+            'path'              => $data['path'] ?? null
+        ]);
+
+        // Reset cached permissions (Spatie)
+        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
+
+        return response()->json([
+            'message'    => 'Permiso creado correctamente.',
+            'permission' => $permission->load('parent', 'children'),
+        ], 201);
+    }
+    /**
+     * Get all permissions with their hierarchy (no user filtering)
+     */
+    public function getAllPermissionsHierarchy(): JsonResponse
+    {
+        // Obtener TODOS los permisos raíz (sin filtrar por is_menu_item)
+        $rootPermissions = Permission::whereNull('idPermissionPadre')
+            ->get();
+
+        // Construir el árbol completo
+        $permissionsTree = $this->buildFullPermissionsTree($rootPermissions);
+
+        return response()->json($permissionsTree);
+    }
+
+    private function buildFullPermissionsTree($permissions)
+    {
+        $tree = [];
+        foreach ($permissions as $permission) {
+            $children = Permission::where('idPermissionPadre', $permission->id)
+                ->orderBy('name')
+                ->get();
+
+            $builtChildren = $this->buildFullPermissionsTree($children);
+
+            $node = [
+                'id'          => $permission->id,
+                'name'        => $permission->name,
+                'description' => $permission->description,
+                'icon'        => $permission->icon,
+                'path'        => $permission->path,
+            ];
+
+            if (!empty($builtChildren)) {
+                $node['children'] = $builtChildren;
+            }
+
+            $tree[] = $node;
+        }
+        return $tree;
+    }
+
+    /**
+     * Map a permissions tree (id,name,description,icon,path,children)
+     * to the frontend menu structure expected by the client.
+     * Each node becomes: { title, icon, path, requiredPermissions: [name], children }
+     */
+    private function mapTreeToFrontend(array $permissionsTree): array
+    {
+        $result = [];
+        foreach ($permissionsTree as $node) {
+            $mapped = [
+                'title' => $node['description'] ?? $node['name'],
+                'icon' => $node['icon'] ?? null,
+                'path' => $node['path'] ?? '#',
+                'requiredPermissions' => isset($node['name']) ? [$node['name']] : [],
+            ];
+
+            if (!empty($node['children'])) {
+                $mapped['children'] = $this->mapTreeToFrontend($node['children']);
+            }
+
+            $result[] = $mapped;
+        }
+
+        return $result;
     }
 }
