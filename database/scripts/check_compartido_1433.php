@@ -8,8 +8,8 @@ $hm = DB::table('horarioMateria')->where('id', 428)->first();
 echo "horarioMateria #428:\n";
 print_r($hm);
 
-$asig = DB::table('asignacionsesion')->where('idHorarioMateria', 428)->get();
-echo "\nasignacionsesion:\n";
+$asig = DB::table('asignacionSesion')->where('idHorarioMateria', 428)->get();
+echo "\nasignacionSesion:\n";
 foreach ($asig as $a) print_r((array)$a);
 
 $slot = DB::table('horarioMateria')

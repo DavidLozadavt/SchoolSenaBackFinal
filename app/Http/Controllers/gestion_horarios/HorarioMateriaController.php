@@ -141,6 +141,7 @@ class HorarioMateriaController extends Controller
             $esCompartido   = $data['esCompartido'] ?? false;
             $horarios       = $data['horarios'] ?? [];
             $observacion  = $data['observacion'] ?? null;
+            $festivos  = $data['festivos'] ?? false;
 
             if (empty($horarios)) {
                 return response()->json(['message' => 'No se enviaron horarios'], 400);
@@ -165,7 +166,7 @@ class HorarioMateriaController extends Controller
                     'idGradoMateria'              => $idGradoMateria,
                     'idFicha'                     => $idFicha,
                     'idInfraestructura'           => $horarioBase ? $horarioBase->idInfraestructura : null,
-
+                    'festivos'                    => $festivos,
                 ];
 
                 // Determinar ID a excluir si estamos actualizando el horario base
@@ -348,6 +349,9 @@ class HorarioMateriaController extends Controller
                     ->whereTime('horaFinal', '>', $data['horaInicial']);
             });
         });
+
+        // validacion de dias festivos entre horarios
+        $query->where('festivos', $data['festivos'] ?? false);
 
         return $query->exists();
     }

@@ -888,7 +888,7 @@ class FichaController extends Controller
                 }
             }
 
-            $tieneAsignacionSesion = Schema::hasTable('asignacionsesion');
+            $tieneAsignacionSesion = Schema::hasTable('asignacionSesion');
 
             $selectFechas = $tieneAsignacionSesion
                 ? [
@@ -946,7 +946,7 @@ class FichaController extends Controller
             }
 
             if ($tieneAsignacionSesion) {
-                $qb->leftJoin('asignacionsesion as asig', function ($join) use ($idInstructor) {
+                $qb->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
                         ->where('asig.idContrato', '=', $idInstructor);
                 });
@@ -1089,7 +1089,7 @@ class FichaController extends Controller
                 }
             }
 
-            $tieneAsignacionSesion = Schema::hasTable('asignacionsesion');
+            $tieneAsignacionSesion = Schema::hasTable('asignacionSesion');
             $hasInfraestructura = Schema::hasColumn('horarioMateria', 'idInfraestructura');
             $selectAula = $hasInfraestructura
                 ? ['inf.nombreInfraestructura as aula_nombre']
@@ -1140,7 +1140,7 @@ class FichaController extends Controller
             }
 
             if ($tieneAsignacionSesion) {
-                $qb->leftJoin('asignacionsesion as asig', function ($join) use ($idInstructor) {
+                $qb->leftJoin('asignacionSesion as asig', function ($join) use ($idInstructor) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
                         ->where('asig.idContrato', '=', $idInstructor);
                 });
@@ -1531,7 +1531,8 @@ class FichaController extends Controller
                 try {
                     $cv = KeyUtil::lastContractActive();
                     if ($cv && $cv->id) $idContratoVista = (int) $cv->id;
-                } catch (\Throwable $e) {}
+                } catch (\Throwable $e) {
+                }
                 if (!$idContratoVista && !empty($claseData->contrato_id)) $idContratoVista = (int) $claseData->contrato_id;
                 foreach ($this->resolverModalidadRap($idHorarioMateria, $idContratoVista) as $k => $v) {
                     $claseDataArray[$k] = $v;
@@ -1547,10 +1548,10 @@ class FichaController extends Controller
             }
 
             // Franjas del mismo contrato que la clase abierta (alineado con `clasesAsignadasInstructor`:
-            // `hm.idContrato` = contrato del instructor O fila en `asignacionsesion` para ese contrato).
+            // `hm.idContrato` = contrato del instructor O fila en `asignacionSesion` para ese contrato).
             // No usar solo idpersona: mezcla otros contratos del mismo docente y desvirtúa el calendario vs "Mi horario".
             $contratoClase = (int) ($claseData->contrato_id ?? 0);
-            $tieneAsignacionSesionDetalle = Schema::hasTable('asignacionsesion');
+            $tieneAsignacionSesionDetalle = Schema::hasTable('asignacionSesion');
 
             $qbTodasFechas = DB::table('horarioMateria as hm')
                 ->select(array_merge([
@@ -1576,7 +1577,7 @@ class FichaController extends Controller
             $qbTodasFechas = $this->aplicarJoinsMateriaCompetenciaRapSeguimiento($qbTodasFechas);
 
             if ($tieneAsignacionSesionDetalle) {
-                $qbTodasFechas->leftJoin('asignacionsesion as asig', function ($join) use ($contratoClase) {
+                $qbTodasFechas->leftJoin('asignacionSesion as asig', function ($join) use ($contratoClase) {
                     $join->on('hm.id', '=', 'asig.idHorarioMateria')
                         ->where('asig.idContrato', '=', $contratoClase);
                 });
@@ -1600,7 +1601,7 @@ class FichaController extends Controller
             // Obtener sesiones completadas con sus fechas específicas
             $sesionesCompletadas = $this->obtenerSesionesCompletadas($idHorarioMateria);
 
-            $idsCalendario = $todasLasFechasClase->pluck('idHorarioMateria')->map(fn ($v) => (int) $v)->unique()->values()->all();
+            $idsCalendario = $todasLasFechasClase->pluck('idHorarioMateria')->map(fn($v) => (int) $v)->unique()->values()->all();
             $sesionesCompletadasPorHorario = $this->obtenerSesionesCompletadasPorHorarios($idsCalendario);
 
             return response()->json([
@@ -2165,7 +2166,7 @@ class FichaController extends Controller
             ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
             ->join('matriculaAcademica as ma', function ($join) {
                 $join->on('hm.idFicha', '=', 'ma.idFicha')
-                     ->on('gm.idMateria', '=', 'ma.idMateria');
+                    ->on('gm.idMateria', '=', 'ma.idMateria');
             })
             ->join('persona as p', 'ma.idEvaluador', '=', 'p.id')
             ->where('hm.id', $idHorarioMateria)
@@ -2717,19 +2718,19 @@ class FichaController extends Controller
             ->where('horaInicial', $hm->horaInicial)
             ->where('horaFinal', $hm->horaFinal)
             ->pluck('id')
-            ->map(fn ($id) => (int) $id)
+            ->map(fn($id) => (int) $id)
             ->unique()->values()->all();
     }
 
     private function reemplazosVigentesEnSlot(array $slotIds, ?Carbon $ref = null): \Illuminate\Support\Collection
     {
-        if (!Schema::hasTable('asignacionsesion') || empty($slotIds)) {
+        if (!Schema::hasTable('asignacionSesion') || empty($slotIds)) {
             return collect();
         }
 
         $ref = $ref ?? Carbon::today();
 
-        return DB::table('asignacionsesion')
+        return DB::table('asignacionSesion')
             ->whereIn('idHorarioMateria', $slotIds)
             ->where('tipoAsignacion', 'REEMPLAZO')
             ->whereDate('fechaInicio', '<=', $ref)
@@ -2739,13 +2740,13 @@ class FichaController extends Controller
 
     private function horariosCompartidosVigentesEnSlot(array $slotIds, ?Carbon $ref = null): \Illuminate\Support\Collection
     {
-        if (!Schema::hasTable('asignacionsesion') || empty($slotIds)) {
+        if (!Schema::hasTable('asignacionSesion') || empty($slotIds)) {
             return collect();
         }
 
         $ref = $ref ?? Carbon::today();
 
-        return DB::table('asignacionsesion')
+        return DB::table('asignacionSesion')
             ->whereIn('idHorarioMateria', $slotIds)
             ->where('tipoAsignacion', 'HORARIO COMPARTIDO')
             ->whereDate('fechaInicio', '<=', $ref)
@@ -2814,10 +2815,13 @@ class FichaController extends Controller
     private function resolverModalidadRap(int $idHorarioMateria, ?int $idContratoVista, ?string $fechaReferenciaYmd = null): array
     {
         $default = [
-            'tipo_asignacion' => null, 'modalidad_rap' => 'TITULAR',
+            'tipo_asignacion' => null,
+            'modalidad_rap' => 'TITULAR',
             'asignacion_vigente' => false,
-            'asignacion_fecha_inicio' => null, 'asignacion_fecha_fin' => null,
-            'reemplazo_vigente_por_otro' => false, 'es_reemplazante' => false,
+            'asignacion_fecha_inicio' => null,
+            'asignacion_fecha_fin' => null,
+            'reemplazo_vigente_por_otro' => false,
+            'es_reemplazante' => false,
             'instructores_rap' => [],
         ];
 
@@ -2836,10 +2840,10 @@ class FichaController extends Controller
 
         $titularId = $horarioContratoId ?: (
             DB::table('horarioMateria')->whereIn('id', $slotIds)
+            ->whereNotNull('idContrato')->orderBy('id')->value('idContrato')
+            ? (int) DB::table('horarioMateria')->whereIn('id', $slotIds)
                 ->whereNotNull('idContrato')->orderBy('id')->value('idContrato')
-                ? (int) DB::table('horarioMateria')->whereIn('id', $slotIds)
-                    ->whereNotNull('idContrato')->orderBy('id')->value('idContrato')
-                : null
+            : null
         );
 
         $reemplazo = $reemplazosVigentes->first();
