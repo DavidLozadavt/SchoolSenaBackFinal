@@ -165,7 +165,8 @@ class HorarioMateriaController extends Controller
                     'idGradoMateria'              => $idGradoMateria,
                     'idFicha'                     => $idFicha,
                     'idInfraestructura'           => $horarioBase ? $horarioBase->idInfraestructura : null,
-
+                    'horaSesionInicial'           => $horario['horaSesionInicial'] ?? null,
+                    'horaSesionFinal'             => $horario['horaSesionFinal'] ?? null,
                 ];
 
                 // Determinar ID a excluir si estamos actualizando el horario base
@@ -1315,6 +1316,7 @@ class HorarioMateriaController extends Controller
             }
 
             $materias = HorarioMateria::where('idFicha', $idFicha)
+                ->whereIn('estado', ['ASIGNADO', 'PENDIENTE'])
                 ->with('gradoMateria.materia')
                 ->with('contrato.persona')
                 ->with('asignacionSesion.contrato.persona')
@@ -1542,7 +1544,9 @@ class HorarioMateriaController extends Controller
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => $h->contrato->persona ?? null,
                                                 'asignacionSesion' => HorarioMateria::asignacionesEspecialesApi($h),
-                                                'rap' => $h->gradoMateria->materia->nombreMateria
+                                                'rap' => $h->gradoMateria->materia->nombreMateria,
+                                                'horaSesionInicial' => $h->horaSesionInicial,
+                                                'horaSesionFinal' => $h->horaSesionFinal,
                                             ];
                                         })->values(),
                                     'sinAsignar' => $horariosDeHijos
@@ -1559,7 +1563,9 @@ class HorarioMateriaController extends Controller
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => null,
                                                 'asignacionSesion' => HorarioMateria::asignacionesEspecialesApi($h),
-                                                'rap' => $h->gradoMateria->materia->nombreMateria
+                                                'rap' => $h->gradoMateria->materia->nombreMateria,
+                                                'horaSesionInicial' => $h->horaSesionInicial,
+                                                'horaSesionFinal' => $h->horaSesionFinal,
                                             ];
                                         })->values()
                                 ]

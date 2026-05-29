@@ -10,7 +10,7 @@ class AsignacionSesion extends Model
 {
     use HasFactory;
 
-    protected $table = 'asignacionsesion';
+    protected $table = 'asignacionSesion'; // nombres de las tablas en camelCase
 
     public $timestamps = false;
 
