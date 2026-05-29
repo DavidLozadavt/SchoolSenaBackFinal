@@ -27,6 +27,9 @@ class PermissionHierarchyController extends Controller
         // Mapear el árbol a la forma que espera el frontend
         $menuTree = $this->mapTreeToFrontend($permissionsTree);
 
+        // Asegurar que el Dashboard (si existe) aparezca primero por visibilidad
+        $menuTree = $this->ensureDashboardFirst($menuTree);
+
         return response()->json($menuTree);
     }
 
@@ -160,10 +163,49 @@ class PermissionHierarchyController extends Controller
         $rootPermissions = Permission::whereNull('idPermissionPadre')
             ->get();
 
-        // Construir el árbol completo
+        // Construir el árbol completo y mapearlo al formato del frontend
         $permissionsTree = $this->buildFullPermissionsTree($rootPermissions);
+        $menuTree = $this->mapTreeToFrontend($permissionsTree);
 
-        return response()->json($permissionsTree);
+        // Asegurar que el Dashboard (si existe) aparezca primero por visibilidad
+        $menuTree = $this->ensureDashboardFirst($menuTree);
+
+        return response()->json($menuTree);
+    }
+
+    /**
+     * Move a dashboard-like node to the front of the menu array if present.
+     * Detection is fuzzy: checks title, path and requiredPermissions for the word "dashboard",
+     * and common paths like "/" or "/dashboard".
+     *
+     * @param array $menu
+     * @return array
+     */
+    private function ensureDashboardFirst(array $menu): array
+    {
+        $dashboardIndex = null;
+        foreach ($menu as $i => $node) {
+            $title = isset($node['title']) ? strtolower($node['title']) : '';
+            $path = $node['path'] ?? '';
+            $required = $node['requiredPermissions'] ?? [];
+            $reqString = strtolower(implode(' ', $required));
+
+            if (strpos($title, 'dashboard') !== false
+                || $path === '/'
+                || $path === '/dashboard'
+                || strpos($reqString, 'dashboard') !== false) {
+                $dashboardIndex = $i;
+                break;
+            }
+        }
+
+        if ($dashboardIndex !== null && $dashboardIndex > 0) {
+            $dashboard = $menu[$dashboardIndex];
+            array_splice($menu, $dashboardIndex, 1);
+            array_unshift($menu, $dashboard);
+        }
+
+        return $menu;
     }
 
     private function buildFullPermissionsTree($permissions)
