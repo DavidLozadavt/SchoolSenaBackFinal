@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Evento;
 use App\Models\GrupoMultimedia;
 use App\Models\MultimediaHistorias;
+use App\Models\ParticipanteEvento;
+use App\Models\Person;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,10 +20,48 @@ class EventoController extends Controller
     public function index(Request $request)
     {
         $idCompany = KeyUtil::idCompany();
-        $eventos = Evento::where('idCompany', $idCompany)
-            ->with(['area', 'grupoMultimedia'])
-            ->orderBy('fechaInicial', 'desc')
-            ->get();
+        $search    = $request->input('search');
+        $archived  = filter_var($request->input('archived', false), FILTER_VALIDATE_BOOLEAN);
+
+        // Auto-finalize events that have already ended
+        $endDatetimeSql = "CASE 
+            WHEN hora_final IS NOT NULL THEN CONCAT(COALESCE(fechaFinal, fechaInicial), ' ', hora_final)
+            ELSE DATE_ADD(CONCAT(fechaInicial, ' ', hora), INTERVAL 2 HOUR)
+        END";
+
+        Evento::where('idCompany', $idCompany)
+            ->where('estado', '!=', 'FINALIZADO')
+            ->whereRaw("{$endDatetimeSql} < ?", [Carbon::now()])
+            ->update(['estado' => 'FINALIZADO']);
+
+        $query = Evento::where('idCompany', $idCompany)
+            ->with([
+                'area',
+                'grupoMultimedia',
+                'formularioInterno:id,titulo,colorTema,estado',
+            ]);
+
+        if ($archived) {
+            $query->where('estado', 'FINALIZADO');
+        } else {
+            $query->where(function($q) {
+                $q->where('estado', '!=', 'FINALIZADO')
+                  ->orWhere(function($sub) {
+                      $sub->where('estado', 'FINALIZADO')
+                          ->where('updated_at', '>=', now()->subHours(12));
+                  });
+            });
+        }
+
+        if ($search) {
+            $query->where(function($q) use ($search) {
+                $q->where('nombre', 'like', "%{$search}%")
+                  ->orWhere('descripcion', 'like', "%{$search}%");
+            });
+        }
+
+        $eventos = $query->orderBy('created_at', 'desc')
+            ->paginate($request->input('per_page', $request->input('limit', 6)));
 
         return response()->json($eventos);
     }
@@ -68,6 +108,9 @@ class EventoController extends Controller
             $evento->estado       = $request->input('estado', 'PENDIENTE');
             $evento->esPublico    = filter_var($request->input('esPublico', true), FILTER_VALIDATE_BOOLEAN);
             $evento->idArea       = $request->input('idArea') ?: null;
+            $evento->formUrl      = $request->input('formUrl');
+            $evento->formProvider = $request->input('formProvider');
+            $evento->idFormularioInterno = $request->input('idFormularioInterno');
 
             // Manejo de archivo promocional del evento
             if ($request->hasFile('archivo')) {
@@ -79,7 +122,7 @@ class EventoController extends Controller
 
             // LÓGICA AUTOMÁTICA: Crear Historia Multimedia si se solicita
             if (filter_var($request->input('crearHistoria'), FILTER_VALIDATE_BOOLEAN)) {
-                $this->crearHistoriaMultimedia($evento);
+                $this->crearHistoriaMultimedia($evento, $request->input('cancion'));
             }
 
             DB::commit();
@@ -123,6 +166,9 @@ class EventoController extends Controller
         if ($request->has('estado'))       $evento->estado       = $request->input('estado');
         if ($request->has('esPublico'))    $evento->esPublico    = filter_var($request->input('esPublico'), FILTER_VALIDATE_BOOLEAN);
         $evento->idArea = $request->input('idArea') ?: null;
+        if ($request->has('formUrl'))      $evento->formUrl      = $request->input('formUrl');
+        if ($request->has('formProvider')) $evento->formProvider = $request->input('formProvider');
+        if ($request->has('idFormularioInterno')) $evento->idFormularioInterno = $request->input('idFormularioInterno');
 
         if ($request->hasFile('archivo')) {
             $path = $request->file('archivo')->store('eventos', ['disk' => 'public']);
@@ -131,9 +177,8 @@ class EventoController extends Controller
 
         $evento->save();
 
-        // LÓGICA AUTOMÁTICA: Crear Historia Multimedia si se solicita (durante edición)
         if (filter_var($request->input('crearHistoria'), FILTER_VALIDATE_BOOLEAN)) {
-            $this->crearHistoriaMultimedia($evento);
+            $this->crearHistoriaMultimedia($evento, $request->input('cancion'));
         }
 
         return response()->json([
@@ -145,7 +190,7 @@ class EventoController extends Controller
     /**
      * Lógica para crear historia multimedia desde un evento
      */
-    private function crearHistoriaMultimedia(Evento $evento)
+    private function crearHistoriaMultimedia(Evento $evento, $cancion = null)
     {
         // Solo si tiene URL y no tiene ya un grupo vinculado
         if (!$evento->url || $evento->idGrupoMultimedia) {
@@ -172,6 +217,9 @@ class EventoController extends Controller
             $historia->tipo              = 'historia';
             $historia->orden             = 1;
             $historia->descripcion       = $evento->descripcion;
+            if ($cancion) {
+                $historia->cancion = is_string($cancion) ? $cancion : json_encode($cancion);
+            }
             $historia->save();
 
             // 3. Vincular el grupo al evento
@@ -191,5 +239,115 @@ class EventoController extends Controller
         $evento->delete();
 
         return response()->json(['message' => 'Evento eliminado']);
+    }
+
+    /**
+     * Asegura que el usuario logueado tenga una persona asociada
+     */
+    private function obtenerOAsociarPersona()
+    {
+        $user = auth()->user();
+        if (!$user) {
+            return null;
+        }
+
+        if ($user->idpersona) {
+            return $user->idpersona;
+        }
+
+        // Buscar si ya existe una persona con el mismo email
+        $persona = Person::where('email', $user->email)->first();
+
+        if (!$persona) {
+            // Obtener primeros IDs válidos para evitar fallos de claves foráneas
+            $tipoId = DB::table('tipoIdentificacion')->value('id') ?? 1;
+            $ciudadId = DB::table('ciudad')->value('id') ?? 1;
+
+            $identificacion = 'ADMIN_' . $user->id . '_' . time();
+            $nameParts = explode(' ', $user->name ?: 'Admin Sistema');
+            $nombre1 = $nameParts[0] ?? 'Admin';
+            $nombre2 = $nameParts[1] ?? '';
+            $apellido1 = $nameParts[2] ?? 'Sistema';
+            $apellido2 = $nameParts[3] ?? '';
+
+            $persona = new Person();
+            $persona->identificacion = $identificacion;
+            $persona->nombre1 = $nombre1;
+            $persona->nombre2 = $nombre2;
+            $persona->apellido1 = $apellido1;
+            $persona->apellido2 = $apellido2;
+            $persona->fechaNac = '1990-01-01';
+            $persona->direccion = 'Calle Falsa 123';
+            $persona->email = $user->email ?? 'admin@virtualt.org';
+            $persona->telefonoFijo = '5555555';
+            $persona->celular = '3000000000';
+            $persona->perfil = 'N/A';
+            $persona->sexo = 'M';
+            $persona->rh = 'O+';
+            $persona->rutaFoto = '/default/user.svg';
+            $persona->idTipoIdentificacion = $tipoId;
+            $persona->idCiudad = $ciudadId;
+            $persona->idCiudadNac = $ciudadId;
+            $persona->idCiudadUbicacion = $ciudadId;
+            $persona->save();
+        }
+
+        // Vincular persona al usuario
+        $user->idpersona = $persona->id;
+        $user->save();
+
+        return $persona->id;
+    }
+
+    /**
+     * Verificar si el usuario actual está inscrito en el evento
+     */
+    public function checkRegistration($id)
+    {
+        $idPersona = $this->obtenerOAsociarPersona();
+        
+        if (!$idPersona) return response()->json(['inscrito' => false]);
+
+        $inscrito = ParticipanteEvento::where('idEvento', $id)
+            ->where('idPersona', $idPersona)
+            ->exists();
+
+        return response()->json(['inscrito' => $inscrito]);
+    }
+
+    /**
+     * Inscribir al usuario actual en el evento
+     */
+    public function register(Request $request, $id)
+    {
+        $idPersona = $this->obtenerOAsociarPersona();
+
+        if (!$idPersona) {
+            return response()->json(['message' => 'El usuario no tiene una persona asociada'], 400);
+        }
+        $registro = ParticipanteEvento::updateOrCreate(
+            ['idEvento' => $id, 'idPersona' => $idPersona],
+            ['fechaRegistro' => now(), 'estado' => 'CONFIRMADO']
+        );
+
+        return response()->json([
+            'message' => 'Te has inscrito correctamente al evento',
+            'registro' => $registro
+        ]);
+    }
+
+    /**
+     * Obtener lista de inscritos (Solo para Admin/Creador)
+     */
+    public function getAttendees($id)
+    {
+        // Solo el creador o alguien de la misma empresa (según lógica de negocio)
+        $attendees = ParticipanteEvento::where('idEvento', $id)
+            ->with(['persona' => function($query) {
+                $query->select('id', 'nombre1', 'nombre2', 'apellido1', 'apellido2', 'email');
+            }])
+            ->get();
+
+        return response()->json($attendees);
     }
 }

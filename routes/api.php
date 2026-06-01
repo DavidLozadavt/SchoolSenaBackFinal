@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\EventoController;
+use App\Http\Controllers\GestionEventoHermanoController;
+use App\Http\Controllers\GestionEventoItemController;
 use App\Http\Controllers\LyraController;
 
 
@@ -61,6 +63,7 @@ use App\Http\Controllers\gestion_nomina\TipoIncapacidadController;
 use App\Http\Controllers\gestion_afiliacion\TipoVehiculoController;
 use App\Http\Controllers\gestion_chat\ComentarioArchivosController;
 use App\Http\Controllers\gestion_rol_permisos\AsignacionRolPermiso;
+use App\Http\Controllers\gestion_rol_permisos\PermissionHierarchyController;
 use App\Http\Controllers\gestion_transporte\AgendarViajeController;
 use App\Http\Controllers\gestion_nomina\SolicitudVacacionController;
 use App\Http\Controllers\gestion_afiliacion\TipoAfiliacionController;
@@ -174,6 +177,10 @@ use App\Http\Controllers\InstructorLiderController;
 
 Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
+// Formularios Públicos
+Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
+Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
+
 Route::group([
     'middleware' => 'api',
 ], function () {
@@ -207,6 +214,18 @@ Route::post('company_update', [CompanyController::class, 'update']);
 Route::get('permisos', [AsignacionRolPermiso::class, 'index']);
 Route::get('permisos_rol', [AsignacionRolPermiso::class, 'permissionsByRole']);
 Route::put('asignar_rol_permiso', [AsignacionRolPermiso::class, 'assignFunctionality']);
+
+Route::middleware('auth:api')->group(function () {
+    // Endpoint to create a permission (used by frontend)
+    Route::post('permisos/crear', [PermissionHierarchyController::class, 'store']);
+    Route::match(['put', 'post'], 'permisos/{id}', [PermissionHierarchyController::class, 'update'])->whereNumber('id');
+
+});
+
+// jerarquía de permisos
+Route::get('permisos_jerarquia', [PermissionHierarchyController::class, 'index']);
+Route::post('permissions/{id}/set-parent', [PermissionHierarchyController::class, 'setParent'])->whereNumber('id');
+Route::get('menu/dynamic', [PermissionHierarchyController::class, 'getAllPermissionsHierarchy']);
 
 // notificaciones
 Route::resource('notificaciones', NotificacionController::class);
@@ -1227,6 +1246,8 @@ Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'upda
 Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
 Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
 Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+Route::get('fichas/instructor/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
+Route::get('fichas/instructor/{idInstructor}/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
 Route::get('fichas/estudiante/clases', [FichaController::class, 'clasesEstudiante']);
 Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
 Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
@@ -1253,6 +1274,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
     Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
     Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
+    Route::get('ambiente-virtual/instructor/mis-actividades', [ActividadController::class, 'misActividadesInstructor']);
     Route::get('ambiente-virtual/material-apoyo', [ActividadController::class, 'materialApoyoAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta-cuestionario', [ActividadController::class, 'responderCuestionarioAprendiz']);
@@ -1437,6 +1459,11 @@ Route::put('update_assistance',[AsistenciaController::class, 'updateAssistance']
 Route::post('update_assistance',[AsistenciaController::class, 'updateAssistance']);
 Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
 Route::get('justificaciones-inasistencia/{id}/soporte',[AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
+Route::post('solicitar-justificacion-asistencia', [AsistenciaController::class, 'solicitarJustificacionAsistencia']);
+Route::post('solicitar-justificacion-asistencia-rango', [AsistenciaController::class, 'solicitarJustificacionAsistenciaRango']);
+Route::get('justificaciones-pendientes-instructor', [AsistenciaController::class, 'justificacionesPendientesInstructor']);
+Route::post('responder-justificacion-asistencia', [AsistenciaController::class, 'responderJustificacionAsistencia']);
+Route::get('asistencias-instructor-global', [AsistenciaController::class, 'asistenciasInstructorGlobal']);
 
 //Intructores:
 Route::middleware('auth:api')->group(function () {
@@ -1584,7 +1611,19 @@ Route::middleware('auth:api')->group(function () {
     Route::post('eventos-multimedia', [EventoController::class, 'store']);
     Route::post('eventos-multimedia/{id}', [EventoController::class, 'update']);
     Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy']);
+    
+    // Rutas de inscripción
+    Route::get('eventos-multimedia/{id}/check-registration', [EventoController::class, 'checkRegistration']);
+    Route::post('eventos-multimedia/{id}/register', [EventoController::class, 'register']);
+    Route::get('eventos-multimedia/{id}/attendees', [EventoController::class, 'getAttendees']);
 
+    // --- FORMULARIOS INTERNOS ---
+    Route::get('formularios', [App\Http\Controllers\FormularioController::class, 'index']);
+    Route::post('formularios', [App\Http\Controllers\FormularioController::class, 'store']);
+    Route::get('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'show']);
+    Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update']);
+    Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy']);
+    Route::get('formularios/{id}/respuestas', [App\Http\Controllers\FormularioController::class, 'respuestas']);
 
 });
 
@@ -1618,3 +1657,33 @@ Route::middleware('auth:api')->group(function () {
     Route::post('solicitud-materia/rechazar/{id}', [SolicitudMateriaController::class, 'rechazar']);
     Route::get('solicitud-materia/materias-ficha', [SolicitudMateriaController::class, 'getMateriaByFicha']);
 });
+
+// Eventos y Control de Actividades (QR Scanner)
+Route::get('/items', [GestionEventoItemController::class, 'index']);
+Route::post('/items', [GestionEventoItemController::class, 'store']);
+Route::get('/items/{id}', [GestionEventoItemController::class, 'show']);
+Route::put('/items/{id}', [GestionEventoItemController::class, 'update']);
+Route::delete('/items/{id}', [GestionEventoItemController::class, 'destroy']);
+
+Route::get('evento/invitado/{token}', [GestionEventoHermanoController::class, 'getByToken']);
+Route::get('/items/{itemId}/estado', [GestionEventoHermanoController::class, 'estadoPorItem']);
+
+Route::prefix('invitado')->group(function () {
+    Route::get('/stats', [GestionEventoHermanoController::class, 'stats']);
+    Route::get('/export-csv', [GestionEventoHermanoController::class, 'exportCsv']);
+    Route::get('/historial-scan', [GestionEventoHermanoController::class, 'historialScan']);
+    Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']); 
+    Route::get('/', [GestionEventoHermanoController::class, 'index']);
+    Route::get('/token/{token}', [GestionEventoHermanoController::class, 'getByToken']);
+    Route::get('/token/{token}/items', [GestionEventoHermanoController::class, 'getItemsByToken']);
+    Route::get('/token/{token}/auto-claim', [GestionEventoHermanoController::class, 'autoClaimByToken']);
+    Route::post('/token/{token}/claim-all', [GestionEventoHermanoController::class, 'claimAllItemsByToken']);
+    Route::post('/', [GestionEventoHermanoController::class, 'store']);
+    Route::post('/generar-qrs', [GestionEventoHermanoController::class, 'generarQrs']);
+    Route::post('/{id}/qr', [GestionEventoHermanoController::class, 'guardarQrImagen']);
+    Route::post('/token/{token}/item/{itemId}/toggle', [GestionEventoHermanoController::class, 'toggleItem']);
+    Route::get('/{id}', [GestionEventoHermanoController::class, 'show']); 
+    Route::put('/{id}', [GestionEventoHermanoController::class, 'update']);
+    Route::delete('/{id}', [GestionEventoHermanoController::class, 'destroy']);
+});
+

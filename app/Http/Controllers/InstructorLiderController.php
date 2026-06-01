@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Ficha;
 use App\Models\Matricula;
 use App\Models\NovedadesAprendiz;
+use App\Models\NotificacionSistema;
+use App\Jobs\SendBasicEmail;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -104,6 +106,44 @@ class InstructorLiderController extends Controller
             // Actualizar la matricula
             $matricula->estado = $request->nuevoEstado;
             $matricula->save();
+
+            // Enviar notificación y correo al aprendiz
+            $persona = $matricula->person;
+            if ($persona) {
+                $usuario = $persona->usuario;
+
+                if ($usuario) {
+                    // Notificación en el sistema
+                    NotificacionSistema::create([
+                        'fecha' => now()->toDateString(),
+                        'hora' => now()->toTimeString(),
+                        'asunto' => 'Cambio de estado de matrícula',
+                        'mensaje' => "Su estado de matrícula ha sido cambiado a: " . $request->nuevoEstado .
+                            ($request->observacion ? ". Observación: " . $request->observacion : ""),
+                        'estado_id' => 1,
+                        'idUsuarioReceptor' => $usuario->id,
+                        'idUsuarioRemitente' => $user->id,
+                        'idTipoNotificacion' => 1,
+                        'idEmpresa' => KeyUtil::idCompany(),
+                        'route' => '/'
+                    ]);
+                }
+
+                $email = $usuario ? $persona->email : $usuario->email;
+                if ($email) {
+                    $nombre = trim($persona->nombre1 . ' ' . $persona->apellido1);
+                    $asunto = 'Actualización de Estado de Matrícula';
+                    $mensaje = "Estimado(a) $nombre,\n\n"
+                        . "Le informamos que el estado de su matrícula ha sido actualizado a: " . $request->nuevoEstado . ".\n\n"
+                        . ($request->observacion ? "Observación: " . $request->observacion . "\n\n" : "")
+                        . "Si tiene alguna inquietud, puede comunicarse con el equipo administrativo.\n\n"
+                        . "Atentamente,\n"
+                        . "Equipo Administrativo\n"
+                        . "Sistema de Gestión Académica";
+
+                    SendBasicEmail::dispatch($email, $asunto, $mensaje);
+                }
+            }
 
             return response()->json([
                 'status' => 'success',

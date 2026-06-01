@@ -46,4 +46,20 @@ class Evento extends Model
     {
         return $this->belongsTo(GrupoMultimedia::class, 'idGrupoMultimedia');
     }
+
+    /**
+     * Relación con el formulario interno opcional
+     */
+    public function formularioInterno()
+    {
+        return $this->belongsTo(Formulario::class, 'idFormularioInterno');
+    }
+
+    /**
+     * Relación con las actividades / items del evento
+     */
+    public function items()
+    {
+        return $this->hasMany(Item::class, 'idEvento');
+    }
 }

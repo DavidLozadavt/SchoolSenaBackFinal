@@ -55,7 +55,19 @@ class HorarioMateria extends Model
     {
         return $this->hasMany(DetalleRmi::class, 'idHorarioMateria', 'id');
     }
-    // En HorarioMateria.php - ejecutar al crear/actualizar un horario
+
+    public static function asignacionesEspecialesApi(self $horario): array
+    {
+        $asignaciones = $horario->relationLoaded('asignacionSesion')
+            ? $horario->asignacionSesion
+            : $horario->asignacionSesion()->with('contrato.persona')->get();
+
+        return $asignaciones
+            ->map(fn (AsignacionSesion $a) => $a->toAsignacionSesionApi())
+            ->values()
+            ->all();
+    }
+
     public static function generarRmis(HorarioMateria $horario): void
     {
         $inicio = \Carbon\Carbon::parse($horario->fechaInicial)->startOfMonth();
@@ -66,13 +78,11 @@ class HorarioMateria extends Model
         while ($cursor->lte($fin)) {
             $periodo = $cursor->format('Y-m');
 
-            // Busca o crea el RMI para ese periodo
             $rmi = Rmi::firstOrCreate(
                 ['periodo' => $periodo],
                 ['estado' => 'PENDIENTE', 'observacion' => null]
             );
 
-            // Crea el detalle si no existe
             DetalleRmi::firstOrCreate(
                 [
                     'idRmi'            => $rmi->id,
@@ -89,29 +99,26 @@ class HorarioMateria extends Model
     }
 
     /**
-     * Duplica un horario para una asignación compartida.
-     * Esto permite que el instructor secundario tenga su propio registro
-     * para el seguimiento de RMI y sesiones.
+     * Duplica un horario para el instructor secundario de un horario compartido.
      */
-    public static function duplicarParaAsignacion(AsignacionSesion $asignacion)
+    public static function duplicarParaAsignacionCompartida(AsignacionSesion $asignacion): ?self
     {
         $original = self::find($asignacion->idHorarioMateria);
-        if (!$original) return null;
+        if (!$original || !$asignacion->idContrato) {
+            return null;
+        }
 
-        // Intentar reciclar un horario existente para este mismo slot que no tenga contrato (placeholder)
-        // Esto evita crear múltiples duplicados para el mismo bloque compartido
         $clon = self::where('idFicha', $original->idFicha)
             ->where('idGradoMateria', $original->idGradoMateria)
             ->where('idDia', $original->idDia)
             ->where('horaInicial', $original->horaInicial)
             ->where('horaFinal', $original->horaFinal)
             ->where('fechaInicial', $original->fechaInicial)
-            ->whereNull('idContrato')
+            ->where('idContrato', $asignacion->idContrato)
             ->where('id', '!=', $original->id)
             ->first();
 
         if (!$clon) {
-            // Si no hay ninguno para reciclar, lo replicamos del original
             $clon = $original->replicate();
         }
 
@@ -119,14 +126,13 @@ class HorarioMateria extends Model
         $clon->fechaInicial = $asignacion->fechaInicio;
         $clon->fechaFinal = $asignacion->fechaFin;
         $clon->estado = 'ASIGNADO';
-        
+
         if ($asignacion->observacion) {
             $clon->observacion = $asignacion->observacion;
         }
-        
+
         $clon->save();
 
-        // Generar RMIs para el nuevo contrato en este horario
         self::generarRmis($clon);
 
         return $clon;

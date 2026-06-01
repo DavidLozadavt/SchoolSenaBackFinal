@@ -342,32 +342,37 @@ class ActividadController extends Controller
                 }
             }
 
-            $materialesPorRap = [];
-            $tablaMar = (new MaterialApoyoRap())->getTable();
-            if ($idsActividad->isNotEmpty() && Schema::hasTable($tablaMar)) {
-                $fichaIds = $registros->pluck('idFichaContext')->filter()->map(fn ($v) => (int) $v)->unique()->values();
-                $rapIds = $registros->pluck('idMateria')->filter()->map(fn ($v) => (int) $v)->unique()->values();
+            // Material de apoyo propio de cada actividad (materialApoyoActividad + asignacionMaterialApoyoActividad).
+            // No mezclar con materialApoyoRap (Biblioteca de conocimiento).
+            if ($idsActividad->isNotEmpty()
+                && Schema::hasTable('asignacionMaterialApoyoActividad')
+                && Schema::hasTable((new MaterialApoyoActividad())->getTable())) {
+                $tablaMa = (new MaterialApoyoActividad())->getTable();
+                $filasMaterial = DB::table('asignacionMaterialApoyoActividad as ama')
+                    ->join($tablaMa.' as ma', 'ama.idMaterialApoyo', '=', 'ma.id')
+                    ->whereIn('ama.idActividad', $idsActividad->all())
+                    ->whereNotNull('ama.idMaterialApoyo')
+                    ->select([
+                        'ama.idActividad',
+                        'ma.id',
+                        'ma.titulo',
+                        'ma.descripcion',
+                        'ma.urlDocumento',
+                        'ma.urlAdicional',
+                    ])
+                    ->orderBy('ma.id')
+                    ->get();
 
-                if ($fichaIds->isNotEmpty() && $rapIds->isNotEmpty()) {
-                    $qMatRap = MaterialApoyoRap::query()
-                        ->whereIn('idFicha', $fichaIds->all())
-                        ->whereIn('idRap', $rapIds->all());
-                    $materialesRap = $qMatRap->orderByDesc('id')->get();
-
-                    foreach ($materialesRap as $mat) {
-                        $key = ((int) $mat->idFicha) . '_' . ((int) $mat->idRap);
-                        $urlVid = Schema::hasColumn($tablaMar, 'urlVideo') ? ($mat->urlVideo ?? null) : null;
-                        $materialesPorRap[$key][] = [
-                            'id' => (int) $mat->id,
-                            'titulo' => $mat->titulo,
-                            'descripcion' => $mat->descripcion,
-                            'urlDocumento' => $mat->urlDocumento,
-                            'urlDocumentoUrl' => $this->publicUrl($mat->urlDocumento),
-                            'urlAdicional' => $mat->urlAdicional,
-                            'urlVideo' => $urlVid,
-                            'urlVideoUrl' => $this->publicUrl($urlVid),
-                        ];
-                    }
+                foreach ($filasMaterial as $mat) {
+                    $idAct = (int) $mat->idActividad;
+                    $materialesPorActividad[$idAct][] = [
+                        'id' => (int) $mat->id,
+                        'titulo' => $mat->titulo,
+                        'descripcion' => $mat->descripcion,
+                        'urlDocumento' => $mat->urlDocumento,
+                        'urlDocumentoUrl' => $this->publicUrl($mat->urlDocumento),
+                        'urlAdicional' => $mat->urlAdicional,
+                    ];
                 }
             }
 
@@ -441,7 +446,7 @@ class ActividadController extends Controller
                         /** Misma regla que App\Models\Person::getRutaFotoUrl (url()), no solo Storage::url sobre /storage/… */
                         'rutaFotoUrl' => $this->resolvePersonaPublicFotoUrl($rutaFotoPersonaCruda),
                     ],
-                    'materialesApoyo' => $materialesPorRap[((int) ($row->idFichaContext ?? 0)) . '_' . ((int) ($row->idMateria ?? 0))] ?? [],
+                    'materialesApoyo' => $materialesPorActividad[(int) $row->idActividad] ?? [],
                     'estadoVisual' => $estadoVisual,
                     'fechaVencida' => $fechaVencida,
                     'fechaInactiva' => $fechaInactiva,
@@ -667,6 +672,251 @@ class ActividadController extends Controller
             return response()->json(['data' => $result]);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Instructor/admin: actividades creadas o asignadas, agrupadas por actividad + ficha (una fila por grupo).
+     */
+    public function misActividadesInstructor(Request $request): JsonResponse
+    {
+        try {
+            if (! Schema::hasTable('calificacionActividad')) {
+                return response()->json(['data' => []]);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+            if (! $idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            $colFicha = Schema::hasColumn($tableMa, 'idFicha')
+                ? 'idFicha'
+                : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada')
+                    ? 'idAsignacionPeriodoProgramaJornada'
+                    : 'idFicha');
+
+            $selectHm = Schema::hasTable('horarioMateria')
+                ? DB::raw('(
+                    SELECT hm2.id FROM horarioMateria hm2
+                    INNER JOIN gradoMateria gm2 ON hm2.idGradoMateria = gm2.id
+                    WHERE hm2.idFicha = ma.'.$colFicha.' AND gm2.idMateria = a.idMateria
+                    ORDER BY hm2.id DESC LIMIT 1
+                ) as idHorarioMateria')
+                : DB::raw('NULL as idHorarioMateria');
+
+            $qb = DB::table('calificacionActividad as ca')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->join($tableMa.' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->join('ficha as f', 'ma.'.$colFicha, '=', 'f.id')
+                ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+                ->leftJoin('materia as mat_padre', 'mat.idMateriaPadre', '=', 'mat_padre.id')
+                ->leftJoin('persona as p_creador', 'a.idPersona', '=', 'p_creador.id')
+                ->where(function ($q) use ($idPersona) {
+                    $q->where('ca.idPersona', $idPersona)
+                        ->orWhere('a.idPersona', $idPersona);
+                });
+
+            $registros = (clone $qb)
+                ->select([
+                    'ca.id as idCalificacionActividad',
+                    'ca.idActividad',
+                    'ca.idGrupo',
+                    'ca.archivo',
+                    'ca.ComentarioEstudiante',
+                    'ca.ComentarioDocente',
+                    'ca.calificacionNumerica',
+                    'ca.fechaInicial',
+                    'ca.fechaFinal',
+                    'm.id as idMatricula',
+                    'ma.'.$colFicha.' as idFicha',
+                    'f.codigo as codigoFicha',
+                    'a.tituloActividad',
+                    'a.descripcionActividad',
+                    'a.tipoActividad',
+                    'a.idMateria',
+                    'mat.codigo as codigoMateria',
+                    'mat.nombreMateria',
+                    'mat.idMateriaPadre',
+                    DB::raw('CASE
+                        WHEN mat.idMateriaPadre IS NOT NULL AND mat.idMateriaPadre > 0 AND mat_padre.id IS NOT NULL THEN mat_padre.nombreMateria
+                        ELSE mat.nombreMateria
+                    END as competenciaNombre'),
+                    DB::raw('CASE
+                        WHEN mat.idMateriaPadre IS NOT NULL AND mat.idMateriaPadre > 0 AND mat_padre.id IS NOT NULL THEN mat.nombreMateria
+                        ELSE NULL
+                    END as rapNombre'),
+                    DB::raw('CASE
+                        WHEN mat.idMateriaPadre IS NOT NULL AND mat.idMateriaPadre > 0 AND mat_padre.id IS NOT NULL THEN mat.id
+                        ELSE NULL
+                    END as idRap'),
+                    DB::raw('CASE
+                        WHEN mat.idMateriaPadre IS NOT NULL AND mat.idMateriaPadre > 0 AND mat_padre.id IS NOT NULL THEN mat.codigo
+                        ELSE mat.codigo
+                    END as codigoRap'),
+                    'p_creador.id as idPersonaCreador',
+                    'p_creador.nombre1 as creadorNombre1',
+                    'p_creador.nombre2 as creadorNombre2',
+                    'p_creador.apellido1 as creadorApellido1',
+                    'p_creador.apellido2 as creadorApellido2',
+                    'p_creador.rutaFoto as creadorRutaFoto',
+                    $selectHm,
+                ])
+                ->orderByDesc('ca.id')
+                ->get();
+
+            $idsCalifCuestionarios = $registros
+                ->where('tipoActividad', 'cuestionario')
+                ->pluck('idCalificacionActividad')
+                ->unique()
+                ->filter()
+                ->values();
+            $cuestionariosConRespuestas = collect();
+            $tblRc = Schema::hasTable('respuestaCuestionarios') ? 'respuestaCuestionarios' : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            if ($tblRc && $idsCalifCuestionarios->isNotEmpty()) {
+                $cuestionariosConRespuestas = DB::table($tblRc)
+                    ->whereIn('idCalificacion', $idsCalifCuestionarios->all())
+                    ->select('idCalificacion')
+                    ->distinct()
+                    ->pluck('idCalificacion');
+            }
+
+            $grupos = [];
+            foreach ($registros as $row) {
+                $idAct = (int) $row->idActividad;
+                $idFicha = (int) ($row->idFicha ?? 0);
+                if ($idAct <= 0 || $idFicha <= 0) {
+                    continue;
+                }
+                $clave = $idAct.'_'.$idFicha;
+                if (! isset($grupos[$clave])) {
+                    $grupos[$clave] = [
+                        'meta' => $row,
+                        'vistosMatricula' => [],
+                        'estados' => [],
+                        'tieneGrupo' => false,
+                        'fechaInicial' => null,
+                        'fechaLimite' => null,
+                    ];
+                }
+                $idMat = $row->idMatricula ?? null;
+                if ($idMat !== null && isset($grupos[$clave]['vistosMatricula'][$idMat])) {
+                    continue;
+                }
+                if ($idMat !== null) {
+                    $grupos[$clave]['vistosMatricula'][$idMat] = true;
+                }
+                if (! empty($row->idGrupo)) {
+                    $grupos[$clave]['tieneGrupo'] = true;
+                }
+                $fi = $row->fechaInicial ? (string) $row->fechaInicial : null;
+                $ff = $row->fechaFinal ? (string) $row->fechaFinal : null;
+                if ($fi && ($grupos[$clave]['fechaInicial'] === null || $fi < $grupos[$clave]['fechaInicial'])) {
+                    $grupos[$clave]['fechaInicial'] = $fi;
+                }
+                if ($ff && ($grupos[$clave]['fechaLimite'] === null || $ff > $grupos[$clave]['fechaLimite'])) {
+                    $grupos[$clave]['fechaLimite'] = $ff;
+                }
+                $tieneRespuestasCuestionario = ($row->tipoActividad ?? '') === 'cuestionario'
+                    && $cuestionariosConRespuestas->contains($row->idCalificacionActividad);
+                $rowEstado = $row;
+                $comentarioEst = trim((string) ($row->ComentarioEstudiante ?? ''));
+                if ($comentarioEst !== '' && trim((string) ($row->archivo ?? '')) === ''
+                    && strtolower((string) ($row->tipoActividad ?? '')) !== 'cuestionario') {
+                    $rowEstado = (object) array_merge((array) $row, ['archivo' => $comentarioEst]);
+                }
+                $estado = $this->resolverEstadoActividadAprendiz($rowEstado, $tieneRespuestasCuestionario);
+                $grupos[$clave]['estados'][] = $estado;
+            }
+
+            $tz = config('app.timezone');
+            $now = now($tz);
+            $data = [];
+            foreach ($grupos as $g) {
+                $row = $g['meta'];
+                $estados = $g['estados'];
+                $totalAsignados = count($estados);
+                $conteo = array_count_values($estados);
+                $totalCalificados = (int) ($conteo['CALIFICADO'] ?? 0);
+                $totalPorEvaluar = (int) ($conteo['POR_EVALUAR'] ?? 0);
+                $totalPendientes = (int) ($conteo['PENDIENTE'] ?? 0);
+                $totalSinEntregar = (int) ($conteo['SIN_ENTREGAR'] ?? 0);
+                $totalCorreccion = (int) ($conteo['CORRECCION_SOLICITADA'] ?? 0);
+                $totalEntregaron = $totalPorEvaluar + $totalCalificados + $totalCorreccion;
+
+                $fechaLimite = $g['fechaLimite'];
+                $vencida = false;
+                if ($fechaLimite) {
+                    $vencida = $now->greaterThan(\Carbon\Carbon::parse($fechaLimite, $tz));
+                }
+
+                if ($totalAsignados === 0) {
+                    $estadoGeneral = 'no_asignada';
+                } elseif ($totalPorEvaluar > 0 || $totalCorreccion > 0) {
+                    $estadoGeneral = 'por_evaluar';
+                } elseif ($totalCalificados === $totalAsignados) {
+                    $estadoGeneral = 'calificada';
+                } elseif ($totalCalificados > 0) {
+                    $estadoGeneral = 'parcial';
+                } elseif ($vencida) {
+                    $estadoGeneral = 'vencida';
+                } else {
+                    $estadoGeneral = 'activa';
+                }
+
+                $nombreCreador = trim(implode(' ', array_filter([
+                    $row->creadorNombre1,
+                    $row->creadorNombre2,
+                    $row->creadorApellido1,
+                    $row->creadorApellido2,
+                ])));
+
+                $data[] = [
+                    'idActividad' => (int) $row->idActividad,
+                    'titulo' => $row->tituloActividad ?? 'Sin título',
+                    'descripcion' => $row->descripcionActividad,
+                    'idFicha' => (int) ($row->idFicha ?? 0),
+                    'codigoFicha' => $row->codigoFicha,
+                    'idMateria' => (int) ($row->idMateria ?? 0),
+                    'materiaNombre' => $row->competenciaNombre ?? $row->nombreMateria,
+                    'idRap' => $row->idRap ? (int) $row->idRap : (int) ($row->idMateria ?? 0),
+                    'rapNombre' => $row->rapNombre ?? $row->nombreMateria,
+                    'codigoRap' => $row->codigoRap,
+                    'fechaInicio' => $g['fechaInicial'],
+                    'fechaLimite' => $fechaLimite,
+                    'estadoGeneral' => $estadoGeneral,
+                    'vencida' => $vencida,
+                    'tipoActividad' => $row->tipoActividad,
+                    'modalidad' => $g['tieneGrupo'] ? 'grupal' : 'individual',
+                    'totalAsignados' => $totalAsignados,
+                    'totalEntregaron' => $totalEntregaron,
+                    'totalPendientes' => $totalPendientes,
+                    'totalCalificados' => $totalCalificados,
+                    'totalPorEvaluar' => $totalPorEvaluar,
+                    'totalSinEntregar' => $totalSinEntregar,
+                    'totalCorreccionSolicitada' => $totalCorreccion,
+                    'idHorarioMateria' => $row->idHorarioMateria ? (int) $row->idHorarioMateria : null,
+                    'creador' => [
+                        'idPersona' => $row->idPersonaCreador ? (int) $row->idPersonaCreador : null,
+                        'nombre' => $nombreCreador !== '' ? $nombreCreador : 'Instructor',
+                        'fotoPerfil' => $this->resolvePersonaPublicFotoUrl($row->creadorRutaFoto ?? null),
+                    ],
+                ];
+            }
+
+            usort($data, function ($a, $b) {
+                $fa = $a['fechaLimite'] ?? '';
+                $fb = $b['fechaLimite'] ?? '';
+
+                return strcmp($fb, $fa);
+            });
+
+            return response()->json(['data' => $data]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage(), 'data' => []], 500);
         }
     }
 
@@ -1046,7 +1296,9 @@ class ActividadController extends Controller
     {
         try {
             $request->validate([
-                'documento' => 'required|file|mimes:pdf,doc,docx|max:10240',
+                'documento' => 'required|file|mimes:pdf,doc,docx|max:51200',
+            ], [
+                'documento.max' => 'El archivo no puede superar los 50 MB.',
             ]);
 
             $file = $request->file('documento');
@@ -1073,7 +1325,9 @@ class ActividadController extends Controller
         try {
             $actividad = Actividad::findOrFail($id);
             $request->validate([
-                'documento' => 'required|file|mimes:pdf,doc,docx|max:10240',
+                'documento' => 'required|file|mimes:pdf,doc,docx|max:51200',
+            ], [
+                'documento.max' => 'El archivo no puede superar los 50 MB.',
             ]);
 
             $file = $request->file('documento');
@@ -1632,7 +1886,7 @@ class ActividadController extends Controller
                 'titulo' => 'required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
                 'urlAdicional' => 'nullable|string|max:500',
-            ], $this->materialDocumentoFileRules(true)));
+            ], $this->materialDocumentoFileRules(true)), $this->materialDocumentoValidationMessages());
             $validator->after(function ($v) use ($request) {
                 if ($request->hasFile('documento')) {
                     $this->assertMaterialDocumentoFile($v, $request->file('documento'));

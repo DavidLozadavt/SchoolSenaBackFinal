@@ -95,24 +95,18 @@ class HorarioMateriaController extends Controller
                 return response()->json(['message' => 'Faltan datos obligatorios'], 400);
             }
 
-            // Buscamos las asignaciones de sesión de tipo compartido que tengan idContrato null
-            $asignaciones = AsignacionSesion::whereIn('idHorarioMateria', $horarioIds)
+            $compartidos = AsignacionSesion::whereIn('idHorarioMateria', $horarioIds)
                 ->where('tipoAsignacion', 'HORARIO COMPARTIDO')
                 ->whereNull('idContrato')
                 ->get();
 
-            if ($asignaciones->isEmpty()) {
+            if ($compartidos->isEmpty()) {
                 return response()->json(['message' => 'No se encontraron horarios compartidos pendientes de asignación'], 404);
             }
 
-            foreach ($asignaciones as $asignacion) {
-                $asignacion->update(['idContrato' => $idContrato]);
-                
-                // Duplicar el horario para el segundo profe
-                $clon = HorarioMateria::duplicarParaAsignacion($asignacion);
-                if ($clon) {
-                    $asignacion->update(['idHorarioMateria' => $clon->id]);
-                }
+            foreach ($compartidos as $compartido) {
+                $compartido->update(['idContrato' => $idContrato]);
+                HorarioMateria::duplicarParaAsignacionCompartida($compartido);
             }
 
             DB::commit();
@@ -147,6 +141,7 @@ class HorarioMateriaController extends Controller
             $esCompartido   = $data['esCompartido'] ?? false;
             $horarios       = $data['horarios'] ?? [];
             $observacion  = $data['observacion'] ?? null;
+            $festivos  = $data['festivos'] ?? false;
 
             if (empty($horarios)) {
                 return response()->json(['message' => 'No se enviaron horarios'], 400);
@@ -171,7 +166,7 @@ class HorarioMateriaController extends Controller
                     'idGradoMateria'              => $idGradoMateria,
                     'idFicha'                     => $idFicha,
                     'idInfraestructura'           => $horarioBase ? $horarioBase->idInfraestructura : null,
-
+                    'festivos'                    => $festivos,
                 ];
 
                 // Determinar ID a excluir si estamos actualizando el horario base
@@ -194,12 +189,12 @@ class HorarioMateriaController extends Controller
 
                     if ($esCompartido) {
                         AsignacionSesion::create([
+                            'idHorarioMateria' => $horarioBase->id,
                             'tipoAsignacion'   => 'HORARIO COMPARTIDO',
                             'fechaInicio'      => $fechaInicio,
                             'fechaFin'         => $fechaFin,
-                            'idContrato'       => null,
-                            'idHorarioMateria' => $horarioBase->id,
                             'observacion'      => $observacion,
+                            'idContrato'       => null,
                         ]);
                     }
 
@@ -210,12 +205,12 @@ class HorarioMateriaController extends Controller
 
                     if ($esCompartido) {
                         AsignacionSesion::create([
+                            'idHorarioMateria' => $newHorario->id,
                             'tipoAsignacion'   => 'HORARIO COMPARTIDO',
                             'fechaInicio'      => $fechaInicio,
                             'fechaFin'         => $fechaFin,
-                            'idContrato'       => null,
-                            'idHorarioMateria' => $newHorario->id,
                             'observacion'      => $observacion,
+                            'idContrato'       => null,
                         ]);
                     }
 
@@ -354,6 +349,9 @@ class HorarioMateriaController extends Controller
                     ->whereTime('horaFinal', '>', $data['horaInicial']);
             });
         });
+
+        // validacion de dias festivos entre horarios
+        $query->where('festivos', $data['festivos'] ?? false);
 
         return $query->exists();
     }
@@ -1387,7 +1385,7 @@ class HorarioMateriaController extends Controller
                 'gradoMateria.gradoPrograma',
                 'dia',
                 'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email',
-                'asignacionSesion.contrato.persona'
+                'asignacionSesion.contrato.persona',
             ])
             ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($q) {
                 $q->whereNotNull('fechaSesion');
@@ -1547,7 +1545,7 @@ class HorarioMateriaController extends Controller
                                                 'fechaFinal' => $h->fechaFinal,
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => $h->contrato->persona ?? null,
-                                                'asignacionSesion' => $h->asignacionSesion ?? [],
+                                                'asignacionSesion' => HorarioMateria::asignacionesEspecialesApi($h),
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values(),
@@ -1564,7 +1562,7 @@ class HorarioMateriaController extends Controller
                                                 'fechaFinal' => $h->fechaFinal,
                                                 'estado' => $isFinished ? EstadoHorarioMateria::FINALIZADO : $h->estado,
                                                 'instructor' => null,
-                                                'asignacionSesion' => $h->asignacionSesion ?? [],
+                                                'asignacionSesion' => HorarioMateria::asignacionesEspecialesApi($h),
                                                 'rap' => $h->gradoMateria->materia->nombreMateria
                                             ];
                                         })->values()

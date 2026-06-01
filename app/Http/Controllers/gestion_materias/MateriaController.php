@@ -516,7 +516,7 @@ class MateriaController extends Controller
                                 'fechaFinal' => $h->fechaFinal,
                                 'estado' => $h->estado,
                                 'instructor' => $h->contrato->persona ?? null,
-                                'asignacionSesion' => $h->asignacionSesion ?? []
+                                'asignacionSesion' => \App\Models\HorarioMateria::asignacionesEspecialesApi($h),
                             ];
                         })->values(),
                     'sinAsignar' => $gradoMateria->horarioMateria
@@ -538,7 +538,7 @@ class MateriaController extends Controller
                                 'fechaFinal' => $h->fechaFinal,
                                 'estado' => $h->estado,
                                 'instructor' => null,
-                                'asignacionSesion' => $h->asignacionSesion ?? []
+                                'asignacionSesion' => \App\Models\HorarioMateria::asignacionesEspecialesApi($h),
                             ];
                         })->values()
                 ]
