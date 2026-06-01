@@ -139,7 +139,9 @@ class MaterialApoyoFichaController extends Controller
                 'urlAdicional' => 'nullable|string|max:500',
                 'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
                 'urlVideo' => 'nullable|string|max:500',
-            ], $this->materialDocumentoFileRules(true)));
+            ], $this->materialDocumentoFileRules(true)), array_merge($this->materialDocumentoValidationMessages(), [
+                'video.max' => 'El archivo no puede superar los 50 MB.',
+            ]));
             $validator->after(function ($v) use ($request) {
                 if ($request->hasFile('documento')) {
                     $this->assertMaterialDocumentoFile($v, $request->file('documento'));
@@ -215,7 +217,9 @@ class MaterialApoyoFichaController extends Controller
                 'urlVideo' => 'nullable|string|max:500',
                 'idMateria' => 'sometimes|required|integer|exists:materia,id',
                 'idRap' => 'sometimes|required|integer|exists:materia,id',
-            ], $this->materialDocumentoFileRules(true)));
+            ], $this->materialDocumentoFileRules(true)), array_merge($this->materialDocumentoValidationMessages(), [
+                'video.max' => 'El archivo no puede superar los 50 MB.',
+            ]));
             $validator->after(function ($v) use ($request) {
                 if ($request->hasFile('documento')) {
                     $this->assertMaterialDocumentoFile($v, $request->file('documento'));
