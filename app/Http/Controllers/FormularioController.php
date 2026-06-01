@@ -130,7 +130,7 @@ class FormularioController extends Controller
                 $preguntasActualesIds = [];
 
                 foreach ($request->preguntas as $p) {
-                    if (isset($p['id']) && strpos($p['id'], 'new') === false) {
+                    if (isset($p['id']) && strpos((string)$p['id'], 'new') === false) {
                         // Actualizar pregunta existente
                         $pregunta = FormularioPregunta::find($p['id']);
                         if ($pregunta) {
@@ -148,7 +148,7 @@ class FormularioController extends Controller
                             if (isset($p['opciones']) && in_array($p['tipo'], ['opcion_multiple', 'casillas', 'desplegable'])) {
                                 $opcionesActualesIds = [];
                                 foreach ($p['opciones'] as $o) {
-                                    if (isset($o['id']) && strpos($o['id'], 'new') === false) {
+                                    if (isset($o['id']) && strpos((string)$o['id'], 'new') === false) {
                                         $opcion = FormularioOpcion::find($o['id']);
                                         if ($opcion) {
                                             $opcion->update(['texto' => $o['texto'], 'orden' => $o['orden']]);
@@ -336,4 +336,32 @@ class FormularioController extends Controller
 
         return response()->json($respuestas);
     }
+
+    /**
+     * Subir archivo adjunto públicamente para formularios.
+     */
+    public function uploadAdjunto(Request $request)
+    {
+        $request->validate([
+            'archivo' => 'required|file|mimes:pdf,jpeg,png,jpg,doc,docx|max:5120',
+        ]);
+
+        try {
+            if ($request->hasFile('archivo')) {
+                $file = $request->file('archivo');
+                $path = $file->store('formularios/adjuntos', 'public');
+                $url = asset('storage/' . $path);
+
+                return response()->json([
+                    'success' => true,
+                    'url' => $url,
+                    'path' => $path
+                ]);
+            }
+            return response()->json(['error' => 'No se recibió ningún archivo'], 400);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
 }
+

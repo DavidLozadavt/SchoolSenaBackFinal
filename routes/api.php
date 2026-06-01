@@ -180,6 +180,7 @@ Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
+Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
 Route::group([
     'middleware' => 'api',
