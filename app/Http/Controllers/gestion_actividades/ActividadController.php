@@ -1296,7 +1296,9 @@ class ActividadController extends Controller
     {
         try {
             $request->validate([
-                'documento' => 'required|file|mimes:pdf,doc,docx|max:10240',
+                'documento' => 'required|file|mimes:pdf,doc,docx|max:51200',
+            ], [
+                'documento.max' => 'El archivo no puede superar los 50 MB.',
             ]);
 
             $file = $request->file('documento');
@@ -1323,7 +1325,9 @@ class ActividadController extends Controller
         try {
             $actividad = Actividad::findOrFail($id);
             $request->validate([
-                'documento' => 'required|file|mimes:pdf,doc,docx|max:10240',
+                'documento' => 'required|file|mimes:pdf,doc,docx|max:51200',
+            ], [
+                'documento.max' => 'El archivo no puede superar los 50 MB.',
             ]);
 
             $file = $request->file('documento');
@@ -1882,7 +1886,7 @@ class ActividadController extends Controller
                 'titulo' => 'required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
                 'urlAdicional' => 'nullable|string|max:500',
-            ], $this->materialDocumentoFileRules(true)));
+            ], $this->materialDocumentoFileRules(true)), $this->materialDocumentoValidationMessages());
             $validator->after(function ($v) use ($request) {
                 if ($request->hasFile('documento')) {
                     $this->assertMaterialDocumentoFile($v, $request->file('documento'));
