@@ -1235,11 +1235,6 @@ Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
 Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'getSedesByRegional']); //Para filtrar las sedes por regional
 
 
-//rutas SHOOL SENA para gestión de aperturaPrograma:
-Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
-Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
-Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
-Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Fichas:
 // IMPORTANTE: Las rutas específicas deben ir ANTES de las genéricas
@@ -1687,3 +1682,11 @@ Route::prefix('invitado')->group(function () {
     Route::delete('/{id}', [GestionEventoHermanoController::class, 'destroy']);
 });
 
+
+//rutas SHOOL SENA para gestión de aperturaPrograma:
+Route::middleware('auth:api')->group(function () {
+    Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
+    Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
+    Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
+    Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
+});
