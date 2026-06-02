@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\AperturarProgramaResource;
 use App\Models\AperturarPrograma;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -14,6 +15,22 @@ class AperturarProgramaController extends Controller
         $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre'])->get();
 
         return response()->json(AperturarProgramaResource::collection($data));
+    }
+
+    public function aperturasDisponibles(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'idPrograma' => 'required|exists:programa,id',
+            'idSede' => 'required|exists:sedes,id'
+        ]);
+
+        $data = AperturarPrograma::with(['periodo'])
+            ->where('fechaFinalMatriculas', '<=', Carbon::today()->toDateString())
+            ->where('idPrograma', $validated['idPrograma'])
+            ->where('idSede', $validated['idSede'])
+            ->get();
+
+        return response()->json(AperturarProgramaResource::collection($data), 200);
     }
 
     public function store(Request $request): JsonResponse
