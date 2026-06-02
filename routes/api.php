@@ -1689,4 +1689,5 @@ Route::middleware('auth:api')->group(function () {
     Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
     Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
     Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
+    Route::get('aperturarprograma/disponibles', [AperturarProgramaController::class, 'aperturasDisponibles']);
 });
