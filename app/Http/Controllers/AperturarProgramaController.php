@@ -51,6 +51,12 @@ class AperturarProgramaController extends Controller
             'fechaInicialPlanMejoramiento' => 'required|date',
             'fechaFinalPlanMejoramiento' => 'required|date|after_or_equal:fechaInicialPlanMejoramiento',
             'tipoCalificacion' => 'required|in:NUMERICO,DESEMPEÑO',
+            //Diferecnia al sena:
+            'pension' => 'nullable|boolean',
+            'valorPension' => 'nullable|numeric',
+            'diasMoraMatricula' => 'nullable|integer',
+            'porcentajeMoraPension' => 'nullable|numeric',
+            'diaCobroPension' => 'nullable|integer',
         ]);
 
         $apertura = AperturarPrograma::create($validated);
@@ -88,6 +94,12 @@ class AperturarProgramaController extends Controller
             'fechaInicialPlanMejoramiento' => 'nullable|date',
             'fechaFinalPlanMejoramiento' => 'nullable|date|after_or_equal:fechaInicialPlanMejoramiento',
             'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
+            //Diferecnia al sena:
+            'pension' => 'nullable|boolean',
+            'valorPension' => 'nullable|numeric',
+            'diasMoraMatricula' => 'nullable|integer',
+            'porcentajeMoraPension' => 'nullable|numeric',
+            'diaCobroPension' => 'nullable|integer',
         ]);
 
         $apertura->update($validated);
