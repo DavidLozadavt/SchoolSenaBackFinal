@@ -21,16 +21,18 @@ class AperturarProgramaController extends Controller
     {
         $validated = $request->validate([
             'idPrograma' => 'required|exists:programa,id',
-            'idSede' => 'required|exists:sedes,id'
+            'idSede' => 'nullable|exists:sedes,id'
         ]);
 
-        $data = AperturarPrograma::with(['periodo'])
+        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre'])
             ->where('fechaFinalMatriculas', '<=', Carbon::today()->toDateString())
             ->where('idPrograma', $validated['idPrograma'])
-            ->where('idSede', $validated['idSede'])
+            ->when(isset($validated['idSede']), function ($query) use ($validated) {
+                $query->where('idSede', $validated['idSede']);
+            })
             ->get();
 
-        return response()->json(AperturarProgramaResource::collection($data), 200);
+        return response()->json(AperturarProgramaResource::collection($data));
     }
 
     public function store(Request $request): JsonResponse
