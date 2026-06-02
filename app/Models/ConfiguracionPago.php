@@ -13,4 +13,15 @@ class ConfiguracionPago extends Model
 
 
     
+  public function asignacionProcesoPago()
+    {
+        return $this->hasOne(AsignacionProcesoPago::class, 'idConfiguracionPago');
+    }
+
+    public function configuracionPagoVigencias()
+    {
+        return $this->hasMany(ConfiguracionPagoVigencia::class, 'idConfiguracionPago');
+    }
+
+  
 }

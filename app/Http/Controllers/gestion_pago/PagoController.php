@@ -11,6 +11,7 @@ use App\Models\AsignacionPagoAdicional;
 use App\Models\AsignacionProcesoPago;
 use App\Models\AsignacionProcesoTipoDocumento;
 use App\Models\ConfiguracionPago;
+use App\Models\ConfiguracionPagoVigencia;
 use App\Models\Contract;
 use App\Models\ContratoTransaccion;
 use App\Models\DocumentoContrato;
@@ -899,29 +900,91 @@ class PagoController extends Controller
 
     public function getConfiguracionesPago()
     {
-        $documents = AsignacionProcesoPago::with('configuracionPago', 'proceso')
-            ->whereHas('configuracionPago', function ($query) {
-                $query->where('estado', 'ACTIVO');
-            })
+        $hoy = Carbon::today()->toDateString();
+        $pagos = ConfiguracionPago::with([
+            'asignacionProcesoPago.proceso',
+            'configuracionPagoVigencias' => function ($query) use ($hoy) {
+                $query->whereDate('fechaInicial', '<=', $hoy)
+                    ->whereDate('fechaFinal', '>=', $hoy)
+                    ->orderBy('fechaInicial', 'desc');
+            }
+        ])
             ->get();
 
-        return response()->json($documents);
+        $pagos->each(function ($config) {
+            $config->setAttribute('configuracionPagoVigenciaActual', $config->configuracionPagoVigencias->first());
+            unset($config->configuracionPagoVigencias);
+        });
+
+        return response()->json($pagos);
     }
 
 
 
     public function storeConfiguracionPago(Request $request)
     {
-
+        $vigenciasInput = $request->input('configuracionPagoVigencia');
+        if (!is_array($vigenciasInput) || empty($vigenciasInput)) {
+            $vigenciasInput = [[
+                'fechaInicial' => $request->input('vigenciaFechaInicial'),
+                'fechaFinal' => $request->input('vigenciaFechaFinal'),
+                'valor' => $request->input('valor'),
+            ]];
+        }
 
         $configuracionPago = new ConfiguracionPago();
         $configuracionPago->titulo = $request->input('titulo');
         $configuracionPago->detalle = $request->input('detalle');
         $configuracionPago->estado = $request->input('estado');
         $configuracionPago->valor = $request->input('valor');
+        $configuracionPago->porcentajeIva = $request->input('porcentajeIva');
+        $configuracionPago->frecuenciaPago = $request->input('frecuenciaPago');
         $configuracionPago->idCompany = KeyUtil::idCompany();
-
+        $configuracionPago->idContabilizacion = $request->input('idContabilizacion');
+        $configuracionPago->obligatorio = $request->input('obligatorio', false);
+        $configuracionPago->porcentaje = $request->input('porcentaje');
+        $configuracionPago->topeValor = $request->input('topeValor');
+        $configuracionPago->frecuenciaTope = $request->input('frecuenciaTope');
+        $configuracionPago->tipoMovimiento = $request->input('tipoMovimiento');
+        $configuracionPago->idCentroCosto = $request->input('idCentroCosto');
+        $configuracionPago->idClaseVehiculo = $request->input('idClaseVehiculo');
         $configuracionPago->save();
+
+        foreach ($vigenciasInput as $vigencia) {
+            $fechaInicial = $vigencia['fechaInicial'] ?? null;
+            $fechaFinal = $vigencia['fechaFinal'] ?? null;
+            $tieneFechaInicial = !empty($fechaInicial);
+            $tieneFechaFinal = !empty($fechaFinal);
+
+            if ($tieneFechaInicial xor $tieneFechaFinal) {
+                $configuracionPago->delete();
+                return response()->json([
+                    'error' => 'Para registrar vigencia debe enviar fechaInicial y fechaFinal.'
+                ], 422);
+            }
+
+            if (!$tieneFechaInicial && !$tieneFechaFinal) {
+                continue;
+            }
+
+            if ($this->existeCruceVigenciaConfiguracionPago(
+                (int) $configuracionPago->id,
+                (string) $fechaInicial,
+                (string) $fechaFinal
+            )) {
+                $configuracionPago->delete();
+                return response()->json([
+                    'error' => 'Ya existe una vigencia con rango de fechas que se cruza para esta configuración de pago.'
+                ], 422);
+            }
+
+            $confiVigenciaValor = new ConfiguracionPagoVigencia();
+            $confiVigenciaValor->idConfiguracionPago = $configuracionPago->id;
+            $confiVigenciaValor->fechaInicial = $fechaInicial;
+            $confiVigenciaValor->fechaFinal = $fechaFinal;
+            $confiVigenciaValor->valor = $vigencia['valor'] ?? $configuracionPago->valor;
+            $confiVigenciaValor->save();
+        }
 
         $asignacion = new AsignacionProcesoPago();
         $asignacion->idConfiguracionPago = $configuracionPago->id;
@@ -929,25 +992,112 @@ class PagoController extends Controller
 
         $asignacion->save();
 
+
+
+
+
         return response()->json($asignacion, 201);
     }
 
 
     public function updateConfiguracionPago(Request $request, int $id)
     {
-        $asignacion = AsignacionProcesoPago::where('id', $id)->firstOrFail();
+        $vigenciasInput = $request->input('configuracionPagoVigencia');
+        if (!is_array($vigenciasInput) || empty($vigenciasInput)) {
+            $vigenciasInput = [[
+                'fechaInicial' => $request->input('vigenciaFechaInicial'),
+                'fechaFinal' => $request->input('vigenciaFechaFinal'),
+                'valor' => $request->input('valor'),
+            ]];
+        }
 
-        $configuracionPago = ConfiguracionPago::findOrFail($asignacion->idConfiguracionPago);
+        $configuracionPago = ConfiguracionPago::findOrFail($id);
+
+
+        $asignacion = AsignacionProcesoPago::where('idConfiguracionPago', $configuracionPago->id)->first();
+
 
         $configuracionPago->titulo = $request->input('titulo', $configuracionPago->titulo);
         $configuracionPago->detalle = $request->input('detalle', $configuracionPago->detalle);
         $configuracionPago->estado = $request->input('estado', $configuracionPago->estado);
         $configuracionPago->valor = $request->input('valor', $configuracionPago->valor);
-
+        $configuracionPago->porcentajeIva = $request->input('porcentajeIva');
+        $configuracionPago->frecuenciaPago = $request->input('frecuenciaPago');
+        $configuracionPago->idContabilizacion = $request->input('idContabilizacion');
+        $configuracionPago->obligatorio = $request->input('obligatorio', false);
+        $configuracionPago->porcentaje = $request->input('porcentaje');
+        $configuracionPago->topeValor = $request->input('topeValor');
+        $configuracionPago->idClaseVehiculo = $request->input('idClaseVehiculo');
+        $configuracionPago->frecuenciaTope = $request->input('frecuenciaTope');
+        $configuracionPago->tipoMovimiento = $request->input('tipoMovimiento');
+        $configuracionPago->idCentroCosto = $request->input('idCentroCosto');
         $configuracionPago->save();
+
+        if (!$asignacion) {
+            if (!$request->filled('idProceso')) {
+                return response()->json([
+                    'error' => 'No existe asignación para esta configuración. Debe enviar idProceso para crearla.'
+                ], 422);
+            }
+
+            $asignacion = new AsignacionProcesoPago();
+            $asignacion->idConfiguracionPago = $configuracionPago->id;
+        }
 
         $asignacion->idProceso = $request->input('idProceso', $asignacion->idProceso);
         $asignacion->save();
+
+        foreach ($vigenciasInput as $vigencia) {
+            $idVigencia = isset($vigencia['id']) ? (int) $vigencia['id'] : null;
+            $fechaInicial = $vigencia['fechaInicial'] ?? null;
+            $fechaFinal = $vigencia['fechaFinal'] ?? null;
+            $tieneFechaInicial = !empty($fechaInicial);
+            $tieneFechaFinal = !empty($fechaFinal);
+
+            if ($tieneFechaInicial xor $tieneFechaFinal) {
+                return response()->json([
+                    'error' => 'Para registrar vigencia debe enviar fechaInicial y fechaFinal.'
+                ], 422);
+            }
+
+            if (!$tieneFechaInicial && !$tieneFechaFinal) {
+                continue;
+            }
+
+            if ($this->existeCruceVigenciaConfiguracionPago(
+                (int) $configuracionPago->id,
+                (string) $fechaInicial,
+                (string) $fechaFinal,
+                $idVigencia
+            )) {
+                return response()->json([
+                    'error' => 'Ya existe una vigencia con rango de fechas que se cruza para esta configuraci�n de pago.'
+                ], 422);
+            }
+
+            if (!empty($idVigencia)) {
+                $confiVigenciaValor = ConfiguracionPagoVigencia::where('idConfiguracionPago', $configuracionPago->id)
+                    ->where('id', $idVigencia)
+                    ->first();
+
+                if (!$confiVigenciaValor) {
+                    return response()->json([
+                        'error' => 'La vigencia indicada no existe para esta configuraci�n de pago.'
+                    ], 404);
+                }
+            } else {
+                $confiVigenciaValor = new ConfiguracionPagoVigencia();
+                $confiVigenciaValor->idConfiguracionPago = $configuracionPago->id;
+            }
+
+            $confiVigenciaValor->fechaInicial = $fechaInicial;
+            $confiVigenciaValor->fechaFinal = $fechaFinal;
+            $confiVigenciaValor->valor = $vigencia['valor'] ?? $configuracionPago->valor;
+            $confiVigenciaValor->save();
+        }
+
+
+
 
         return response()->json([
             'configuracionPago' => $configuracionPago,
@@ -958,13 +1108,30 @@ class PagoController extends Controller
 
     public function destroyConfiguracionPago(int $id)
     {
-        $asignacion = AsignacionProcesoPago::findOrFail($id);
+        $configuracionPago = ConfiguracionPago::findOrFail($id);
 
-        $configuracionPago = ConfiguracionPago::findOrFail($asignacion->idConfiguracionPago);
 
-        $asignacion->delete();
+        AsignacionProcesoPago::where('idConfiguracionPago', $configuracionPago->id)->delete();
         $configuracionPago->delete();
 
         return response()->json([], 204);
+    }
+
+
+    private function existeCruceVigenciaConfiguracionPago(
+        int $idConfiguracionPago,
+        string $fechaInicial,
+        string $fechaFinal,
+        ?int $ignorarIdVigencia = null
+    ): bool {
+        $query = ConfiguracionPagoVigencia::where('idConfiguracionPago', $idConfiguracionPago)
+            ->whereDate('fechaInicial', '<=', $fechaFinal)
+            ->whereDate('fechaFinal', '>=', $fechaInicial);
+
+        if (!empty($ignorarIdVigencia)) {
+            $query->where('id', '!=', $ignorarIdVigencia);
+        }
+
+        return $query->exists();
     }
 }
