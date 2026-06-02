@@ -1246,6 +1246,7 @@ Route::get('fichas/instructor/{idInstructor}/historial-sesiones', [FichaControll
 Route::get('fichas/estudiante/clases', [FichaController::class, 'clasesEstudiante']);
 Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
 Route::get('fichas/programa/{idApertura}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('tipos-grado', [FichaController::class, 'getTiposGrado']); // trimestre, semestre, etc.
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);

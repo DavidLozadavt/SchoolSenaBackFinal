@@ -22,6 +22,7 @@ class AperturarPrograma extends Model
         'idPeriodo',
         'idPrograma',
         'estado',
+        'idJornada',
         'idSede',
         'pension',
         'diaCobro',
@@ -76,5 +77,10 @@ class AperturarPrograma extends Model
     public function fichas()
     {
         return $this->hasMany(Ficha::class, 'idAsignacion', 'id');
+    }
+
+    public function jornada()
+    {
+        return $this->belongsTo(Jornada::class, 'idJornada');
     }
 }

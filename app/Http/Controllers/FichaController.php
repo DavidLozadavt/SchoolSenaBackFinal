@@ -21,14 +21,29 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use App\Models\TipoGrado;
 
 class FichaController extends Controller
 {
+    public function getTiposGrado(): JsonResponse
+    {
+        $tiposGrado = TipoGrado::all();
+
+        $tiposGradoArray = $tiposGrado->map(function ($tipo) {
+            return [
+                'value' => $tipo->id,
+                'label' => $tipo->nombreTipoGrado,
+            ];
+        });
+
+        return response()->json($tiposGradoArray);
+    }
+
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
             // Ficha
-            'idJornada' => 'required|exists:jornadas,id',
             'idSede' => 'required|exists:sedes,id',
             'idAsignacion' => 'required|exists:aperturarprograma,id',
             'codigo' => 'required|string|unique:ficha,codigo',
@@ -76,7 +91,6 @@ class FichaController extends Controller
             }
 
             $ficha = Ficha::create([
-                'idJornada' => $validated['idJornada'],
                 'idAsignacion' => $validated['idAsignacion'],
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
@@ -180,12 +194,13 @@ class FichaController extends Controller
     {
         $fichas = Ficha::query()
             ->whereHas('asignacion', function ($query) use ($idApertura) {
-                $query->where('idAsignacion', $idApertura);
+                $query->where('id', $idApertura);
             })
             ->with([
                 'sede:id,nombre,idCentroFormacion',
                 'regional:id,razonSocial',
-                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
+                'asignacion.jornada:id,nombreJornada',
+                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma,idJornada',
                 'asignacion.programa:id,nombrePrograma',
                 'asignacion.programa.grados', //Ya puedo capturar en idgrado
                 'instructorLider:id,idpersona', // Especificar campos para que Laravel resuelva correctamente la relación
@@ -501,11 +516,7 @@ class FichaController extends Controller
             'idJornada' => 'required|exists:jornadas,id',
             'idSede' => 'required|exists:sedes,id',
             'idAsignacion' => 'required|exists:aperturarprograma,id',
-            'codigo' => [
-                'required',
-                'string',
-                Rule::unique('ficha', 'codigo')->ignore($id)
-            ],
+            'codigo' => ['required','string'],
             'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'documento' => 'nullable|file|mimes:pdf|max:5120',
             'idPrograma' => 'required|exists:programa,id',
