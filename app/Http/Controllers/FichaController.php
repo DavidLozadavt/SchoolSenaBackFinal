@@ -176,17 +176,13 @@ class FichaController extends Controller
             'data' => $fichas
         ]);
     }
-    public function fichasPorPrograma(int $idPrograma, int $idCentro): JsonResponse
+    public function fichasPorPrograma(int $idApertura): JsonResponse
     {
         $fichas = Ficha::query()
-            ->whereHas('asignacion', function ($query) use ($idPrograma) {
-                $query->where('idPrograma', $idPrograma);
-            })
-            ->whereHas('sede', function ($sede) use ($idCentro) {
-                $sede->where('idCentroFormacion', $idCentro);
+            ->whereHas('asignacion', function ($query) use ($idApertura) {
+                $query->where('idAsignacion', $idApertura);
             })
             ->with([
-                'jornada:id,nombreJornada',
                 'sede:id,nombre,idCentroFormacion',
                 'regional:id,razonSocial',
                 'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
@@ -227,7 +223,6 @@ class FichaController extends Controller
         })->toArray();
 
         return response()->json([
-            'idPrograma' => $idPrograma,
             'total' => $fichas->count(),
             'data' => $fichasArray
         ]);
