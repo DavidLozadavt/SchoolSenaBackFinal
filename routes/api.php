@@ -758,6 +758,10 @@ Route::delete('delete_configuracion_pago/{id}', [PagoController::class, 'destroy
 Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
 Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
 Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);
+Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
+Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
+Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
 
 
 
