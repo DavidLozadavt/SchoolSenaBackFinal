@@ -25,7 +25,7 @@ class AperturarProgramaController extends Controller
         ]);
 
         $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'jornada:id,nombreJornada'])
-            ->where('fechaFinalMatriculas', '>=', Carbon::today()->toDateString())
+            ->where('fechaFinalPlanMejoramiento', '>=', Carbon::today()->toDateString())
             ->where('idPrograma', $validated['idPrograma'])
             ->when(isset($validated['idSede']), function ($query) use ($validated) {
                 $query->where('idSede', $validated['idSede']);
