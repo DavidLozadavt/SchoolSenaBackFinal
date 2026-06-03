@@ -60,7 +60,7 @@ class AperturarProgramaController extends Controller
             'porcentajeMoraPension' => 'nullable|numeric',
             'diaCobroPension' => 'nullable|integer',
             //Nuevo campo
-            'idJornada' => 'required|exists:jornada,id'
+            'idJornada' => 'required|exists:jornadas,id'
         ]);
 
         $apertura = AperturarPrograma::create($validated);
@@ -105,7 +105,7 @@ class AperturarProgramaController extends Controller
             'porcentajeMoraPension' => 'nullable|numeric',
             'diaCobroPension' => 'nullable|integer',
             //Nuevo campo
-            'idJornada' => 'nullable|exists:jornada,id'
+            'idJornada' => 'nullable|exists:jornadas,id'
         ]);
 
         $apertura->update($validated);
