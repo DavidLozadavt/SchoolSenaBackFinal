@@ -7,11 +7,14 @@ use App\Mail\MailService;
 use App\Models\ActivationCompanyUser;
 use App\Models\AgregarPagoCuenta;
 use App\Models\AporteSocio;
+use App\Models\AsignacionFacturaTransaccion;
 use App\Models\AsignacionPagoAdicional;
 use App\Models\AsignacionProcesoPago;
 use App\Models\AsignacionProcesoTipoDocumento;
 use App\Models\ConfiguracionPago;
 use App\Models\ConfiguracionPagoVigencia;
+use App\Models\DetalleFactura;
+use App\Models\Factura;
 use App\Models\Contract;
 use App\Models\ContratoTransaccion;
 use App\Models\DocumentoContrato;
@@ -25,12 +28,15 @@ use App\Models\Rol;
 use App\Models\Status;
 use App\Models\Tercero;
 use App\Models\TipoDocumento;
+use App\Models\TipoFactura;
+use App\Models\TipoTransaccion;
 use App\Models\Transaccion;
 use App\Models\User;
 use App\Util\KeyUtil;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Session;
 
@@ -1133,5 +1139,360 @@ class PagoController extends Controller
         }
 
         return $query->exists();
+    }
+
+
+    /**
+     * Genera factura de venta y líneas desde configuraciones económicas activas de un proceso.
+     * No modifica configuracionPago ni vigencias.
+     */
+    public function generarFacturaValoresEconomicos(Request $request)
+    {
+        $idProceso = $request->input('idProceso');
+        if (empty($idProceso)) {
+            return response()->json(['error' => 'idProceso es obligatorio.'], 422);
+        }
+
+        $proceso = Proceso::find($idProceso);
+        if (!$proceso) {
+            return response()->json(['error' => 'Proceso no encontrado.'], 404);
+        }
+
+        $idCompany = (int) ($request->input('idCompany') ?: KeyUtil::idCompany());
+        $idTercero = $request->input('idTercero') ?: $request->input('idEstudiante');
+
+        $asignaciones = AsignacionProcesoPago::with('configuracionPago')
+            ->where('idProceso', $idProceso)
+            ->whereHas('configuracionPago', function ($query) use ($idCompany) {
+                $query->where('idCompany', $idCompany)
+                    ->where('estado', 'ACTIVO');
+            })
+            ->get();
+
+        $conceptosInput = $request->input('conceptos', []);
+        $idsSolicitados = collect($conceptosInput)
+            ->pluck('idConfiguracionPago')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($idsSolicitados->isNotEmpty()) {
+            $idsDelProceso = $asignaciones->pluck('idConfiguracionPago')->map(fn ($id) => (int) $id);
+            $invalidos = $idsSolicitados->diff($idsDelProceso);
+            if ($invalidos->isNotEmpty()) {
+                return response()->json([
+                    'error' => 'Uno o más conceptos no pertenecen al proceso seleccionado o no están activos.',
+                    'idsInvalidos' => $invalidos->values(),
+                ], 422);
+            }
+            $asignaciones = $asignaciones->filter(
+                fn ($a) => $idsSolicitados->contains((int) $a->idConfiguracionPago)
+            )->values();
+        }
+
+        if ($asignaciones->isEmpty()) {
+            return response()->json([
+                'error' => 'No hay conceptos económicos activos asociados al proceso.',
+            ], 422);
+        }
+
+        $lineas = [];
+        $totalSinIva = 0.0;
+        $totalIva = 0.0;
+        $idsUsados = [];
+
+        foreach ($asignaciones as $asignacion) {
+            $config = $asignacion->configuracionPago;
+            if (!$config || strtoupper((string) $config->estado) !== 'ACTIVO') {
+                continue;
+            }
+
+            $idConfig = (int) $config->id;
+            if (in_array($idConfig, $idsUsados, true)) {
+                continue;
+            }
+            $idsUsados[] = $idConfig;
+
+            $valorLinea = $this->resolverValorLineaConfiguracion($config, $conceptosInput, $idConfig);
+            if ($valorLinea < 0) {
+                return response()->json(['error' => 'No se permiten valores negativos en los conceptos.'], 422);
+            }
+
+            $porcentajeIva = (float) ($config->porcentajeIva ?? 0);
+            $ivaLinea = $porcentajeIva > 0 ? round($valorLinea * ($porcentajeIva / 100), 2) : 0.0;
+
+            $lineas[] = [
+                'config' => $config,
+                'valor' => $valorLinea,
+                'iva' => $ivaLinea,
+            ];
+            $totalSinIva += $valorLinea;
+            $totalIva += $ivaLinea;
+        }
+
+        if (empty($lineas)) {
+            return response()->json(['error' => 'No se encontraron conceptos válidos para generar la factura.'], 422);
+        }
+
+        $totalSinIva = round($totalSinIva, 2);
+        $totalIva = round($totalIva, 2);
+        $valorMasIva = round($totalSinIva + $totalIva, 2);
+
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        try {
+            DB::beginTransaction();
+
+            $factura = new Factura();
+            $lastFactura = Factura::where('idTipoFactura', TipoFactura::VENTA)
+                ->orderBy('id', 'desc')
+                ->first();
+            $factura->numeroFactura = $lastFactura
+                ? str_pad((int) $lastFactura->numeroFactura + 1, 5, '0', STR_PAD_LEFT)
+                : '00001';
+            $factura->fecha = Carbon::now();
+            $factura->valor = $totalSinIva;
+            $factura->valorIva = $totalIva;
+            $factura->valorMasIva = $valorMasIva;
+            if (!empty($idTercero)) {
+                $factura->idTercero = $idTercero;
+            }
+            $factura->idCompany = $idCompany;
+            $factura->idTipoFactura = TipoFactura::VENTA;
+            if (auth()->check()) {
+                $factura->idUser = auth()->id();
+            }
+            $factura->save();
+
+            $detallesCreados = [];
+            foreach ($lineas as $linea) {
+                $config = $linea['config'];
+                $detalleFactura = new DetalleFactura();
+                $detalleFactura->idFactura = $factura->id;
+                $detalleFactura->detalle = $config->titulo ?? $config->detalle ?? 'Concepto académico';
+                $detalleFactura->valor = $linea['valor'] + $linea['iva'];
+                if ($tieneColumnaIdConfig) {
+                    $detalleFactura->idConfiguracionPago = $config->id;
+                }
+                $detalleFactura->save();
+                $detallesCreados[] = $detalleFactura;
+            }
+
+            $transaccion = new Transaccion();
+            $transaccion->valor = $valorMasIva;
+            $transaccion->hora = Carbon::now()->format('H:i');
+            $transaccion->fechaTransaccion = Carbon::now();
+            $transaccion->tipoCartera = 'CXC';
+            $transaccion->idTipoTransaccion = TipoTransaccion::VENTA;
+            $transaccion->idEstado = Status::ID_PENDIENTE;
+            $transaccion->excedente = $valorMasIva;
+            $transaccion->save();
+
+            $asignacionFacturaTransaccion = new AsignacionFacturaTransaccion();
+            $asignacionFacturaTransaccion->idFactura = $factura->id;
+            $asignacionFacturaTransaccion->idTransaccion = $transaccion->id;
+            $asignacionFacturaTransaccion->save();
+
+            $pago = new Pago();
+            $pago->fechaPago = Carbon::now();
+            $pago->fechaReg = Carbon::now();
+            $pago->valor = 0;
+            $pago->excedente = $valorMasIva;
+            $pago->idEstado = Status::ID_PENDIENTE;
+            $pago->idTransaccion = $transaccion->id;
+            $pago->save();
+
+            DB::commit();
+
+            $factura->load(['detalles', 'tercero', 'transacciones.pago.estado']);
+
+            return response()->json([
+                'message' => 'Factura académica generada correctamente.',
+                'factura' => $this->formatearFacturaAcademica($factura, $proceso),
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'error' => 'No fue posible generar la factura académica.',
+                'detalle' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+
+    public function getFacturasAcademicas(Request $request)
+    {
+        $idCompany = (int) ($request->input('idCompany') ?: KeyUtil::idCompany());
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        $query = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('idTipoFactura', TipoFactura::VENTA)
+            ->where(function ($q) use ($idCompany) {
+                $q->where('idCompany', $idCompany)->orWhereNull('idCompany');
+            })
+            ->orderBy('id', 'desc');
+
+        if ($tieneColumnaIdConfig) {
+            $query->whereHas('detalles', function ($q) {
+                $q->whereNotNull('idConfiguracionPago');
+            });
+        } else {
+            $idsConfig = ConfiguracionPago::where('idCompany', $idCompany)->pluck('id');
+            if ($idsConfig->isEmpty()) {
+                return response()->json([]);
+            }
+            $titulos = ConfiguracionPago::whereIn('id', $idsConfig)->pluck('titulo')->filter();
+            $query->whereHas('detalles', function ($q) use ($titulos) {
+                $q->where(function ($inner) use ($titulos) {
+                    foreach ($titulos as $titulo) {
+                        $inner->orWhere('detalle', $titulo);
+                    }
+                });
+            });
+        }
+
+        $facturas = $query->get();
+
+        $resultado = $facturas->map(function (Factura $factura) {
+            $proceso = $this->inferirProcesoFacturaAcademica($factura);
+            return $this->formatearFacturaAcademica($factura, $proceso);
+        });
+
+        return response()->json($resultado->values());
+    }
+
+
+    public function getFacturaAcademica(int $id)
+    {
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('id', $id)
+            ->where(function ($q) use ($idCompany) {
+                $q->where('idCompany', $idCompany)->orWhereNull('idCompany');
+            })
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $proceso = $this->inferirProcesoFacturaAcademica($factura);
+
+        return response()->json($this->formatearFacturaAcademica($factura, $proceso));
+    }
+
+
+    private function resolverValorLineaConfiguracion(
+        ConfiguracionPago $config,
+        array $conceptosInput,
+        int $idConfig
+    ): float {
+        foreach ($conceptosInput as $item) {
+            if ((int) ($item['idConfiguracionPago'] ?? 0) === $idConfig && isset($item['valor'])) {
+                $valorManual = (float) $item['valor'];
+                return max(0, $valorManual);
+            }
+        }
+
+        $hoy = Carbon::today()->toDateString();
+        $vigencia = ConfiguracionPagoVigencia::where('idConfiguracionPago', $config->id)
+            ->whereDate('fechaInicial', '<=', $hoy)
+            ->whereDate('fechaFinal', '>=', $hoy)
+            ->orderBy('fechaInicial', 'desc')
+            ->first();
+
+        if ($vigencia && $vigencia->valor !== null) {
+            return max(0, (float) $vigencia->valor);
+        }
+
+        return max(0, (float) ($config->valor ?? 0));
+    }
+
+
+    private function inferirProcesoFacturaAcademica(Factura $factura): ?Proceso
+    {
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        foreach ($factura->detalles as $detalle) {
+            $idConfig = $tieneColumnaIdConfig ? ($detalle->idConfiguracionPago ?? null) : null;
+
+            if (!$idConfig) {
+                $config = ConfiguracionPago::where('titulo', $detalle->detalle)
+                    ->orWhere('detalle', $detalle->detalle)
+                    ->first();
+                $idConfig = $config?->id;
+            }
+
+            if (!$idConfig) {
+                continue;
+            }
+
+            $asignacion = AsignacionProcesoPago::with('proceso')
+                ->where('idConfiguracionPago', $idConfig)
+                ->first();
+
+            if ($asignacion?->proceso) {
+                return $asignacion->proceso;
+            }
+        }
+
+        return null;
+    }
+
+
+    private function formatearFacturaAcademica(Factura $factura, $proceso): array
+    {
+        $estado = 'PENDIENTE';
+        $transaccion = $factura->transacciones->first();
+        $pago = $transaccion?->pago?->first();
+
+        if ($pago) {
+            if ((int) $pago->idEstado === Status::ID_APROBADO && (float) $pago->excedente <= 0) {
+                $estado = 'PAGADO';
+            } elseif ((int) $pago->idEstado === Status::ID_PENDIENTE) {
+                $estado = 'PENDIENTE';
+            } elseif ($pago->estado) {
+                $estado = $pago->estado->estado ?? $pago->estado->nombre ?? 'PENDIENTE';
+            }
+        }
+
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        $detalles = $factura->detalles->map(function (DetalleFactura $detalle) use ($tieneColumnaIdConfig) {
+            $idConfig = $tieneColumnaIdConfig ? ($detalle->idConfiguracionPago ?? null) : null;
+            $config = $idConfig ? ConfiguracionPago::find($idConfig) : null;
+
+            return [
+                'id' => $detalle->id,
+                'idFactura' => $detalle->idFactura,
+                'idConfiguracionPago' => $idConfig,
+                'concepto' => $config?->titulo ?? $detalle->detalle,
+                'detalle' => $detalle->detalle,
+                'valor' => (float) $detalle->valor,
+            ];
+        })->values();
+
+        $procesoPayload = null;
+        if ($proceso instanceof Proceso) {
+            $procesoPayload = [
+                'id' => $proceso->id,
+                'nombreProceso' => $proceso->nombreProceso,
+            ];
+        }
+
+        return [
+            'id' => $factura->id,
+            'numeroFactura' => $factura->numeroFactura,
+            'fecha' => $factura->fecha,
+            'valor' => (float) ($factura->valorMasIva ?? $factura->valor),
+            'valorSinIva' => (float) $factura->valor,
+            'valorIva' => (float) ($factura->valorIva ?? 0),
+            'estado' => $estado,
+            'idTercero' => $factura->idTercero,
+            'tercero' => $factura->tercero,
+            'proceso' => $procesoPayload,
+            'detalles' => $detalles,
+        ];
     }
 }
