@@ -39,6 +39,42 @@ class FichaController extends Controller
         return response()->json($tiposGradoArray);
     }
 
+    public function storeMultiple(Request $request)
+    {
+        $validated = $request->validate([
+            // Ficha
+            'idAsignacion' => 'required|exists:aperturarprograma,id',
+            'cantidadGrados' => 'required|integer|min:1',
+            'idTipoGrado' => 'required|exists:tipoGrado,id'
+        ]);
+
+        $apertura = AperturarPrograma::findOrFail($validated['idAsignacion']);
+        $idRegional = KeyUtil::idCompany();
+
+        try {
+            for ($i = 1; $i <= $validated['cantidadGrados']; $i++) {
+                Ficha::create([
+                    'idAsignacion' => $validated['idAsignacion'],
+                    'codigo' => str_pad($i, 2, '0', STR_PAD_LEFT),
+                    'idSede' => $apertura->idSede ?? null,
+                    'documento' => null,
+                    'idInfraestructura' => null,
+                    'porcentajeEjecucion' => 100,
+                    'idRegional' => $idRegional ?? null,
+                ]);
+            }
+        } catch (\Exception $e) {
+            DB::rollBack(); 
+            return response()->json([
+                'message' => 'Error al crear los grupos',
+                ], 400
+            );
+        }
+
+        return response()->json([
+            'message' => 'Grupos creados correctamente',
+        ], 201);
+    }
 
     public function store(Request $request): JsonResponse
     {
@@ -46,7 +82,7 @@ class FichaController extends Controller
             // Ficha
             'idSede' => 'required|exists:sedes,id',
             'idAsignacion' => 'required|exists:aperturarprograma,id',
-            'codigo' => 'required|string|unique:ficha,codigo',
+            'codigo' => 'required|string',
             'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'documento' => 'nullable|file|mimes:pdf|max:5120',
             'idPrograma' => 'required|exists:programa,id',
@@ -405,7 +441,7 @@ class FichaController extends Controller
     {
         try {
             $validated = $request->validate([
-                'idInstructorLider' => 'required|exists:contrato,id'
+                'idInstructorLider' => 'nullable|exists:contrato,id'
             ]);
 
             $ficha = Ficha::with('asignacion.programa')->findOrFail($idFicha);
@@ -420,6 +456,7 @@ class FichaController extends Controller
             $idInstructorLider = $validated['idInstructorLider'];
 
             // Verificar que el instructor tenga el programa asignado
+            if ($idInstructorLider !== null) {
             $instructor = Contract::whereHas('programas', function ($query) use ($idPrograma) {
                 $query->where('programa.id', $idPrograma);
             })
@@ -431,6 +468,7 @@ class FichaController extends Controller
                 return response()->json([
                     'message' => 'El instructor seleccionado no tiene el programa de la ficha asignado en su contrato'
                 ], 422);
+            }
             }
 
             // Actualizar la ficha
