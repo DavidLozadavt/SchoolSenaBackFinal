@@ -38,7 +38,7 @@ class AperturarProgramaController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'observacion' => 'required|string|max:1000',
+            'observacion' => 'nullable|string|max:1000',
 
             'idPeriodo' => 'required|exists:periodo,id',
             'idPrograma' => 'required|exists:programa,id',
@@ -58,7 +58,7 @@ class AperturarProgramaController extends Controller
             'valorPension' => 'nullable|numeric',
             'diasMoraMatricula' => 'nullable|integer',
             'porcentajeMoraPension' => 'nullable|numeric',
-            'diaCobroPension' => 'nullable|integer',
+            'diaCobro' => 'nullable|integer',
             //Nuevo campo
             'idJornada' => 'required|exists:jornadas,id'
         ]);
@@ -103,7 +103,7 @@ class AperturarProgramaController extends Controller
             'valorPension' => 'nullable|numeric',
             'diasMoraMatricula' => 'nullable|integer',
             'porcentajeMoraPension' => 'nullable|numeric',
-            'diaCobroPension' => 'nullable|integer',
+            'diaCobro' => 'nullable|integer',
             //Nuevo campo
             'idJornada' => 'nullable|exists:jornadas,id'
         ]);
