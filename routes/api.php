@@ -760,6 +760,13 @@ Route::get('configuraciones_pago', [PagoController::class, 'getConfiguracionesPa
 Route::post('store_configuracion_pago', [PagoController::class, 'storeConfiguracionPago']);
 Route::put('update_configuracion_pago/{id}', [PagoController::class, 'updateConfiguracionPago']);
 Route::delete('delete_configuracion_pago/{id}', [PagoController::class, 'destroyConfiguracionPago']);
+Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
+Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
+Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);
+Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
+Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
+Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
 
 
 
