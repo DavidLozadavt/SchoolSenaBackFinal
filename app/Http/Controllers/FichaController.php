@@ -61,6 +61,7 @@ class FichaController extends Controller
                     'idInfraestructura' => null,
                     'porcentajeEjecucion' => 100,
                     'idRegional' => $idRegional ?? null,
+                    'idTipoGrado' => $validated['idTipoGrado'] ?? null,
                 ]);
             }
         } catch (\Exception $e) {
