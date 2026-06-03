@@ -474,12 +474,11 @@ class FichaController extends Controller
         try {
             // Buscar la ficha con todas sus relaciones
             $ficha = Ficha::with([
-                'jornada',
                 'asignacion' => function ($query) {
                     $query->with([
                         'periodo',
                         'programa',
-                        'sede'
+                        'sede',
                     ]);
                 },
                 'sede',
@@ -513,7 +512,6 @@ class FichaController extends Controller
     {
         $validated = $request->validate([
             // Ficha
-            'idJornada' => 'required|exists:jornadas,id',
             'idSede' => 'required|exists:sedes,id',
             'idAsignacion' => 'required|exists:aperturarprograma,id',
             'codigo' => ['required','string'],
@@ -521,6 +519,7 @@ class FichaController extends Controller
             'documento' => 'nullable|file|mimes:pdf|max:5120',
             'idPrograma' => 'required|exists:programa,id',
             'idInfraestructura' => 'required|exists:infraestructura,id',
+            'idTipoGrado' => 'nullable|exists:tipoGrado,id',
         ]);
 
         DB::beginTransaction();
@@ -637,7 +636,6 @@ class FichaController extends Controller
 
             // Actualizar la ficha
             $ficha->update([
-                'idJornada' => $validated['idJornada'],
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
@@ -645,13 +643,14 @@ class FichaController extends Controller
                 'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
                 'documento' => $rutaDocumento,
                 'idAsignacion' => $validated['idAsignacion'],
+                'idTipoGrado' => $validated['idTipoGrado'] ?? null,
             ]);
 
             DB::commit();
 
             // Recargar las relaciones
             $ficha->load([
-                'jornada',
+                'tipoGrado',
                 'asignacion',
                 'sede',
                 'infraestructura',
