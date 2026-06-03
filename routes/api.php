@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\SchoolBridgeController;
 use App\Http\Controllers\EventoController;
 use App\Http\Controllers\GestionEventoHermanoController;
 use App\Http\Controllers\GestionEventoItemController;
@@ -178,9 +179,13 @@ use App\Http\Controllers\ReunionesTemporalesController;
 
 Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
+// Integración con ERP
+Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
+
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
+Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
 Route::group([
     'middleware' => 'api',
@@ -757,6 +762,13 @@ Route::get('configuraciones_pago', [PagoController::class, 'getConfiguracionesPa
 Route::post('store_configuracion_pago', [PagoController::class, 'storeConfiguracionPago']);
 Route::put('update_configuracion_pago/{id}', [PagoController::class, 'updateConfiguracionPago']);
 Route::delete('delete_configuracion_pago/{id}', [PagoController::class, 'destroyConfiguracionPago']);
+Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
+Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
+Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);
+Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
+Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
+Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
 
 
 
