@@ -27,6 +27,7 @@ class AperturarProgramaResource extends JsonResource
             'periodo' => $this->whenLoaded('periodo'),
             'programa' => $this->whenLoaded('programa'),
             'sede' => $this->whenLoaded('sede'),
+            'jornada' => $this->whenLoaded('jornada'),
         ], fn ($value) => !is_null($value));
     }
 }

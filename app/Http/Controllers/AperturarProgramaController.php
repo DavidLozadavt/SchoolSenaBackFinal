@@ -24,7 +24,7 @@ class AperturarProgramaController extends Controller
             'idSede' => 'nullable|exists:sedes,id'
         ]);
 
-        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre'])
+        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'jornada:id,nombreJornada'])
             ->where('fechaFinalMatriculas', '<=', Carbon::today()->toDateString())
             ->where('idPrograma', $validated['idPrograma'])
             ->when(isset($validated['idSede']), function ($query) use ($validated) {
@@ -59,6 +59,8 @@ class AperturarProgramaController extends Controller
             'diasMoraMatricula' => 'nullable|integer',
             'porcentajeMoraPension' => 'nullable|numeric',
             'diaCobroPension' => 'nullable|integer',
+            //Nuevo campo
+            'idJornada' => 'required|exists:jornada,id'
         ]);
 
         $apertura = AperturarPrograma::create($validated);
@@ -102,6 +104,8 @@ class AperturarProgramaController extends Controller
             'diasMoraMatricula' => 'nullable|integer',
             'porcentajeMoraPension' => 'nullable|numeric',
             'diaCobroPension' => 'nullable|integer',
+            //Nuevo campo
+            'idJornada' => 'nullable|exists:jornada,id'
         ]);
 
         $apertura->update($validated);
