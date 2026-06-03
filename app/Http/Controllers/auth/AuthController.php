@@ -15,6 +15,10 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use Agence104\LiveKit\AccessToken;
+use Agence104\LiveKit\AccessTokenOptions;
+use Agence104\LiveKit\VideoGrant;
+use App\Models\ReunionesTemporales;
 
 class AuthController extends Controller
 {
@@ -180,5 +184,90 @@ class AuthController extends Controller
         }
 
         return response()->json($userData);
+    }
+
+
+    public function tokenLivekit(Request $request)
+{
+    $request->validate([
+        'codigo' => ['nullable', 'string', 'max:20'],
+        'room' => ['nullable', 'string', 'max:100'],
+    ]);
+
+    $user = auth()->user();
+    $persona = $user->persona;
+
+    $nombreCompleto = trim(implode(' ', array_filter([
+        $persona->nombre1 ?? null,
+        $persona->nombre2 ?? null,
+        $persona->apellido1 ?? null,
+        $persona->apellido2 ?? null,
+    ])));
+
+    $nombreCompleto = $nombreCompleto ?: 'Invitado';
+    $avatarUrl = $persona->rutaFotoUrl ?? null;
+
+    $metadata = json_encode([
+        'avatar' => $avatarUrl,
+    ]);
+
+    $codigo = strtoupper(trim((string) $request->input('codigo', '')));
+    $room = $request->input('room', 'default-room');
+
+    $expiresAt = null;
+
+    if ($codigo !== '') {
+        $reunion = ReunionesTemporales::where('codigo', $codigo)->first();
+
+        if (!$reunion) {
+            return response()->json([
+                'message' => 'Código inválido.'
+            ], 404);
+        }
+
+        if ($reunion->expires_at && now()->greaterThanOrEqualTo($reunion->expires_at)) {
+            return response()->json([
+                'message' => 'El código ya expiró.'
+            ], 403);
+        }
+
+        // 👇 NUEVO: validar que la reunión ya haya iniciado
+        if ($reunion->start_at && now()->lessThan($reunion->start_at)) {
+            return response()->json([
+                'message' => 'La reunión aún no ha iniciado. Inicia el: ' . $reunion->start_at->format('d/m/Y H:i')
+            ], 403);
+        }
+
+        $room = $reunion->room_name;
+        $expiresAt = $reunion->expires_at;
+    }
+
+
+        $tokenOptions = (new AccessTokenOptions())
+            ->setIdentity((string) $user->id)
+            ->setName($nombreCompleto)
+            ->setMetadata($metadata);
+
+        $videoGrant = (new VideoGrant())
+            ->setRoomJoin()
+            ->setRoomName($room)
+            ->setCanPublish(true)
+            ->setCanSubscribe(true)
+            ->setCanPublishData(true);
+
+        $token = (new AccessToken(
+            config('services.livekit.key'),
+            config('services.livekit.secret')
+        ))
+            ->init($tokenOptions)
+            ->setGrant($videoGrant)
+            ->toJwt();
+
+        return response()->json([
+            'token' => $token,
+            'url' => config('services.livekit.url'),
+            'room' => $room,
+            'expires_at' => $expiresAt?->toIso8601String(),
+        ]);
     }
 }

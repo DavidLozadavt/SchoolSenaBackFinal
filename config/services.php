@@ -37,6 +37,10 @@ return [
         'password' => env('FACTUS_PASSWORD'),
         'timeout' => env('FACTUS_TIMEOUT', 10),
         ],
-
-
+     
+    'livekit' => [
+        'key' => env('LIVEKIT_API_KEY'),
+        'secret' => env('LIVEKIT_API_SECRET'),
+        'url' => env('LIVEKIT_URL'),
+    ],
 ];

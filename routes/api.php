@@ -163,6 +163,7 @@ use App\Http\Controllers\SancionesController;
 use App\Http\Controllers\AnexoActaController;
 use App\Http\Controllers\gestion_solicitudes_instructor\SolicitudMateriaController;
 use App\Http\Controllers\InstructorLiderController;
+use App\Http\Controllers\ReunionesTemporalesController;
 
 /*
 |--------------------------------------------------------------------------
@@ -194,6 +195,7 @@ Route::group([
     Route::post('permissions', [AuthController::class, 'getPermissions']);
     Route::get('user_mobile', [AuthController::class, 'getUserAppMobile']);
     Route::get('get_users_and_groups', [Gestion_usuarioUserController::class, 'getUsersAndGroups']);
+    Route::post('token_livekit', [AuthController::class, 'tokenLivekit']);
 });
 
 //olvidaste contraseña
@@ -1690,4 +1692,9 @@ Route::middleware('auth:api')->group(function () {
     Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
     Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
     Route::get('aperturarprograma/disponibles', [AperturarProgramaController::class, 'aperturasDisponibles']);
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('reuniones_temporales', ReunionesTemporalesController::class);
+    Route::post('reuniones_temporales/{reunion}/extend', [ReunionesTemporalesController::class, 'extend']);
 });
