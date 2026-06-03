@@ -134,7 +134,7 @@ class PensumController extends Controller
                             $sub->where('idCentroFormacion', $idCentro);
                         });
                     }, 'aperturarProgramas as aperturas_activas_count' => function ($q) use ($idCentro) {
-                    $q->where('fechaFinalMatriculas', '<=', Carbon::today()->toDateString())
+                    $q->where('fechaFinalPlanMejoramiento', '>=', Carbon::today()->toDateString())
                       ->whereHas('sede', function ($sub) use ($idCentro) {
                           $sub->where('idCentroFormacion', $idCentro);
                       });
