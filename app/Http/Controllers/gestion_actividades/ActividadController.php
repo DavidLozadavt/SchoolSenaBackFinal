@@ -936,7 +936,9 @@ class ActividadController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'comentarioEstudiante' => 'nullable|string|max:3000',
-                'archivo' => 'nullable|file|max:10240',
+                'archivo' => 'nullable|file|max:51200',
+            ], [
+                'archivo.max' => 'El archivo supera el tamaño máximo permitido de 50 MB.',
             ]);
 
             $validator->after(function ($v) use ($request) {

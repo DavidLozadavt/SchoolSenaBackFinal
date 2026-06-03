@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\SchoolBridgeController;
 use App\Http\Controllers\EventoController;
 use App\Http\Controllers\GestionEventoHermanoController;
 use App\Http\Controllers\GestionEventoItemController;
@@ -177,9 +178,13 @@ use App\Http\Controllers\InstructorLiderController;
 
 Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
+// Integración con ERP
+Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
+
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
+Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
 Route::group([
     'middleware' => 'api',
