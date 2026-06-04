@@ -300,6 +300,220 @@ class FormularioController extends Controller
                 }
             }
 
+            // Si es el formulario de inscripción pública de estudiantes, generar registros académicos y factura para validar
+            if ($formulario->slug === 'inscripcion-estudiantes') {
+                $studentName = '';
+                $studentDocType = 'CC';
+                $studentDocNum = '';
+                $studentBirthDate = null;
+                $studentEmail = '';
+                $studentPhone = '';
+                $studentPhoneSec = '';
+                $programName = '';
+                $tutorName = '';
+                $tutorParentesco = '';
+                $tutorDocNum = '';
+                $tutorPhone = '';
+                $tutorEmail = '';
+
+                foreach ($respuesta->respuestas as $resp) {
+                    $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
+                    if (!$preg) continue;
+                    $val = $resp['valor'] ?? '';
+                    if (is_array($val)) $val = implode(', ', $val);
+                    $titleLower = mb_strtolower(trim($preg->titulo));
+
+                    if (str_contains($titleLower, 'nombre completo del estudiante') || str_contains($titleLower, 'nombre completo del aspirante')) {
+                        $studentName = $val;
+                    } elseif (str_contains($titleLower, 'tipo de documento')) {
+                        $studentDocType = $val;
+                    } elseif (str_contains($titleLower, 'número de documento') || str_contains($titleLower, 'numero de documento')) {
+                        $studentDocNum = $val;
+                    } elseif (str_contains($titleLower, 'fecha de nacimiento')) {
+                        $studentBirthDate = $val;
+                    } elseif (str_contains($titleLower, 'correo electrónico') || str_contains($titleLower, 'correo electronico')) {
+                        $studentEmail = $val;
+                    } elseif (str_contains($titleLower, 'teléfono') || str_contains($titleLower, 'telefono')) {
+                        if (str_contains($titleLower, 'secundario')) {
+                            $studentPhoneSec = $val;
+                        } else {
+                            $studentPhone = $val;
+                        }
+                    } elseif (str_contains($titleLower, 'programa de')) {
+                        $programName = $val;
+                    } elseif (str_contains($titleLower, 'nombre completo del tutor') || str_contains($titleLower, 'nombre completo del acudiente')) {
+                        $tutorName = $val;
+                    } elseif (str_contains($titleLower, 'parentesco')) {
+                        $tutorParentesco = $val;
+                    } elseif (str_contains($titleLower, 'identificación del tutor') || str_contains($titleLower, 'identificacion del tutor') || str_contains($titleLower, 'identificación del acudiente')) {
+                        $tutorDocNum = $val;
+                    } elseif (str_contains($titleLower, 'teléfono del tutor') || str_contains($titleLower, 'telefono del tutor') || str_contains($titleLower, 'teléfono del acudiente')) {
+                        $tutorPhone = $val;
+                    } elseif (str_contains($titleLower, 'correo del tutor') || str_contains($titleLower, 'correo del acudiente')) {
+                        $tutorEmail = $val;
+                    }
+                }
+
+                // Generar partes del nombre del estudiante
+                $parts = explode(' ', preg_replace('/\s+/', ' ', trim($studentName)));
+                $nombre1 = $parts[0] ?? '';
+                $nombre2 = count($parts) > 2 ? implode(' ', array_slice($parts, 1, -1)) : '';
+                $apellido1 = count($parts) > 1 ? end($parts) : '';
+                $apellido2 = '';
+
+                // 1. Crear o actualizar Tercero del estudiante
+                $terceroEstudiante = \App\Models\Tercero::updateOrCreate(
+                    ['identificacion' => $studentDocNum, 'idCompany' => $formulario->idCompany],
+                    [
+                        'nombre' => $studentName,
+                        'email' => $studentEmail,
+                        'telefono' => $studentPhone,
+                        'idCompany' => $formulario->idCompany
+                    ]
+                );
+
+                // 2. Crear o actualizar Person del estudiante
+                $personEstudiante = \App\Models\Person::updateOrCreate(
+                    ['identificacion' => $studentDocNum, 'idCompany' => $formulario->idCompany],
+                    [
+                        'nombre1' => $nombre1,
+                        'nombre2' => $nombre2,
+                        'apellido1' => $apellido1,
+                        'apellido2' => $apellido2,
+                        'email' => $studentEmail,
+                        'celular' => $studentPhone,
+                        'fechaNac' => $studentBirthDate,
+                        'idCompany' => $formulario->idCompany
+                    ]
+                );
+
+                // 3. Crear Tutor/Acudiente si es menor de edad
+                $idAcudiente = null;
+                $isMenorEdad = false;
+                if ($studentBirthDate) {
+                    $birth = \Carbon\Carbon::parse($studentBirthDate);
+                    if ($birth->age < 18) {
+                        $isMenorEdad = true;
+                    }
+                }
+                
+                // Also check if they answered "Sí" to a "menor de edad" question
+                foreach ($respuesta->respuestas as $resp) {
+                    $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
+                    if (!$preg) continue;
+                    $titleLower = mb_strtolower(trim($preg->titulo));
+                    if (str_contains($titleLower, 'menor de edad') || str_contains($titleLower, 'menor de 18')) {
+                        $val = mb_strtolower(trim($resp['valor'] ?? ''));
+                        if ($val === 'sí' || $val === 'si' || $val === 'yes') {
+                            $isMenorEdad = true;
+                        }
+                    }
+                }
+
+                if ($isMenorEdad && !empty($tutorDocNum)) {
+                    $tutorTercero = \App\Models\Tercero::updateOrCreate(
+                            ['identificacion' => $tutorDocNum, 'idCompany' => $formulario->idCompany],
+                            [
+                                'nombre' => $tutorName,
+                                'email' => $tutorEmail,
+                                'telefono' => $tutorPhone,
+                                'idCompany' => $formulario->idCompany
+                            ]
+                        );
+
+                        $tParts = explode(' ', preg_replace('/\s+/', ' ', trim($tutorName)));
+                        $tNombre1 = $tParts[0] ?? '';
+                        $tNombre2 = count($tParts) > 2 ? implode(' ', array_slice($tParts, 1, -1)) : '';
+                        $tApellido1 = count($tParts) > 1 ? end($tParts) : '';
+
+                        $tPerson = \App\Models\Person::updateOrCreate(
+                            ['identificacion' => $tutorDocNum, 'idCompany' => $formulario->idCompany],
+                            [
+                                'nombre1' => $tNombre1,
+                                'nombre2' => $tNombre2,
+                                'apellido1' => $tApellido1,
+                                'email' => $tutorEmail,
+                                'celular' => $tutorPhone,
+                                'idCompany' => $formulario->idCompany
+                            ]
+                        );
+                        $idAcudiente = $tPerson->id;
+                    }
+
+                // 4. Crear Matrícula en estado INSCRIPCION
+                $matricula = \App\Models\Matricula::create([
+                    'idPersona' => $personEstudiante->id,
+                    'idAcudiente' => $idAcudiente,
+                    'estado' => 'INSCRIPCION',
+                    'idCompany' => $formulario->idCompany
+                ]);
+
+                // Buscar proceso (Programa de Interés) y Configuración de Pago asociada
+                $proceso = \App\Models\Proceso::where('nombreProceso', $programName)->first();
+                $idConfigPago = null;
+                if ($proceso) {
+                    $asignacion = \App\Models\AsignacionProcesoPago::where('idProceso', $proceso->id)->first();
+                    if ($asignacion) {
+                        $idConfigPago = $asignacion->idConfiguracionPago;
+                    }
+                }
+
+                if (!$idConfigPago) {
+                    $configPago = \App\Models\ConfiguracionPago::where('idCompany', $formulario->idCompany)->first();
+                    $idConfigPago = $configPago?->id;
+                }
+
+                // 5. Generar Factura académica (solicitud)
+                $factura = new \App\Models\Factura();
+                $lastFactura = \App\Models\Factura::where('idTipoFactura', \App\Models\TipoFactura::VENTA)->orderBy('id', 'desc')->first();
+                $factura->numeroFactura = $lastFactura
+                    ? str_pad((int) $lastFactura->numeroFactura + 1, 5, '0', STR_PAD_LEFT)
+                    : '00001';
+                $factura->fecha = \Carbon\Carbon::now();
+                $factura->valor = 0;
+                $factura->valorIva = 0;
+                $factura->valorMasIva = 0;
+                $factura->idTercero = $terceroEstudiante->id;
+                $factura->idCompany = $formulario->idCompany;
+                $factura->idTipoFactura = \App\Models\TipoFactura::VENTA;
+                $factura->save();
+
+                // Detalle Factura
+                $detalleFactura = new \App\Models\DetalleFactura();
+                $detalleFactura->idFactura = $factura->id;
+                $detalleFactura->detalle = $programName ?: 'Proceso académico';
+                $detalleFactura->valor = 0;
+                if (\Schema::hasColumn('detalleFactura', 'idConfiguracionPago')) {
+                    $detalleFactura->idConfiguracionPago = $idConfigPago;
+                }
+                $detalleFactura->save();
+
+                // Transacción pendiente
+                $transaccion = new \App\Models\Transaccion();
+                $transaccion->valor = 0;
+                $transaccion->hora = \Carbon\Carbon::now()->format('H:i');
+                $transaccion->fechaTransaccion = \Carbon\Carbon::now();
+                $transaccion->tipoCartera = 'CXC';
+                $transaccion->idTipoTransaccion = \App\Models\TipoTransaccion::VENTA;
+                $transaccion->idEstado = \App\Models\Status::ID_PENDIENTE;
+                $transaccion->excedente = 0;
+                $transaccion->save();
+
+                $asignacionFacturaTransaccion = new \App\Models\AsignacionFacturaTransaccion();
+                $asignacionFacturaTransaccion->idFactura = $factura->id;
+                $asignacionFacturaTransaccion->idTransaccion = $transaccion->id;
+                $asignacionFacturaTransaccion->save();
+
+                $pago = new \App\Models\Pago();
+                $pago->fechaPago = \Carbon\Carbon::now();
+                $pago->fechaReg = \Carbon\Carbon::now();
+                $pago->valor = 0;
+                $pago->excedente = 0;
+                $pago->idEstado = \App\Models\Status::ID_PENDIENTE;
+                $pago->idTransaccion = $transaccion->id;
+                $pago->save();
+            }
+
             DB::commit();
 
             return response()->json(['message' => 'Respuesta guardada con éxito', 'data' => $respuesta]);

@@ -399,6 +399,12 @@ class UserController extends Controller
                 $persona->firmaDigital = $this->storeFirmaDigital($request, $persona->firmaDigital);
             }
 
+            $persona->nombre1 = $request->input('nombre1');
+            $persona->nombre2 = $request->input('nombre2');
+            $persona->apellido1 = $request->input('apellido1');
+            $persona->apellido2 = $request->input('apellido2');
+            $persona->fechaNac = $request->input('fechaNac');
+
             $persona->email = $request->input('email');
             $persona->telefonoFijo = $request->input('telefonoFijo');
             $persona->celular = $request->input('celular');

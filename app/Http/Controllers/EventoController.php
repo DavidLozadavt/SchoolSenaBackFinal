@@ -80,6 +80,15 @@ class EventoController extends Controller
      */
     public function store(Request $request)
     {
+        foreach (['idArea', 'idFormularioInterno', 'idGrupoMultimedia'] as $key) {
+            if ($request->has($key)) {
+                $val = $request->input($key);
+                if ($val === 'null' || $val === 'undefined' || $val === '') {
+                    $request->merge([$key => null]);
+                }
+            }
+        }
+
         $request->validate([
             'nombre'       => 'required|string|max:255',
             'fechaInicial' => 'required|date',
@@ -107,7 +116,7 @@ class EventoController extends Controller
             $evento->tipoEvento   = $request->input('tipoEvento', 'PRESENCIAL');
             $evento->estado       = $request->input('estado', 'PENDIENTE');
             $evento->esPublico    = filter_var($request->input('esPublico', true), FILTER_VALIDATE_BOOLEAN);
-            $evento->idArea       = $request->input('idArea') ?: null;
+            $evento->idArea       = $request->input('idArea');
             $evento->formUrl      = $request->input('formUrl');
             $evento->formProvider = $request->input('formProvider');
             $evento->idFormularioInterno = $request->input('idFormularioInterno');
@@ -153,6 +162,15 @@ class EventoController extends Controller
      */
     public function update(Request $request, $id)
     {
+        foreach (['idArea', 'idFormularioInterno', 'idGrupoMultimedia'] as $key) {
+            if ($request->has($key)) {
+                $val = $request->input($key);
+                if ($val === 'null' || $val === 'undefined' || $val === '') {
+                    $request->merge([$key => null]);
+                }
+            }
+        }
+
         $evento = Evento::findOrFail($id);
 
         if ($request->has('nombre'))       $evento->nombre       = $request->input('nombre');
@@ -165,7 +183,7 @@ class EventoController extends Controller
         if ($request->has('tipoEvento'))   $evento->tipoEvento   = $request->input('tipoEvento');
         if ($request->has('estado'))       $evento->estado       = $request->input('estado');
         if ($request->has('esPublico'))    $evento->esPublico    = filter_var($request->input('esPublico'), FILTER_VALIDATE_BOOLEAN);
-        $evento->idArea = $request->input('idArea') ?: null;
+        if ($request->has('idArea'))       $evento->idArea       = $request->input('idArea');
         if ($request->has('formUrl'))      $evento->formUrl      = $request->input('formUrl');
         if ($request->has('formProvider')) $evento->formProvider = $request->input('formProvider');
         if ($request->has('idFormularioInterno')) $evento->idFormularioInterno = $request->input('idFormularioInterno');
