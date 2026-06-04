@@ -41,7 +41,10 @@ class MatriculaAcademicaController extends Controller
                 'ficha',
                 'materia'
             ])
-            ->where('idMateria', $idMateria);
+            ->where('idMateria', $idMateria)
+            ->whereHas('matricula', function ($query) {
+                $query->where('estado', 'EN FORMACION');
+            });
  
             if ($idFicha) {
                 $matriculasAcademicas->where('idFicha', $idFicha);
