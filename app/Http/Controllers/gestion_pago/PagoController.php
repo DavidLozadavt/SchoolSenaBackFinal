@@ -1709,8 +1709,16 @@ class PagoController extends Controller
 
         $factura->refresh();
         $factura->load(['detalles', 'tercero', 'transacciones.pago.estado']);
+        $proceso = $this->inferirProcesoFacturaAcademica($factura);
         $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
         $solicitud = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
+
+        /** @var \App\Services\Inscripcion\SeguimientoInscripcionService $seguimientoService */
+        $seguimientoService = app(\App\Services\Inscripcion\SeguimientoInscripcionService::class);
+        $seguimiento = $seguimientoService->obtenerPorFactura($idFactura);
+        if ($seguimiento) {
+            $seguimientoService->marcarInscripcionAprobada($seguimiento);
+        }
 
         return response()->json([
             'message' => 'Validación de inscripción aprobada.',
@@ -1737,11 +1745,13 @@ class PagoController extends Controller
         $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
         $solicitud = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
         $estudiante = $this->formatearEstudianteSolicitud($factura, $idCompany);
+        $datosFormulario = $this->resolverDatosFormularioInscripcion($factura, $idCompany);
 
         return response()->json([
             'solicitud' => $solicitud,
             'factura' => $facturaPayload,
             'estudiante' => $estudiante,
+            'datosFormulario' => $datosFormulario,
         ]);
     }
 
@@ -1788,9 +1798,15 @@ class PagoController extends Controller
     ): array {
         $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany);
         $persona = $matricula?->person;
+        $datosFormulario = $this->resolverDatosFormularioInscripcion($factura, $idCompany);
+        $estForm = $datosFormulario['estudiante'] ?? [];
+
         $nombreEstudiante = $this->formatearNombrePersona($persona)
+            ?? ($estForm['nombreCompleto'] ?? null)
             ?? ($factura->tercero->nombre ?? 'Estudiante');
-        $documento = $persona?->identificacion ?? ($factura->tercero->identificacion ?? '');
+        $documento = $persona?->identificacion
+            ?? ($estForm['documento'] ?? null)
+            ?? ($factura->tercero->identificacion ?? '');
         $estadoFactura = strtoupper((string) ($facturaPayload['estado'] ?? 'PENDIENTE'));
         $saldoPendiente = (float) ($facturaPayload['saldoPendiente'] ?? 0);
         $validacionAprobada = $this->solicitudValidacionAprobada($factura);
@@ -1810,8 +1826,8 @@ class PagoController extends Controller
             'idTercero' => $factura->idTercero,
             'nombreEstudiante' => $nombreEstudiante,
             'documento' => $documento,
-            'email' => $persona?->email ?? ($factura->tercero->email ?? null),
-            'telefono' => $persona?->celular ?? ($factura->tercero->telefono ?? null),
+            'email' => $persona?->email ?? ($estForm['email'] ?? null) ?? ($factura->tercero->email ?? null),
+            'telefono' => $persona?->celular ?? ($estForm['telefono'] ?? null) ?? ($factura->tercero->telefono ?? null),
             'idMatricula' => $matricula?->id,
             'estadoMatricula' => $matricula?->estado,
             'idPrograma' => $proceso instanceof Proceso ? (int) $proceso->id : null,
@@ -1831,7 +1847,118 @@ class PagoController extends Controller
             'totalFactura' => (float) ($facturaPayload['valor'] ?? 0),
             'idTransaccion' => $facturaPayload['idTransaccion'] ?? null,
             'requierePago' => $saldoPendiente > 0 && $estadoFactura === 'PENDIENTE',
+            'seguimiento' => $this->formatearSeguimientoAdmin($factura, $idCompany),
+            'idFormularioRespuesta' => $datosFormulario['idFormularioRespuesta'] ?? null,
         ];
+    }
+
+
+    private function resolverDatosFormularioInscripcion(Factura $factura, int $idCompany): ?array
+    {
+        /** @var \App\Services\Inscripcion\FormularioInscripcionDatosService $service */
+        $service = app(\App\Services\Inscripcion\FormularioInscripcionDatosService::class);
+
+        /** @var \App\Services\Inscripcion\SeguimientoInscripcionService $seguimientoService */
+        $seguimientoService = app(\App\Services\Inscripcion\SeguimientoInscripcionService::class);
+        $seguimiento = $seguimientoService->obtenerPorFactura((int) $factura->id);
+        $idRespuesta = $seguimiento?->idFormularioRespuesta;
+
+        return $service->resolverParaFactura($factura->tercero, $idCompany, $idRespuesta ? (int) $idRespuesta : null);
+    }
+
+
+    /**
+     * Paso 1 wizard: confirma información del estudiante y envía correo con enlace al portal.
+     */
+    public function confirmarInformacionSeguimientoInscripcion(Request $request, int $idFactura)
+    {
+        $request->validate([
+            'correo' => ['required', 'email', 'max:255'],
+            'fechaLimitePago' => ['nullable', 'date'],
+            'observaciones' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = $this->queryFacturasAcademicas($idCompany)
+            ->where('id', $idFactura)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Solicitud no encontrada.'], 404);
+        }
+
+        $proceso = $this->inferirProcesoFacturaAcademica($factura);
+        $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany);
+        $persona = $matricula?->person;
+
+        /** @var \App\Services\Inscripcion\SeguimientoInscripcionService $seguimientoService */
+        $seguimientoService = app(\App\Services\Inscripcion\SeguimientoInscripcionService::class);
+
+        $seguimiento = $seguimientoService->crearOActualizarBorrador(
+            $factura,
+            $proceso,
+            $idCompany,
+            $matricula,
+            $persona
+        );
+
+        $datosFormulario = $this->resolverDatosFormularioInscripcion($factura, $idCompany);
+        if ($datosFormulario && !empty($datosFormulario['idFormularioRespuesta'])) {
+            $seguimiento->idFormularioRespuesta = (int) $datosFormulario['idFormularioRespuesta'];
+            $seguimiento->save();
+        }
+
+        try {
+            $seguimiento = $seguimientoService->confirmarInformacionYEnviarCorreo(
+                $seguimiento,
+                $request->input('correo'),
+                auth()->id(),
+                $request->input('fechaLimitePago'),
+                $request->input('observaciones')
+            );
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'No fue posible enviar el correo de inscripción.',
+                'detalle' => $e->getMessage(),
+            ], 500);
+        }
+
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $solicitud = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
+
+        return response()->json([
+            'message' => 'Información confirmada y correo enviado al estudiante.',
+            'solicitud' => $solicitud,
+            'seguimiento' => $seguimientoService->formatearParaAdmin($seguimiento),
+        ]);
+    }
+
+
+    private function formatearSeguimientoAdmin(Factura $factura, int $idCompany): ?array
+    {
+        /** @var \App\Services\Inscripcion\SeguimientoInscripcionService $seguimientoService */
+        $seguimientoService = app(\App\Services\Inscripcion\SeguimientoInscripcionService::class);
+        $seguimiento = $seguimientoService->obtenerPorFactura((int) $factura->id);
+
+        if (!$seguimiento) {
+            $proceso = $this->inferirProcesoFacturaAcademica($factura);
+            $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany);
+            $seguimiento = $seguimientoService->crearOActualizarBorrador(
+                $factura,
+                $proceso,
+                $idCompany,
+                $matricula,
+                $matricula?->person
+            );
+
+            $datosFormulario = $this->resolverDatosFormularioInscripcion($factura, $idCompany);
+            if ($datosFormulario && !empty($datosFormulario['idFormularioRespuesta'])) {
+                $seguimiento->idFormularioRespuesta = (int) $datosFormulario['idFormularioRespuesta'];
+                $seguimiento->save();
+            }
+        }
+
+        return $seguimientoService->formatearParaAdmin($seguimiento);
     }
 
 
@@ -1839,17 +1966,35 @@ class PagoController extends Controller
     {
         $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany);
         $persona = $matricula?->person;
+        $datosFormulario = $this->resolverDatosFormularioInscripcion($factura, $idCompany);
+        $estForm = $datosFormulario['estudiante'] ?? [];
 
         if (!$persona && $factura->tercero) {
             return [
                 'idPersona' => null,
                 'idMatricula' => $matricula?->id,
-                'nombreCompleto' => $factura->tercero->nombre ?? 'Estudiante',
-                'tipoDocumento' => 'CC',
-                'documento' => $factura->tercero->identificacion ?? '',
-                'email' => $factura->tercero->email,
-                'celular' => $factura->tercero->telefono,
-                'telefono' => $factura->tercero->telefono,
+                'nombreCompleto' => $estForm['nombreCompleto'] ?? ($factura->tercero->nombre ?? 'Estudiante'),
+                'tipoDocumento' => $estForm['tipoDocumento'] ?? 'CC',
+                'documento' => $estForm['documento'] ?? ($factura->tercero->identificacion ?? ''),
+                'email' => $estForm['email'] ?? $factura->tercero->email,
+                'celular' => $estForm['telefono'] ?? $factura->tercero->telefono,
+                'telefono' => $estForm['telefono'] ?? $factura->tercero->telefono,
+                'fechaNacimiento' => $estForm['fechaNacimiento'] ?? null,
+                'estadoMatricula' => $matricula?->estado,
+            ];
+        }
+
+        if (!$persona && !empty($estForm)) {
+            return [
+                'idPersona' => null,
+                'idMatricula' => $matricula?->id,
+                'nombreCompleto' => $estForm['nombreCompleto'] ?? 'Estudiante',
+                'tipoDocumento' => $estForm['tipoDocumento'] ?? 'CC',
+                'documento' => $estForm['documento'] ?? '',
+                'email' => $estForm['email'] ?? null,
+                'celular' => $estForm['telefono'] ?? null,
+                'telefono' => $estForm['telefono'] ?? null,
+                'fechaNacimiento' => $estForm['fechaNacimiento'] ?? null,
                 'estadoMatricula' => $matricula?->estado,
             ];
         }

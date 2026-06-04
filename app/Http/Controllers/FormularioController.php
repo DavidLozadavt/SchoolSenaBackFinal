@@ -302,6 +302,23 @@ class FormularioController extends Controller
 
             DB::commit();
 
+            if ($formulario->slug === \App\Services\Inscripcion\FormularioInscripcionDatosService::SLUG_INSCRIPCION) {
+                /** @var \App\Services\Inscripcion\FormularioInscripcionDatosService $inscripcionDatos */
+                $inscripcionDatos = app(\App\Services\Inscripcion\FormularioInscripcionDatosService::class);
+                $tercero = $inscripcionDatos->sincronizarTerceroDesdeRespuesta(
+                    $respuesta,
+                    (int) ($formulario->idCompany ?? 1)
+                );
+
+                /** @var \App\Services\Inscripcion\SeguimientoInscripcionService $seguimientoService */
+                $seguimientoService = app(\App\Services\Inscripcion\SeguimientoInscripcionService::class);
+                $seguimientoService->registrarSolicitudDesdeFormulario(
+                    $respuesta,
+                    (int) ($formulario->idCompany ?? 1),
+                    $tercero
+                );
+            }
+
             return response()->json(['message' => 'Respuesta guardada con éxito', 'data' => $respuesta]);
         } catch (\Exception $e) {
             DB::rollBack();

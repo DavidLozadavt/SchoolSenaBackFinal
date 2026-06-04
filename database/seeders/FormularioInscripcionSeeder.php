@@ -75,18 +75,25 @@ class FormularioInscripcionSeeder extends Seeder
                 'orden' => 6,
             ],
             [
+                'titulo' => 'Programa de Interés',
+                'tipo' => 'texto_corto',
+                'descripcion' => 'Indique el programa o proceso académico al que aspira inscribirse.',
+                'esObligatoria' => true,
+                'orden' => 7,
+            ],
+            [
                 'titulo' => 'Nombre Completo del Tutor / Acudiente',
                 'tipo' => 'texto_corto',
                 'descripcion' => 'Nombre completo del representante legal responsable del alumno.',
                 'esObligatoria' => true,
-                'orden' => 7,
+                'orden' => 8,
             ],
             [
                 'titulo' => 'Parentesco del Tutor',
                 'tipo' => 'desplegable',
                 'descripcion' => 'Relación familiar del acudiente con el estudiante.',
                 'esObligatoria' => true,
-                'orden' => 8,
+                'orden' => 9,
                 'opciones' => ['Madre', 'Padre', 'Abuelo/a', 'Tío/a', 'Hermano/a mayor de edad', 'Tutor Legal']
             ],
             [
@@ -94,28 +101,28 @@ class FormularioInscripcionSeeder extends Seeder
                 'tipo' => 'texto_corto',
                 'descripcion' => 'Número de documento del acudiente.',
                 'esObligatoria' => true,
-                'orden' => 9,
+                'orden' => 10,
             ],
             [
                 'titulo' => 'Teléfono del Tutor',
                 'tipo' => 'texto_corto',
                 'descripcion' => 'Teléfono de contacto prioritario para emergencias.',
                 'esObligatoria' => true,
-                'orden' => 10,
+                'orden' => 11,
             ],
             [
                 'titulo' => 'Correo del Tutor',
                 'tipo' => 'texto_corto',
                 'descripcion' => 'Dirección de correo electrónico del acudiente.',
                 'esObligatoria' => true,
-                'orden' => 11,
+                'orden' => 12,
             ],
             [
                 'titulo' => 'Certificado de Estudios de la Institución Anterior',
                 'tipo' => 'texto_largo',
                 'descripcion' => 'Por favor, suba el último certificado académico en formato PDF o Imagen.',
                 'esObligatoria' => true,
-                'orden' => 12,
+                'orden' => 13,
             ],
         ];
 

@@ -181,11 +181,19 @@ Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
 // Integración con ERP
 Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
-
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
 Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
+
+// Seguimiento de inscripción (público, sin autenticación)
+Route::prefix('publico/seguimiento-inscripcion')->group(function () {
+    Route::match(['get', 'post'], 'consultar', [App\Http\Controllers\publico\SeguimientoInscripcionPublicoController::class, 'consultar']);
+    Route::get('buscar', [App\Http\Controllers\publico\SeguimientoInscripcionPublicoController::class, 'buscar']);
+    Route::get('{token}/factura-pdf', [App\Http\Controllers\publico\SeguimientoInscripcionPublicoController::class, 'descargarFacturaPdf']);
+    Route::post('{token}/comprobante', [App\Http\Controllers\publico\SeguimientoInscripcionPublicoController::class, 'subirComprobante']);
+    Route::get('{token}', [App\Http\Controllers\publico\SeguimientoInscripcionPublicoController::class, 'show']);
+});
 
 Route::group([
     'middleware' => 'api',
@@ -768,8 +776,17 @@ Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcadem
 Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
 Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
 Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/confirmar_informacion', [PagoController::class, 'confirmarInformacionSeguimientoInscripcion']);
 Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
-
+Route::get('solicitudes_recibidas', [App\Http\Controllers\gestion_pago\SolicitudesRecibidasAdminController::class, 'index']);
+Route::get('solicitudes_recibidas/{id}', [App\Http\Controllers\gestion_pago\SolicitudesRecibidasAdminController::class, 'show']);
+Route::post('solicitudes_recibidas/{id}/generar_factura', [App\Http\Controllers\gestion_pago\SolicitudesRecibidasAdminController::class, 'generarFactura']);
+Route::post('solicitudes_recibidas/{id}/confirmar_informacion', [App\Http\Controllers\gestion_pago\SolicitudesRecibidasAdminController::class, 'confirmarInformacion']);
+Route::post('solicitudes_recibidas/{id}/rechazar', [App\Http\Controllers\gestion_pago\SolicitudesRecibidasAdminController::class, 'rechazar']);
+Route::post('solicitudes_recibidas/{id}/solicitar_correccion', [App\Http\Controllers\gestion_pago\SolicitudesRecibidasAdminController::class, 'solicitarCorreccion']);
+Route::get('seguimiento_inscripcion/comprobantes', [App\Http\Controllers\gestion_pago\SeguimientoInscripcionAdminController::class, 'listarComprobantes']);
+Route::post('seguimiento_inscripcion/comprobantes/{id}/aprobar', [App\Http\Controllers\gestion_pago\SeguimientoInscripcionAdminController::class, 'aprobarComprobante']);
+Route::post('seguimiento_inscripcion/comprobantes/{id}/rechazar', [App\Http\Controllers\gestion_pago\SeguimientoInscripcionAdminController::class, 'rechazarComprobante']);
 
 
 //completar info persona natural afiliacion
