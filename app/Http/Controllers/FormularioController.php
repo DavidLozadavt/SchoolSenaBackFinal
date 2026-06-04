@@ -11,6 +11,7 @@ use App\Models\ParticipanteEvento;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use App\Util\KeyUtil;
 
 class FormularioController extends Controller
 {
@@ -19,7 +20,7 @@ class FormularioController extends Controller
      */
     public function index(Request $request)
     {
-        $idCompany = $request->user()->idempresa ?? 1; // Ajustar según cómo se obtiene la empresa
+        $idCompany = KeyUtil::idCompany();
 
         $formularios = Formulario::where('idCompany', $idCompany)
             ->withCount(['preguntas', 'respuestas'])
@@ -45,7 +46,7 @@ class FormularioController extends Controller
             $user = $request->user();
             
             $formulario = Formulario::create([
-                'idCompany' => $user->idempresa ?? 1, // Obtener empresa del usuario
+                'idCompany' => KeyUtil::idCompany(), // Obtener empresa del usuario
                 'idUser' => $user->id,
                 'titulo' => $request->titulo,
                 'descripcion' => $request->descripcion,

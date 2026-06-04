@@ -267,6 +267,13 @@ Route::post('update_status_user/{id}', [Gestion_usuarioUserController::class, 'u
 
 
 
+// Configuración de Inscripción para Colegios
+Route::middleware('auth:api')->group(function () {
+    Route::get('inscripcion/configuracion', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'getConfig']);
+    Route::post('inscripcion/configuracion', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'saveConfig']);
+    Route::get('inscripcion/formularios', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'getFormularios']);
+});
+
 Route::get('users_company', [CompanyController::class, 'getUsersCompany']);
 
 
