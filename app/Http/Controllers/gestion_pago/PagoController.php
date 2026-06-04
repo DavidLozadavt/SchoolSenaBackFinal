@@ -1749,7 +1749,7 @@ class PagoController extends Controller
         ]);
     }
 
-    private function resolverRespuestasFormulario(string $documento, int $idCompany, ?Factura $factura = null)
+    private function resolverRespuestaFormularioObj(string $documento, int $idCompany, ?Factura $factura = null)
     {
         $company = \App\Models\Company::find($idCompany);
         if (!$company || !$company->idFormularioInscripcion) {
@@ -1799,6 +1799,18 @@ class PagoController extends Controller
                     ->first();
             }
         }
+
+        return $respuestaObj;
+    }
+
+    private function resolverRespuestasFormulario(string $documento, int $idCompany, ?Factura $factura = null)
+    {
+        $company = \App\Models\Company::find($idCompany);
+        if (!$company || !$company->idFormularioInscripcion) {
+            return null;
+        }
+
+        $respuestaObj = $this->resolverRespuestaFormularioObj($documento, $idCompany, $factura);
 
         // 4. Formatear la respuesta si se encontró
         if ($respuestaObj) {
@@ -1878,6 +1890,16 @@ class PagoController extends Controller
             $saldoPendiente
         );
 
+        $respFormObj = $this->resolverRespuestaFormularioObj($documento, $idCompany, $factura);
+        $editado = false;
+        $fechaEditado = null;
+        if ($respFormObj && $respFormObj->updated_at && $respFormObj->created_at) {
+            if ($respFormObj->updated_at->diffInSeconds($respFormObj->created_at) > 5) {
+                $editado = true;
+                $fechaEditado = $respFormObj->updated_at->toDateTimeString();
+            }
+        }
+
         return [
             'idSolicitud' => (int) $factura->id,
             'idFactura' => (int) $factura->id,
@@ -1908,6 +1930,8 @@ class PagoController extends Controller
             'totalFactura' => (float) ($facturaPayload['valor'] ?? 0),
             'idTransaccion' => $facturaPayload['idTransaccion'] ?? null,
             'requierePago' => $saldoPendiente > 0 && $estadoFactura === 'PENDIENTE',
+            'editado' => $editado,
+            'fechaEditado' => $fechaEditado,
         ];
     }
 

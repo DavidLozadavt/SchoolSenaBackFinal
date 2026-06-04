@@ -233,9 +233,26 @@ class FormularioController extends Controller
             ->firstOrFail();
         
         $isAuth = Auth::check() || Auth::guard('api')->check();
+        $user = Auth::user() ?: Auth::guard('api')->user();
+
         if ($formulario->estado !== 'publicado' && !$isAuth) {
             return response()->json(['error' => 'Formulario no disponible'], 403);
         }
+
+        $ultimaRespuesta = null;
+        if ($user) {
+            $ultimaRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                ->where('idUser', $user->id)
+                ->orderBy('id', 'desc')
+                ->first();
+        } else {
+            $ultimaRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                ->where('ipAddress', request()->ip())
+                ->orderBy('id', 'desc')
+                ->first();
+        }
+
+        $formulario->setAttribute('ultima_respuesta', $ultimaRespuesta);
 
         return response()->json($formulario);
     }
@@ -262,20 +279,95 @@ class FormularioController extends Controller
 
         $userId = $user ? $user->id : null;
 
-        // Validar si ya respondió (si requiere auth y el formulario está publicado)
-        if ($formulario->estado === 'publicado' && $formulario->requiereAutenticacion && FormularioRespuesta::where('idFormulario', $formulario->id)->where('idUser', $userId)->exists()) {
-            return response()->json(['error' => 'Ya has respondido este formulario'], 403);
+        $studentDocNumInput = '';
+        $studentEmailInput = '';
+
+        foreach ($request->respuestas ?? [] as $resp) {
+            $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
+            if (!$preg) continue;
+            $val = $resp['valor'] ?? '';
+            if (is_array($val)) $val = implode(', ', $val);
+            $titleLower = mb_strtolower(trim($preg->titulo));
+
+            if (str_contains($titleLower, 'número') || str_contains($titleLower, 'numero') || str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion')) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $studentDocNumInput = trim($val);
+                }
+            }
+            elseif (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $studentEmailInput = trim($val);
+                }
+            }
         }
 
         try {
             DB::beginTransaction();
 
-            $respuesta = FormularioRespuesta::create([
-                'idFormulario' => $formulario->id,
-                'idUser' => $userId,
-                'ipAddress' => $request->ip(),
-                'respuestas' => $request->respuestas ?? [],
-            ]);
+            $existingRespuesta = null;
+            if ($userId) {
+                $existingRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                    ->where('idUser', $userId)
+                    ->first();
+            }
+
+            if (!$existingRespuesta && (!empty($studentDocNumInput) || !empty($studentEmailInput))) {
+                $allResponses = FormularioRespuesta::where('idFormulario', $formulario->id)->get();
+                foreach ($allResponses as $resp) {
+                    $listaResp = $resp->respuestas;
+                    if (is_array($listaResp)) {
+                        $hasMatchingDoc = false;
+                        $hasMatchingEmail = false;
+                        foreach ($listaResp as $r) {
+                            $preg = \App\Models\FormularioPregunta::find($r['idPregunta'] ?? 0);
+                            if (!$preg) continue;
+                            $val = trim(is_array($r['valor']) ? implode(', ', $r['valor']) : ($r['valor'] ?? ''));
+                            $titleLower = mb_strtolower(trim($preg->titulo));
+
+                            if (str_contains($titleLower, 'número') || str_contains($titleLower, 'numero') || str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion')) {
+                                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                                    if (!empty($studentDocNumInput) && $val === $studentDocNumInput) {
+                                        $hasMatchingDoc = true;
+                                    }
+                                }
+                            }
+                            if (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
+                                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                                    if (!empty($studentEmailInput) && strcasecmp($val, $studentEmailInput) === 0) {
+                                        $hasMatchingEmail = true;
+                                    }
+                                }
+                            }
+                        }
+                        if ($hasMatchingDoc || $hasMatchingEmail) {
+                            $existingRespuesta = $resp;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!$existingRespuesta) {
+                $existingRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                    ->where('ipAddress', $request->ip())
+                    ->first();
+            }
+
+            $isEditing = false;
+            if ($existingRespuesta) {
+                $existingRespuesta->update([
+                    'respuestas' => $request->respuestas ?? [],
+                ]);
+                $respuesta = $existingRespuesta;
+                $isEditing = true;
+            } else {
+                $respuesta = FormularioRespuesta::create([
+                    'idFormulario' => $formulario->id,
+                    'idUser' => $userId,
+                    'ipAddress' => $request->ip(),
+                    'respuestas' => $request->respuestas ?? [],
+                ]);
+            }
 
             // Auto-inscribir a evento si está asociado
             $evento = Evento::where('idFormularioInterno', $formulario->id)->first();
@@ -501,91 +593,104 @@ class FormularioController extends Controller
                 $fichaId = \App\Models\Ficha::value('id') ?? 1;
 
                 // 4. Crear Matrícula en estado INSCRIPCION
-                $matricula = \App\Models\Matricula::create([
-                    'idPersona' => $personEstudiante->id,
-                    'idAcudiente' => $idAcudiente,
-                    'estado' => 'INSCRIPCION',
-                    'idCompany' => $formulario->idCompany,
-                    'fecha' => \Carbon\Carbon::now(),
-                    'idGrado' => $gradoId,
-                    'idFicha' => $fichaId,
-                    'observacion' => 'FormResponseID:' . $respuesta->id,
-                ]);
+                if (!$isEditing) {
+                    $matricula = \App\Models\Matricula::create([
+                        'idPersona' => $personEstudiante->id,
+                        'idAcudiente' => $idAcudiente,
+                        'estado' => 'INSCRIPCION',
+                        'idCompany' => $formulario->idCompany,
+                        'fecha' => \Carbon\Carbon::now(),
+                        'idGrado' => $gradoId,
+                        'idFicha' => $fichaId,
+                        'observacion' => 'FormResponseID:' . $respuesta->id,
+                    ]);
 
-                // Buscar proceso (Programa de Interés) y Configuración de Pago asociada
-                $proceso = \App\Models\Proceso::where('nombreProceso', $programName)->first();
-                $idConfigPago = null;
-                if ($proceso) {
-                    $asignacion = \App\Models\AsignacionProcesoPago::where('idProceso', $proceso->id)->first();
-                    if ($asignacion) {
-                        $idConfigPago = $asignacion->idConfiguracionPago;
+                    // Buscar proceso (Programa de Interés) y Configuración de Pago asociada
+                    $proceso = \App\Models\Proceso::where('nombreProceso', $programName)->first();
+                    $idConfigPago = null;
+                    if ($proceso) {
+                        $asignacion = \App\Models\AsignacionProcesoPago::where('idProceso', $proceso->id)->first();
+                        if ($asignacion) {
+                            $idConfigPago = $asignacion->idConfiguracionPago;
+                        }
                     }
-                }
 
-                if (!$idConfigPago) {
-                    $configPago = \App\Models\ConfiguracionPago::where('idCompany', $formulario->idCompany)->first();
-                    if (!$configPago) {
-                        $configPago = \App\Models\ConfiguracionPago::create([
-                            'titulo' => 'Inscripción Estándar',
-                            'detalle' => 'Derechos de inscripción y matrícula',
-                            'valor' => 0,
-                            'estado' => 'ACTIVO',
-                            'idCompany' => $formulario->idCompany
+                    if (!$idConfigPago) {
+                        $configPago = \App\Models\ConfiguracionPago::where('idCompany', $formulario->idCompany)->first();
+                        if (!$configPago) {
+                            $configPago = \App\Models\ConfiguracionPago::create([
+                                'titulo' => 'Inscripción Estándar',
+                                'detalle' => 'Derechos de inscripción y matrícula',
+                                'valor' => 0,
+                                'estado' => 'ACTIVO',
+                                'idCompany' => $formulario->idCompany
+                            ]);
+                        }
+                        $idConfigPago = $configPago?->id;
+                    }
+
+                    // 5. Generar Factura académica (solicitud)
+                    $factura = new \App\Models\Factura();
+                    $lastFactura = \App\Models\Factura::where('idTipoFactura', \App\Models\TipoFactura::VENTA)->orderBy('id', 'desc')->first();
+                    $factura->numeroFactura = $lastFactura
+                        ? str_pad((int) $lastFactura->numeroFactura + 1, 5, '0', STR_PAD_LEFT)
+                        : '00001';
+                    $factura->fecha = \Carbon\Carbon::now();
+                    $factura->valor = 0;
+                    $factura->valorIva = 0;
+                    $factura->valorMasIva = 0;
+                    $factura->idTercero = $terceroEstudiante->id;
+                    $factura->idCompany = $formulario->idCompany;
+                    $factura->idTipoFactura = \App\Models\TipoFactura::VENTA;
+                    $factura->save();
+
+                    // Detalle Factura
+                    $detalleFactura = new \App\Models\DetalleFactura();
+                    $detalleFactura->idFactura = $factura->id;
+                    
+                    $configPago = \App\Models\ConfiguracionPago::find($idConfigPago);
+                    $detalleFactura->detalle = $configPago ? $configPago->titulo : ($programName ?: 'Proceso académico');
+                    $detalleFactura->valor = 0;
+                    if (\Schema::hasColumn('detalleFactura', 'idConfiguracionPago')) {
+                        $detalleFactura->idConfiguracionPago = $idConfigPago;
+                    }
+                    $detalleFactura->save();
+
+                    // Transacción pendiente
+                    $transaccion = new \App\Models\Transaccion();
+                    $transaccion->valor = 0;
+                    $transaccion->hora = \Carbon\Carbon::now()->format('H:i');
+                    $transaccion->fechaTransaccion = \Carbon\Carbon::now();
+                    $transaccion->idTipoTransaccion = \App\Models\TipoTransaccion::VENTA;
+                    $transaccion->idEstado = \App\Models\Status::ID_PENDIENTE;
+                    $transaccion->excedente = 0;
+                    $transaccion->save();
+
+                    $asignacionFacturaTransaccion = new \App\Models\AsignacionFacturaTransaccion();
+                    $asignacionFacturaTransaccion->idFactura = $factura->id;
+                    $asignacionFacturaTransaccion->idTransaccion = $transaccion->id;
+                    $asignacionFacturaTransaccion->save();
+
+                    $pago = new \App\Models\Pago();
+                    $pago->fechaPago = \Carbon\Carbon::now();
+                    $pago->fechaReg = \Carbon\Carbon::now();
+                    $pago->valor = 0;
+                    $pago->excedente = 0;
+                    $pago->idEstado = \App\Models\Status::ID_PENDIENTE;
+                    $pago->idTransaccion = $transaccion->id;
+                    $pago->save();
+                } else {
+                    $matricula = \App\Models\Matricula::where('idPersona', $personEstudiante->id)
+                        ->where('idCompany', $formulario->idCompany)
+                        ->orderBy('id', 'desc')
+                        ->first();
+                    if ($matricula) {
+                        $matricula->update([
+                            'idAcudiente' => $idAcudiente,
+                            'idGrado' => $gradoId,
                         ]);
                     }
-                    $idConfigPago = $configPago?->id;
                 }
-
-                // 5. Generar Factura académica (solicitud)
-                $factura = new \App\Models\Factura();
-                $lastFactura = \App\Models\Factura::where('idTipoFactura', \App\Models\TipoFactura::VENTA)->orderBy('id', 'desc')->first();
-                $factura->numeroFactura = $lastFactura
-                    ? str_pad((int) $lastFactura->numeroFactura + 1, 5, '0', STR_PAD_LEFT)
-                    : '00001';
-                $factura->fecha = \Carbon\Carbon::now();
-                $factura->valor = 0;
-                $factura->valorIva = 0;
-                $factura->valorMasIva = 0;
-                $factura->idTercero = $terceroEstudiante->id;
-                $factura->idCompany = $formulario->idCompany;
-                $factura->idTipoFactura = \App\Models\TipoFactura::VENTA;
-                $factura->save();
-
-                // Detalle Factura
-                $detalleFactura = new \App\Models\DetalleFactura();
-                $detalleFactura->idFactura = $factura->id;
-                
-                $configPago = \App\Models\ConfiguracionPago::find($idConfigPago);
-                $detalleFactura->detalle = $configPago ? $configPago->titulo : ($programName ?: 'Proceso académico');
-                $detalleFactura->valor = 0;
-                if (\Schema::hasColumn('detalleFactura', 'idConfiguracionPago')) {
-                    $detalleFactura->idConfiguracionPago = $idConfigPago;
-                }
-                $detalleFactura->save();
-
-                // Transacción pendiente
-                $transaccion = new \App\Models\Transaccion();
-                $transaccion->valor = 0;
-                $transaccion->hora = \Carbon\Carbon::now()->format('H:i');
-                $transaccion->fechaTransaccion = \Carbon\Carbon::now();
-                $transaccion->idTipoTransaccion = \App\Models\TipoTransaccion::VENTA;
-                $transaccion->idEstado = \App\Models\Status::ID_PENDIENTE;
-                $transaccion->excedente = 0;
-                $transaccion->save();
-
-                $asignacionFacturaTransaccion = new \App\Models\AsignacionFacturaTransaccion();
-                $asignacionFacturaTransaccion->idFactura = $factura->id;
-                $asignacionFacturaTransaccion->idTransaccion = $transaccion->id;
-                $asignacionFacturaTransaccion->save();
-
-                $pago = new \App\Models\Pago();
-                $pago->fechaPago = \Carbon\Carbon::now();
-                $pago->fechaReg = \Carbon\Carbon::now();
-                $pago->valor = 0;
-                $pago->excedente = 0;
-                $pago->idEstado = \App\Models\Status::ID_PENDIENTE;
-                $pago->idTransaccion = $transaccion->id;
-                $pago->save();
             }
 
             DB::commit();
