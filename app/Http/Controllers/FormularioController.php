@@ -301,8 +301,14 @@ class FormularioController extends Controller
                 }
             }
 
-            // Si es el formulario de inscripción pública de estudiantes, generar registros académicos y factura para validar
-            if ($formulario->slug === 'inscripcion-estudiantes') {
+            // Si es el formulario de inscripción pública de estudiantes o el configurado para la empresa, generar registros académicos y factura para validar
+            $isEnrollmentForm = false;
+            $companyConfig = \App\Models\Company::find($formulario->idCompany);
+            if ($companyConfig && $companyConfig->idFormularioInscripcion == $formulario->id) {
+                $isEnrollmentForm = true;
+            }
+
+            if ($formulario->slug === 'inscripcion-estudiantes' || $isEnrollmentForm) {
                 $studentName = '';
                 $studentDocType = 'CC';
                 $studentDocNum = '';
@@ -324,33 +330,66 @@ class FormularioController extends Controller
                     if (is_array($val)) $val = implode(', ', $val);
                     $titleLower = mb_strtolower(trim($preg->titulo));
 
-                    if (str_contains($titleLower, 'nombre completo del estudiante') || str_contains($titleLower, 'nombre completo del aspirante')) {
-                        $studentName = $val;
-                    } elseif (str_contains($titleLower, 'tipo de documento')) {
-                        $studentDocType = $val;
-                    } elseif (str_contains($titleLower, 'número de documento') || str_contains($titleLower, 'numero de documento')) {
-                        $studentDocNum = $val;
-                    } elseif (str_contains($titleLower, 'fecha de nacimiento')) {
-                        $studentBirthDate = $val;
-                    } elseif (str_contains($titleLower, 'correo electrónico') || str_contains($titleLower, 'correo electronico')) {
-                        $studentEmail = $val;
-                    } elseif (str_contains($titleLower, 'teléfono') || str_contains($titleLower, 'telefono')) {
-                        if (str_contains($titleLower, 'secundario')) {
-                            $studentPhoneSec = $val;
-                        } else {
-                            $studentPhone = $val;
+                    // Student name
+                    if ((str_contains($titleLower, 'nombre') && (str_contains($titleLower, 'estudiante') || str_contains($titleLower, 'aspirante') || str_contains($titleLower, 'participante') || str_contains($titleLower, 'alumno'))) || str_contains($titleLower, 'nombre completo') || str_contains($titleLower, 'nombres y apellidos')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            $studentName = $val;
                         }
-                    } elseif (str_contains($titleLower, 'programa de')) {
+                    }
+                    // Student doc type
+                    elseif (str_contains($titleLower, 'tipo') && str_contains($titleLower, 'documento')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            $studentDocType = $val;
+                        }
+                    }
+                    // Student doc num
+                    elseif (str_contains($titleLower, 'número') || str_contains($titleLower, 'numero') || str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            $studentDocNum = $val;
+                        }
+                    }
+                    // Student birth date
+                    elseif (str_contains($titleLower, 'fecha') && str_contains($titleLower, 'nacimiento')) {
+                        $studentBirthDate = $val;
+                    }
+                    // Student email
+                    elseif (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            $studentEmail = $val;
+                        }
+                    }
+                    // Student phone
+                    elseif (str_contains($titleLower, 'teléfono') || str_contains($titleLower, 'telefono') || str_contains($titleLower, 'celular') || str_contains($titleLower, 'móvil') || str_contains($titleLower, 'movil')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            if (str_contains($titleLower, 'secundario')) {
+                                $studentPhoneSec = $val;
+                            } else {
+                                $studentPhone = $val;
+                            }
+                        }
+                    }
+                    // Program interest
+                    elseif (str_contains($titleLower, 'programa') || str_contains($titleLower, 'curso') || str_contains($titleLower, 'carrera') || str_contains($titleLower, 'interés') || str_contains($titleLower, 'interes')) {
                         $programName = $val;
-                    } elseif (str_contains($titleLower, 'nombre completo del tutor') || str_contains($titleLower, 'nombre completo del acudiente')) {
+                    }
+                    // Tutor name
+                    elseif (str_contains($titleLower, 'nombre') && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
                         $tutorName = $val;
-                    } elseif (str_contains($titleLower, 'parentesco')) {
+                    }
+                    // Tutor relationship
+                    elseif (str_contains($titleLower, 'parentesco') || str_contains($titleLower, 'relación') || str_contains($titleLower, 'relacion')) {
                         $tutorParentesco = $val;
-                    } elseif (str_contains($titleLower, 'identificación del tutor') || str_contains($titleLower, 'identificacion del tutor') || str_contains($titleLower, 'identificación del acudiente')) {
+                    }
+                    // Tutor doc num
+                    elseif ((str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion') || str_contains($titleLower, 'cédula') || str_contains($titleLower, 'cedula')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
                         $tutorDocNum = $val;
-                    } elseif (str_contains($titleLower, 'teléfono del tutor') || str_contains($titleLower, 'telefono del tutor') || str_contains($titleLower, 'teléfono del acudiente')) {
+                    }
+                    // Tutor phone
+                    elseif ((str_contains($titleLower, 'teléfono') || str_contains($titleLower, 'telefono') || str_contains($titleLower, 'celular') || str_contains($titleLower, 'móvil') || str_contains($titleLower, 'movil')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
                         $tutorPhone = $val;
-                    } elseif (str_contains($titleLower, 'correo del tutor') || str_contains($titleLower, 'correo del acudiente')) {
+                    }
+                    // Tutor email
+                    elseif ((str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
                         $tutorEmail = $val;
                     }
                 }
@@ -364,27 +403,32 @@ class FormularioController extends Controller
 
                 // 1. Crear o actualizar Tercero del estudiante
                 $terceroEstudiante = \App\Models\Tercero::updateOrCreate(
-                    ['identificacion' => $studentDocNum, 'idCompany' => $formulario->idCompany],
+                    ['identificacion' => $studentDocNum ?: '0', 'idCompany' => $formulario->idCompany],
                     [
-                        'nombre' => $studentName,
-                        'email' => $studentEmail,
-                        'telefono' => $studentPhone,
+                        'nombre' => $studentName ?: 'Aspirante Inscrito',
+                        'email' => $studentEmail ?: '',
+                        'telefono' => $studentPhone ?: '',
                         'idCompany' => $formulario->idCompany
                     ]
                 );
 
+                $tipoId = \DB::table('tipoIdentificacion')->value('id') ?? 1;
+
                 // 2. Crear o actualizar Person del estudiante
                 $personEstudiante = \App\Models\Person::updateOrCreate(
-                    ['identificacion' => $studentDocNum, 'idCompany' => $formulario->idCompany],
+                    ['identificacion' => $studentDocNum ?: '0'],
                     [
-                        'nombre1' => $nombre1,
-                        'nombre2' => $nombre2,
-                        'apellido1' => $apellido1,
-                        'apellido2' => $apellido2,
-                        'email' => $studentEmail,
-                        'celular' => $studentPhone,
-                        'fechaNac' => $studentBirthDate,
-                        'idCompany' => $formulario->idCompany
+                        'nombre1' => $nombre1 ?: 'Aspirante',
+                        'nombre2' => $nombre2 ?: '',
+                        'apellido1' => $apellido1 ?: 'Inscrito',
+                        'apellido2' => $apellido2 ?: '',
+                        'email' => $studentEmail ?: '',
+                        'celular' => $studentPhone ?: '',
+                        'fechaNac' => $studentBirthDate ?: '2000-01-01',
+                        'direccion' => 'Desconocida',
+                        'sexo' => 'M',
+                        'perfil' => '',
+                        'idTipoIdentificacion' => $tipoId,
                     ]
                 );
 
@@ -415,9 +459,9 @@ class FormularioController extends Controller
                     $tutorTercero = \App\Models\Tercero::updateOrCreate(
                             ['identificacion' => $tutorDocNum, 'idCompany' => $formulario->idCompany],
                             [
-                                'nombre' => $tutorName,
-                                'email' => $tutorEmail,
-                                'telefono' => $tutorPhone,
+                                'nombre' => $tutorName ?: 'Tutor Acudiente',
+                                'email' => $tutorEmail ?: '',
+                                'telefono' => $tutorPhone ?: '',
                                 'idCompany' => $formulario->idCompany
                             ]
                         );
@@ -428,25 +472,44 @@ class FormularioController extends Controller
                         $tApellido1 = count($tParts) > 1 ? end($tParts) : '';
 
                         $tPerson = \App\Models\Person::updateOrCreate(
-                            ['identificacion' => $tutorDocNum, 'idCompany' => $formulario->idCompany],
+                            ['identificacion' => $tutorDocNum],
                             [
-                                'nombre1' => $tNombre1,
-                                'nombre2' => $tNombre2,
-                                'apellido1' => $tApellido1,
-                                'email' => $tutorEmail,
-                                'celular' => $tutorPhone,
-                                'idCompany' => $formulario->idCompany
+                                'nombre1' => $tNombre1 ?: 'Tutor',
+                                'nombre2' => $tNombre2 ?: '',
+                                'apellido1' => $tApellido1 ?: 'Acudiente',
+                                'email' => $tutorEmail ?: '',
+                                'celular' => $tutorPhone ?: '',
+                                'fechaNac' => '2000-01-01',
+                                'direccion' => 'Desconocida',
+                                'sexo' => 'M',
+                                'perfil' => '',
+                                'idTipoIdentificacion' => $tipoId,
                             ]
                         );
                         $idAcudiente = $tPerson->id;
                     }
+
+                // Find a matching Grado or default to 1
+                $gradoId = 1;
+                if (!empty($programName)) {
+                    $matchedGrado = \App\Models\Grado::where('nombreGrado', 'like', "%{$programName}%")->first();
+                    if ($matchedGrado) {
+                        $gradoId = $matchedGrado->id;
+                    }
+                }
+
+                $fichaId = \App\Models\Ficha::value('id') ?? 1;
 
                 // 4. Crear Matrícula en estado INSCRIPCION
                 $matricula = \App\Models\Matricula::create([
                     'idPersona' => $personEstudiante->id,
                     'idAcudiente' => $idAcudiente,
                     'estado' => 'INSCRIPCION',
-                    'idCompany' => $formulario->idCompany
+                    'idCompany' => $formulario->idCompany,
+                    'fecha' => \Carbon\Carbon::now(),
+                    'idGrado' => $gradoId,
+                    'idFicha' => $fichaId,
+                    'observacion' => 'FormResponseID:' . $respuesta->id,
                 ]);
 
                 // Buscar proceso (Programa de Interés) y Configuración de Pago asociada
@@ -461,6 +524,15 @@ class FormularioController extends Controller
 
                 if (!$idConfigPago) {
                     $configPago = \App\Models\ConfiguracionPago::where('idCompany', $formulario->idCompany)->first();
+                    if (!$configPago) {
+                        $configPago = \App\Models\ConfiguracionPago::create([
+                            'titulo' => 'Inscripción Estándar',
+                            'detalle' => 'Derechos de inscripción y matrícula',
+                            'valor' => 0,
+                            'estado' => 'ACTIVO',
+                            'idCompany' => $formulario->idCompany
+                        ]);
+                    }
                     $idConfigPago = $configPago?->id;
                 }
 
@@ -482,7 +554,9 @@ class FormularioController extends Controller
                 // Detalle Factura
                 $detalleFactura = new \App\Models\DetalleFactura();
                 $detalleFactura->idFactura = $factura->id;
-                $detalleFactura->detalle = $programName ?: 'Proceso académico';
+                
+                $configPago = \App\Models\ConfiguracionPago::find($idConfigPago);
+                $detalleFactura->detalle = $configPago ? $configPago->titulo : ($programName ?: 'Proceso académico');
                 $detalleFactura->valor = 0;
                 if (\Schema::hasColumn('detalleFactura', 'idConfiguracionPago')) {
                     $detalleFactura->idConfiguracionPago = $idConfigPago;
@@ -494,7 +568,6 @@ class FormularioController extends Controller
                 $transaccion->valor = 0;
                 $transaccion->hora = \Carbon\Carbon::now()->format('H:i');
                 $transaccion->fechaTransaccion = \Carbon\Carbon::now();
-                $transaccion->tipoCartera = 'CXC';
                 $transaccion->idTipoTransaccion = \App\Models\TipoTransaccion::VENTA;
                 $transaccion->idEstado = \App\Models\Status::ID_PENDIENTE;
                 $transaccion->excedente = 0;

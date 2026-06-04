@@ -10,6 +10,7 @@ class ConfiguracionPago extends Model
     use HasFactory;
 
     protected $table = 'configuracionPago';
+    protected $guarded = ['id'];
 
 
     

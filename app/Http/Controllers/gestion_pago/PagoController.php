@@ -1738,11 +1738,88 @@ class PagoController extends Controller
         $solicitud = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
         $estudiante = $this->formatearEstudianteSolicitud($factura, $idCompany);
 
+        $documento = $factura->tercero?->identificacion ?? '';
+        $respuestasFormulario = $this->resolverRespuestasFormulario($documento, $idCompany, $factura);
+
         return response()->json([
             'solicitud' => $solicitud,
             'factura' => $facturaPayload,
             'estudiante' => $estudiante,
+            'respuestasFormulario' => $respuestasFormulario,
         ]);
+    }
+
+    private function resolverRespuestasFormulario(string $documento, int $idCompany, ?Factura $factura = null)
+    {
+        $company = \App\Models\Company::find($idCompany);
+        if (!$company || !$company->idFormularioInscripcion) {
+            return null;
+        }
+
+        $respuestaObj = null;
+
+        // 1. Intentar resolver usando FormResponseID guardado en la matricula
+        if ($factura) {
+            $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany);
+            if ($matricula && $matricula->observacion && strpos($matricula->observacion, 'FormResponseID:') === 0) {
+                $respId = (int) str_replace('FormResponseID:', '', $matricula->observacion);
+                if ($respId > 0) {
+                    $respuestaObj = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)
+                        ->where('id', $respId)
+                        ->first();
+                }
+            }
+        }
+
+        // 2. Fallback: Buscar por documento (si no es '0' y no está vacío)
+        if (!$respuestaObj && !empty($documento) && $documento !== '0') {
+            $respuestas = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)->get();
+            foreach ($respuestas as $resp) {
+                $listaResp = $resp->respuestas;
+                if (is_array($listaResp)) {
+                    foreach ($listaResp as $r) {
+                        if (isset($r['valor']) && (string)$r['valor'] === (string)$documento) {
+                            $respuestaObj = $resp;
+                            break 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback: Para registros de prueba existentes, buscar por coincidencia de fecha/hora de creación (margen de 5 segundos)
+        if (!$respuestaObj && $factura) {
+            $createdAt = $factura->created_at;
+            if ($createdAt) {
+                $respuestaObj = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)
+                    ->whereBetween('created_at', [
+                        $createdAt->copy()->subSeconds(5),
+                        $createdAt->copy()->addSeconds(5)
+                    ])
+                    ->first();
+            }
+        }
+
+        // 4. Formatear la respuesta si se encontró
+        if ($respuestaObj) {
+            $listaResp = $respuestaObj->respuestas;
+            $result = [];
+            if (is_array($listaResp)) {
+                foreach ($listaResp as $rInner) {
+                    $preg = \App\Models\FormularioPregunta::find($rInner['idPregunta'] ?? 0);
+                    $result[] = [
+                        'pregunta' => $preg ? $preg->titulo : 'Pregunta sin título',
+                        'respuesta' => $rInner['valor'] ?? ''
+                    ];
+                }
+            }
+            return [
+                'formulario' => \App\Models\Formulario::where('id', $company->idFormularioInscripcion)->value('titulo'),
+                'respuestas' => $result
+            ];
+        }
+
+        return null;
     }
 
 
