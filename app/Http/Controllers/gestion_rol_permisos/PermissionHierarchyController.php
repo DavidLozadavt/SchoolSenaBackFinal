@@ -88,6 +88,7 @@ class PermissionHierarchyController extends Controller
         $data = $request->validate([
             'description' => ['nullable', 'string'],
             'descripcion' => ['nullable', 'string'],
+            'idPermissionPadre' => ['nullable', 'integer', 'exists:permissions,id'],
             'icon' => ['nullable', 'string'],
             'path' => ['nullable', 'string']
         ]);
@@ -111,6 +112,9 @@ class PermissionHierarchyController extends Controller
         }
         if (isset($data['path'])) {
             $permission->path = $data['path'];
+        }
+        if (isset($data['idPermissionPadre'])) {
+            $permission->idPermissionPadre = $data['idPermissionPadre'];
         }
 
         $permission->save();
