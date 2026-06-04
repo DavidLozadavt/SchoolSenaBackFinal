@@ -107,7 +107,8 @@ class SedeController extends Controller
             })
             ->with([
                 'ciudad:id,descripcion',
-                'empresa:id,razonSocial'
+                'empresa:id,razonSocial',
+                'centroFormacion'
             ])
             ->get();
 

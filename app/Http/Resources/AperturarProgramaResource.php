@@ -24,9 +24,16 @@ class AperturarProgramaResource extends JsonResource
 
             'tipoCalificacion' => $this->tipoCalificacion,
 
+            'pension' => $this->pension,
+            'valorPension' => $this->valorPension,
+            'diasMoraMatricula' => $this->diasMoraMatricula,
+            'porcentajeMoraPension' => $this->porcentajeMoraPension,
+            'diaCobro' => $this->diaCobro,
+
             'periodo' => $this->whenLoaded('periodo'),
             'programa' => $this->whenLoaded('programa'),
             'sede' => $this->whenLoaded('sede'),
+            'jornada' => $this->whenLoaded('jornada'),
         ], fn ($value) => !is_null($value));
     }
 }

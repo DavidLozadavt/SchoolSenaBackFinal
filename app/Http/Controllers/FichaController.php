@@ -21,17 +21,69 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use App\Models\TipoGrado;
 
 class FichaController extends Controller
 {
+    public function getTiposGrado(): JsonResponse
+    {
+        $tiposGrado = TipoGrado::all();
+
+        $tiposGradoArray = $tiposGrado->map(function ($tipo) {
+            return [
+                'value' => $tipo->id,
+                'label' => $tipo->nombreTipoGrado,
+            ];
+        });
+
+        return response()->json($tiposGradoArray);
+    }
+
+    public function storeMultiple(Request $request)
+    {
+        $validated = $request->validate([
+            // Ficha
+            'idAsignacion' => 'required|exists:aperturarprograma,id',
+            'cantidadGrados' => 'required|integer|min:1',
+            'idTipoGrado' => 'required|exists:tipoGrado,id'
+        ]);
+
+        $apertura = AperturarPrograma::findOrFail($validated['idAsignacion']);
+        $idRegional = KeyUtil::idCompany();
+
+        try {
+            for ($i = 1; $i <= $validated['cantidadGrados']; $i++) {
+                Ficha::create([
+                    'idAsignacion' => $validated['idAsignacion'],
+                    'codigo' => str_pad($i, 2, '0', STR_PAD_LEFT),
+                    'idSede' => $apertura->idSede ?? null,
+                    'documento' => null,
+                    'idInfraestructura' => null,
+                    'porcentajeEjecucion' => 100,
+                    'idRegional' => $idRegional ?? null,
+                    'idTipoGrado' => $validated['idTipoGrado'] ?? null,
+                ]);
+            }
+        } catch (\Exception $e) {
+            DB::rollBack(); 
+            return response()->json([
+                'message' => 'Error al crear los grupos',
+                ], 400
+            );
+        }
+
+        return response()->json([
+            'message' => 'Grupos creados correctamente',
+        ], 201);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
             // Ficha
-            'idJornada' => 'required|exists:jornadas,id',
             'idSede' => 'required|exists:sedes,id',
             'idAsignacion' => 'required|exists:aperturarprograma,id',
-            'codigo' => 'required|string|unique:ficha,codigo',
+            'codigo' => 'required|string',
             'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'documento' => 'nullable|file|mimes:pdf|max:5120',
             'idPrograma' => 'required|exists:programa,id',
@@ -76,7 +128,6 @@ class FichaController extends Controller
             }
 
             $ficha = Ficha::create([
-                'idJornada' => $validated['idJornada'],
                 'idAsignacion' => $validated['idAsignacion'],
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
@@ -176,20 +227,17 @@ class FichaController extends Controller
             'data' => $fichas
         ]);
     }
-    public function fichasPorPrograma(int $idPrograma, int $idCentro): JsonResponse
+    public function fichasPorPrograma(int $idApertura): JsonResponse
     {
         $fichas = Ficha::query()
-            ->whereHas('asignacion', function ($query) use ($idPrograma) {
-                $query->where('idPrograma', $idPrograma);
-            })
-            ->whereHas('sede', function ($sede) use ($idCentro) {
-                $sede->where('idCentroFormacion', $idCentro);
+            ->whereHas('asignacion', function ($query) use ($idApertura) {
+                $query->where('id', $idApertura);
             })
             ->with([
-                'jornada:id,nombreJornada',
                 'sede:id,nombre,idCentroFormacion',
                 'regional:id,razonSocial',
-                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
+                'asignacion.jornada:id,nombreJornada',
+                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma,idJornada',
                 'asignacion.programa:id,nombrePrograma',
                 'asignacion.programa.grados', //Ya puedo capturar en idgrado
                 'instructorLider:id,idpersona', // Especificar campos para que Laravel resuelva correctamente la relación
@@ -227,7 +275,6 @@ class FichaController extends Controller
         })->toArray();
 
         return response()->json([
-            'idPrograma' => $idPrograma,
             'total' => $fichas->count(),
             'data' => $fichasArray
         ]);
@@ -395,7 +442,7 @@ class FichaController extends Controller
     {
         try {
             $validated = $request->validate([
-                'idInstructorLider' => 'required|exists:contrato,id'
+                'idInstructorLider' => 'nullable|exists:contrato,id'
             ]);
 
             $ficha = Ficha::with('asignacion.programa')->findOrFail($idFicha);
@@ -410,6 +457,7 @@ class FichaController extends Controller
             $idInstructorLider = $validated['idInstructorLider'];
 
             // Verificar que el instructor tenga el programa asignado
+            if ($idInstructorLider !== null) {
             $instructor = Contract::whereHas('programas', function ($query) use ($idPrograma) {
                 $query->where('programa.id', $idPrograma);
             })
@@ -421,6 +469,7 @@ class FichaController extends Controller
                 return response()->json([
                     'message' => 'El instructor seleccionado no tiene el programa de la ficha asignado en su contrato'
                 ], 422);
+            }
             }
 
             // Actualizar la ficha
@@ -464,12 +513,11 @@ class FichaController extends Controller
         try {
             // Buscar la ficha con todas sus relaciones
             $ficha = Ficha::with([
-                'jornada',
                 'asignacion' => function ($query) {
                     $query->with([
                         'periodo',
                         'programa',
-                        'sede'
+                        'sede',
                     ]);
                 },
                 'sede',
@@ -503,18 +551,14 @@ class FichaController extends Controller
     {
         $validated = $request->validate([
             // Ficha
-            'idJornada' => 'required|exists:jornadas,id',
             'idSede' => 'required|exists:sedes,id',
             'idAsignacion' => 'required|exists:aperturarprograma,id',
-            'codigo' => [
-                'required',
-                'string',
-                Rule::unique('ficha', 'codigo')->ignore($id)
-            ],
+            'codigo' => ['required','string'],
             'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'documento' => 'nullable|file|mimes:pdf|max:5120',
             'idPrograma' => 'required|exists:programa,id',
             'idInfraestructura' => 'required|exists:infraestructura,id',
+            'idTipoGrado' => 'nullable|exists:tipoGrado,id',
         ]);
 
         DB::beginTransaction();
@@ -631,7 +675,6 @@ class FichaController extends Controller
 
             // Actualizar la ficha
             $ficha->update([
-                'idJornada' => $validated['idJornada'],
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
@@ -639,13 +682,14 @@ class FichaController extends Controller
                 'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
                 'documento' => $rutaDocumento,
                 'idAsignacion' => $validated['idAsignacion'],
+                'idTipoGrado' => $validated['idTipoGrado'] ?? null,
             ]);
 
             DB::commit();
 
             // Recargar las relaciones
             $ficha->load([
-                'jornada',
+                'tipoGrado',
                 'asignacion',
                 'sede',
                 'infraestructura',
