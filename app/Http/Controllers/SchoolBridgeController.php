@@ -129,9 +129,9 @@ class SchoolBridgeController extends Controller
             $activation->fechaFin = now()->addYears(5)->format('Y-m-d');
             $activation->save();
 
-            // 7. Crear el rol de 'Admin' asignado a este tenant y asignárselo
+            // 7. Crear el rol de 'administradorVT' asignado a este tenant y asignárselo
             $role = Role::firstOrCreate([
-                'name' => 'Admin',
+                'name' => 'administradorVT',
                 'guard_name' => 'web',
             ]);
 
