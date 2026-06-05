@@ -776,6 +776,13 @@ Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, '
 Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
 Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
 Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/notificar_recepcion', [PagoController::class, 'notificarRecepcionSolicitudInscripcion']);
+// Ruta pública para el portal del aspirante (sin autenticación requerida)
+Route::get('portal-aspirante/{token}', [PagoController::class, 'getPortalAspirante']);
+Route::post('portal-aspirante/{token}/comprobante', [PagoController::class, 'subirComprobantePortalAspirante']);
+Route::get('portal-aspirante/{token}/factura-pdf', [PagoController::class, 'generarFacturaPdfPortalAspirante']);
+
+
 
 
 

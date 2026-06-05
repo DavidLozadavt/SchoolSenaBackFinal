@@ -4,6 +4,7 @@ namespace App\Http\Controllers\gestion_pago;
 
 use App\Http\Controllers\Controller;
 use App\Mail\MailService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use App\Models\ActivationCompanyUser;
 use App\Models\AgregarPagoCuenta;
 use App\Models\AporteSocio;
@@ -1591,15 +1592,27 @@ class PagoController extends Controller
             ];
         }
 
+        $valorFacturaOriginal = (float) ($factura->valorMasIva ?? $factura->valor);
+        
+        // Si el valor viene en 0, calcularlo sumando los detalles (cantidad * valor)
+        if ($valorFacturaOriginal <= 0) {
+            $valorCalculado = $detalles->sum(function ($detalle) {
+                return (float) ($detalle['valor'] ?? 0) * (float) ($detalle['cantidad'] ?? 1);
+            });
+            $valorFinal = $valorCalculado;
+        } else {
+            $valorFinal = $valorFacturaOriginal;
+        }
+
         return [
             'id' => $factura->id,
             'numeroFactura' => $factura->numeroFactura,
             'fecha' => $factura->fecha,
-            'valor' => (float) ($factura->valorMasIva ?? $factura->valor),
-            'valorSinIva' => (float) $factura->valor,
+            'valor' => $valorFinal,
+            'valorSinIva' => $valorFinal,
             'valorIva' => (float) ($factura->valorIva ?? 0),
             'estado' => $estado,
-            'saldoPendiente' => $pago ? max(0, (float) $pago->excedente) : (float) ($factura->valorMasIva ?? $factura->valor),
+            'saldoPendiente' => $pago ? max(0, (float) $pago->excedente) : $valorFinal,
             'idTransaccion' => $transaccion?->id,
             'idTercero' => $factura->idTercero,
             'tercero' => $factura->tercero,
@@ -1720,6 +1733,301 @@ class PagoController extends Controller
 
 
     /**
+     * Genera un token HMAC firmado para acceso público al portal del aspirante.
+     * No requiere base de datos — el token codifica idFactura e idCompany.
+     */
+    private function generarTokenPortalAspirante(int $idFactura, int $idCompany): string
+    {
+        $payload = "{$idCompany}:{$idFactura}";
+        $secret  = config('app.key');
+        $hmac    = hash_hmac('sha256', $payload, $secret);
+        return rtrim(strtr(base64_encode("{$payload}:{$hmac}"), '+/', '-_'), '=');
+    }
+
+    /**
+     * Verifica un token de portal y retorna [idCompany, idFactura] o null si inválido.
+     */
+    private function verificarTokenPortalAspirante(string $token): ?array
+    {
+        $padded  = str_pad(strtr($token, '-_', '+/'), strlen($token) % 4 === 0 ? strlen($token) : strlen($token) + (4 - strlen($token) % 4), '=');
+        $decoded = base64_decode($padded, true);
+        if (!$decoded) {
+            return null;
+        }
+        $parts = explode(':', $decoded, 3);
+        if (count($parts) !== 3) {
+            return null;
+        }
+        [$idCompany, $idFactura, $hmacRecibido] = $parts;
+        $payload      = "{$idCompany}:{$idFactura}";
+        $secret       = config('app.key');
+        $hmacEsperado = hash_hmac('sha256', $payload, $secret);
+        if (!hash_equals($hmacEsperado, $hmacRecibido)) {
+            return null;
+        }
+        return ['idCompany' => (int) $idCompany, 'idFactura' => (int) $idFactura];
+    }
+
+    /**
+     * Endpoint público (sin auth) para el portal del aspirante.
+     * Verifica el token HMAC y retorna datos de la factura e inscripción.
+     */
+    public function getPortalAspirante(string $token)
+    {
+        $datos = $this->verificarTokenPortalAspirante($token);
+        if (!$datos) {
+            return response()->json(['error' => 'Enlace de acceso inválido o expirado.'], 403);
+        }
+
+        $idCompany = $datos['idCompany'];
+        $idFactura = $datos['idFactura'];
+
+        $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('id', $idFactura)
+            ->where('idCompany', $idCompany)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Solicitud no encontrada.'], 404);
+        }
+
+        $proceso        = $this->inferirProcesoFacturaAcademica($factura);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $solicitud      = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
+        $estudiante     = $this->formatearEstudianteSolicitud($factura, $idCompany);
+        $company        = \App\Models\Company::find($idCompany);
+
+        // Resolver campos específicos solicitados
+        $transaccion = $factura->transacciones->first();
+        $pago = $transaccion?->pago?->first();
+
+        return response()->json([
+            'solicitud'          => $solicitud,
+            'factura'            => $facturaPayload,
+            'estudiante'         => $estudiante,
+            'nombreInstitucion'  => $company?->razonSocial ?? 'La institución',
+            // Agregando la estructura JSON requerida explícitamente en el root de la respuesta
+            'detalleFactura'     => $facturaPayload['detalles'] ?? [],
+            'transaccion'        => $transaccion,
+            'pagos'              => $pago,
+            'saldoPendiente'     => (float) ($facturaPayload['saldoPendiente'] ?? 0),
+            'valorTotal'         => (float) ($facturaPayload['valor'] ?? 0),
+            'numeroFactura'      => $factura->numeroFactura,
+            'pdfUrl'             => url("api/portal-aspirante/{$token}/factura-pdf"),
+        ]);
+    }
+
+    /**
+     * Sube un comprobante de pago en pdf/imagen y lo asocia al pago de la transacción de la factura.
+     */
+    public function subirComprobantePortalAspirante(Request $request, string $token)
+    {
+        $datos = $this->verificarTokenPortalAspirante($token);
+        if (!$datos) {
+            return response()->json(['error' => 'Enlace de acceso inválido o expirado.'], 403);
+        }
+
+        $request->validate([
+            'comprobante' => ['required', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:5120'],
+        ]);
+
+        $idCompany = $datos['idCompany'];
+        $idFactura = $datos['idFactura'];
+
+        $factura = Factura::with(['transacciones.pago'])
+            ->where('id', $idFactura)
+            ->where('idCompany', $idCompany)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $transaccion = $factura->transacciones->first();
+        $pago = $transaccion?->pago?->first();
+
+        if (!$pago) {
+            return response()->json(['error' => 'No se encontró un registro de pago asociado a la factura.'], 400);
+        }
+
+        if ($request->hasFile('comprobante')) {
+            $file = $request->file('comprobante');
+            $extension = $file->getClientOriginalExtension();
+            $filename = 'comprobante_' . $pago->id . '_' . time() . '.' . $extension;
+            $path = $file->storeAs(Pago::PATH, $filename, 'public');
+
+            // Guardar documento comprobante de pago
+            $documentoPago = new DocumentoPago();
+            $documentoPago->idPago = $pago->id;
+            $documentoPago->idEstado = Status::ID_PENDIENTE; // Pendiente de revisión
+            $documentoPago->ruta = 'storage/' . $path;
+            $documentoPago->fechaCarga = \Carbon\Carbon::now()->toDateTimeString();
+            $documentoPago->save();
+
+            // Cambiar estado del pago a PAGO_EN_REVISION o equivalente (ID_EN_ESPERA es usado en bandeja administrativa de revisión)
+            $pago->idEstado = Status::ID_EN_ESPERA; 
+            $pago->save();
+
+            return response()->json([
+                'message' => 'Comprobante cargado con éxito.',
+                'documento' => $documentoPago
+            ]);
+        }
+
+        return response()->json(['error' => 'No se recibió ningún archivo.'], 400);
+    }
+
+    /**
+     * Genera y devuelve el PDF de la factura académica para el portal del aspirante.
+     * Endpoint público: GET /api/portal-aspirante/{token}/factura-pdf
+     */
+    public function generarFacturaPdfPortalAspirante(string $token)
+    {
+        $datos = $this->verificarTokenPortalAspirante($token);
+        if (!$datos) {
+            return response()->json(['error' => 'Enlace de acceso inválido o expirado.'], 403);
+        }
+
+        $idCompany = $datos['idCompany'];
+        $idFactura = $datos['idFactura'];
+
+        $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('id', $idFactura)
+            ->where('idCompany', $idCompany)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $proceso        = $this->inferirProcesoFacturaAcademica($factura);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $estudiante     = $this->formatearEstudianteSolicitud($factura, $idCompany);
+        $company        = \App\Models\Company::find($idCompany);
+        $nombreInstitucion = $company?->razonSocial ?? 'La Institución';
+
+        $procesoPayload = null;
+        if ($proceso instanceof \App\Models\Proceso) {
+            $procesoPayload = ['nombreProceso' => $proceso->nombreProceso];
+        }
+
+        $pdf = Pdf::loadView('pdf.factura-academica', [
+            'factura'           => $facturaPayload,
+            'estudiante'        => $estudiante,
+            'proceso'           => $procesoPayload,
+            'nombreInstitucion' => $nombreInstitucion,
+        ])->setPaper('a4', 'portrait');
+
+        $filename = 'factura-academica-' . ($factura->numeroFactura ?? $idFactura) . '.pdf';
+
+        return $pdf->stream($filename);
+    }
+
+
+    /**
+     * Envía correo enriquecido de confirmación de recepción al aspirante.
+     * Se llama desde el Paso 1 del wizard de validación al hacer clic en "Siguiente".
+     * Usa la plantilla email-inscripcion.blade.php con tabla de datos y botón CTA.
+     * No modifica estados ni genera facturas.
+     */
+    public function notificarRecepcionSolicitudInscripcion(Request $request, int $idFactura)
+    {
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = $this->queryFacturasAcademicas($idCompany)
+            ->where('id', $idFactura)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Solicitud no encontrada.'], 404);
+        }
+
+        // ── Resolver datos del aspirante ──────────────────────────────────
+        $emailAspirante  = $factura->tercero?->email ?? null;
+        $nombreAspirante = $factura->tercero?->nombre ?? 'Aspirante';
+        $documento       = $factura->tercero?->identificacion ?? '';
+
+        $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany);
+        if ($matricula?->person) {
+            $emailAspirante  = $emailAspirante  ?? ($matricula->person->email ?? null);
+            $nombreAspirante = $this->formatearNombrePersona($matricula->person) ?? $nombreAspirante;
+            $documento       = $documento !== '' ? $documento : ($matricula->person->identificacion ?? '');
+        }
+
+        if (!$emailAspirante) {
+            return response()->json([
+                'message'        => 'No se encontró correo del aspirante. Se omitió el envío.',
+                'correo_enviado' => false,
+            ]);
+        }
+
+        // ── Datos del proceso y factura ───────────────────────────────────
+        $proceso        = $this->inferirProcesoFacturaAcademica($factura);
+        $nombrePrograma = $proceso instanceof \App\Models\Proceso
+            ? ($proceso->nombreProceso ?? 'Proceso académico')
+            : 'Proceso académico';
+
+        $facturaPayload  = $this->formatearFacturaAcademica($factura, $proceso);
+        $valorTotal      = (float) ($facturaPayload['valor'] ?? 0);
+        $saldoPendiente  = (float) ($facturaPayload['saldoPendiente'] ?? $valorTotal);
+        $numeroFactura   = $factura->numeroFactura ?? "FAC-{$idFactura}";
+        $estadoFactura   = strtoupper((string) ($facturaPayload['estado'] ?? 'PENDIENTE'));
+
+        $estadoTexto = match (true) {
+            in_array($estadoFactura, ['PAGADA', 'PAGADO'], true) => 'PAGADA – Pendiente de validación final',
+            $estadoFactura === 'ANULADA'                          => 'ANULADA',
+            default                                               => 'PENDIENTE DE PAGO',
+        };
+
+        $fechaLimite = $saldoPendiente > 0
+            ? \Carbon\Carbon::now()->addDays(15)->format('d/m/Y')
+            : '';
+
+        $company           = \App\Models\Company::find($idCompany);
+        $nombreInstitucion = $company?->razonSocial ?? 'La institución';
+
+        // ── Generar URL del portal público ────────────────────────────────
+        $token       = $this->generarTokenPortalAspirante($idFactura, $idCompany);
+        $frontendUrl = rtrim(env('FRONTEND_URL', 'https://sena-school.virtualt.org'), '/');
+        $portalUrl   = "{$frontendUrl}/portal-aspirante/{$token}";
+
+        // ── Enviar correo con la plantilla HTML enriquecida ───────────────
+        $subject = "Solicitud de inscripción recibida – {$nombrePrograma}";
+
+        try {
+            Mail::send('email-inscripcion', [
+                'nombreAspirante'   => $nombreAspirante,
+                'documento'         => $documento,
+                'programa'          => $nombrePrograma,
+                'estadoInscripcion' => $estadoTexto,
+                'valorTotal'        => $saldoPendiente > 0 ? $saldoPendiente : $valorTotal,
+                'numeroFactura'     => $numeroFactura,
+                'fechaLimite'       => $fechaLimite,
+                'portalUrl'         => $portalUrl,
+                'nombreInstitucion' => $nombreInstitucion,
+            ], function ($mail) use ($emailAspirante, $subject, $nombreInstitucion) {
+                $mail->to($emailAspirante)
+                     ->subject($subject)
+                     ->from(config('mail.from.address'), $nombreInstitucion);
+            });
+        } catch (\Exception $e) {
+            \Log::error('Error enviando correo inscripción: ' . $e->getMessage());
+            return response()->json([
+                'message'        => 'No se pudo enviar el correo al aspirante.',
+                'correo_enviado' => false,
+                'error'          => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'message'        => 'Correo de recepción enviado al aspirante.',
+            'correo_enviado' => true,
+            'email'          => $emailAspirante,
+            'portal_url'     => $portalUrl,
+        ]);
+    }
+
+
+    /**
      * Detalle de una solicitud (por id de factura académica) para el wizard de validación.
      */
     public function getSolicitudInscripcion(int $idFactura)
@@ -1741,11 +2049,16 @@ class PagoController extends Controller
         $documento = $factura->tercero?->identificacion ?? '';
         $respuestasFormulario = $this->resolverRespuestasFormulario($documento, $idCompany, $factura);
 
+        $transaccion = $factura->transacciones->first();
+        $pago = $transaccion?->pago?->first();
+        $documentosPago = $pago ? \App\Models\DocumentoPago::with('estado')->where('idPago', $pago->id)->get() : [];
+
         return response()->json([
             'solicitud' => $solicitud,
             'factura' => $facturaPayload,
             'estudiante' => $estudiante,
             'respuestasFormulario' => $respuestasFormulario,
+            'documentosPago' => $documentosPago,
         ]);
     }
 
