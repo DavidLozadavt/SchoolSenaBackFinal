@@ -11,6 +11,10 @@ use App\Models\ParticipanteEvento;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use App\Http\Controllers\gestion_pago\PagoController;
+use App\Models\AsignacionProcesoPago;
+use App\Models\Proceso;
 use App\Util\KeyUtil;
 
 class FormularioController extends Controller
@@ -287,9 +291,9 @@ class FormularioController extends Controller
             if (!$preg) continue;
             $val = $resp['valor'] ?? '';
             if (is_array($val)) $val = implode(', ', $val);
-            $titleLower = mb_strtolower(trim($preg->titulo));
+            $titleLower = $this->normalizarTituloPregunta($preg->titulo);
 
-            if (str_contains($titleLower, 'número') || str_contains($titleLower, 'numero') || str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion')) {
+            if (str_contains($titleLower, 'numero') || (str_contains($titleLower, 'documento') && !str_contains($titleLower, 'tipo')) || str_contains($titleLower, 'identificacion')) {
                 if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
                     $studentDocNumInput = trim($val);
                 }
@@ -322,9 +326,9 @@ class FormularioController extends Controller
                             $preg = \App\Models\FormularioPregunta::find($r['idPregunta'] ?? 0);
                             if (!$preg) continue;
                             $val = trim(is_array($r['valor']) ? implode(', ', $r['valor']) : ($r['valor'] ?? ''));
-                            $titleLower = mb_strtolower(trim($preg->titulo));
+                            $titleLower = $this->normalizarTituloPregunta($preg->titulo);
 
-                            if (str_contains($titleLower, 'número') || str_contains($titleLower, 'numero') || str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion')) {
+                            if (str_contains($titleLower, 'numero') || (str_contains($titleLower, 'documento') && !str_contains($titleLower, 'tipo')) || str_contains($titleLower, 'identificacion')) {
                                 if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
                                     if (!empty($studentDocNumInput) && $val === $studentDocNumInput) {
                                         $hasMatchingDoc = true;
@@ -400,6 +404,9 @@ class FormularioController extends Controller
                 $isEnrollmentForm = true;
             }
 
+            $facturaInscripcion = null;
+            $advertenciaFactura = null;
+
             if ($formulario->slug === 'inscripcion-estudiantes' || $isEnrollmentForm) {
                 $studentName = '';
                 $studentDocType = 'CC';
@@ -420,7 +427,7 @@ class FormularioController extends Controller
                     if (!$preg) continue;
                     $val = $resp['valor'] ?? '';
                     if (is_array($val)) $val = implode(', ', $val);
-                    $titleLower = mb_strtolower(trim($preg->titulo));
+                    $titleLower = $this->normalizarTituloPregunta($preg->titulo);
 
                     // Student name
                     if ((str_contains($titleLower, 'nombre') && (str_contains($titleLower, 'estudiante') || str_contains($titleLower, 'aspirante') || str_contains($titleLower, 'participante') || str_contains($titleLower, 'alumno'))) || str_contains($titleLower, 'nombre completo') || str_contains($titleLower, 'nombres y apellidos')) {
@@ -451,7 +458,7 @@ class FormularioController extends Controller
                         }
                     }
                     // Student phone
-                    elseif (str_contains($titleLower, 'teléfono') || str_contains($titleLower, 'telefono') || str_contains($titleLower, 'celular') || str_contains($titleLower, 'móvil') || str_contains($titleLower, 'movil')) {
+                    elseif (str_contains($titleLower, 'telefono') || str_contains($titleLower, 'celular') || str_contains($titleLower, 'movil') || (str_contains($titleLower, 'tel') && !str_contains($titleLower, 'satelite'))) {
                         if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
                             if (str_contains($titleLower, 'secundario')) {
                                 $studentPhoneSec = $val;
@@ -538,7 +545,7 @@ class FormularioController extends Controller
                 foreach ($respuesta->respuestas as $resp) {
                     $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
                     if (!$preg) continue;
-                    $titleLower = mb_strtolower(trim($preg->titulo));
+                    $titleLower = $this->normalizarTituloPregunta($preg->titulo);
                     if (str_contains($titleLower, 'menor de edad') || str_contains($titleLower, 'menor de 18')) {
                         $val = mb_strtolower(trim($resp['valor'] ?? ''));
                         if ($val === 'sí' || $val === 'si' || $val === 'yes') {
@@ -592,8 +599,20 @@ class FormularioController extends Controller
 
                 $fichaId = \App\Models\Ficha::value('id') ?? 1;
 
-                // 4. Crear Matrícula en estado INSCRIPCION
-                if (!$isEditing) {
+                // 4. Crear o actualizar matrícula en estado INSCRIPCION
+                $observacionMatricula = 'FormResponseID:' . $respuesta->id;
+                $matricula = \App\Models\Matricula::where('observacion', $observacionMatricula)
+                    ->where('idCompany', $formulario->idCompany)
+                    ->first();
+
+                if ($matricula) {
+                    $matricula->update([
+                        'idPersona' => $personEstudiante->id,
+                        'idAcudiente' => $idAcudiente,
+                        'idGrado' => $gradoId,
+                        'observacion' => $observacionMatricula,
+                    ]);
+                } else {
                     $matricula = \App\Models\Matricula::create([
                         'idPersona' => $personEstudiante->id,
                         'idAcudiente' => $idAcudiente,
@@ -602,100 +621,60 @@ class FormularioController extends Controller
                         'fecha' => \Carbon\Carbon::now(),
                         'idGrado' => $gradoId,
                         'idFicha' => $fichaId,
-                        'observacion' => 'FormResponseID:' . $respuesta->id,
+                        'observacion' => $observacionMatricula,
                     ]);
+                }
 
-                    // Buscar proceso (Programa de Interés) y Configuración de Pago asociada
-                    $proceso = \App\Models\Proceso::where('nombreProceso', $programName)->first();
-                    $idConfigPago = null;
-                    if ($proceso) {
-                        $asignacion = \App\Models\AsignacionProcesoPago::where('idProceso', $proceso->id)->first();
-                        if ($asignacion) {
-                            $idConfigPago = $asignacion->idConfiguracionPago;
-                        }
+                // 5. Generar factura individual (idempotente) con valores económicos del proceso
+                $proceso = $this->resolverProcesoInscripcionFormulario($programName, (int) $formulario->idCompany);
+
+                if ($proceso) {
+                    /** @var PagoController $pagoController */
+                    $pagoController = app(PagoController::class);
+                    $resultadoFactura = $pagoController->crearFacturaIndividualInscripcion(
+                        (int) $proceso->id,
+                        (int) $formulario->idCompany,
+                        (int) $terceroEstudiante->id
+                    );
+
+                    if (!empty($resultadoFactura['factura'])) {
+                        $facturaInscripcion = $resultadoFactura['factura'];
                     }
-
-                    if (!$idConfigPago) {
-                        $configPago = \App\Models\ConfiguracionPago::where('idCompany', $formulario->idCompany)->first();
-                        if (!$configPago) {
-                            $configPago = \App\Models\ConfiguracionPago::create([
-                                'titulo' => 'Inscripción Estándar',
-                                'detalle' => 'Derechos de inscripción y matrícula',
-                                'valor' => 0,
-                                'estado' => 'ACTIVO',
-                                'idCompany' => $formulario->idCompany
-                            ]);
-                        }
-                        $idConfigPago = $configPago?->id;
-                    }
-
-                    // 5. Generar Factura académica (solicitud)
-                    $factura = new \App\Models\Factura();
-                    $lastFactura = \App\Models\Factura::where('idTipoFactura', \App\Models\TipoFactura::VENTA)->orderBy('id', 'desc')->first();
-                    $factura->numeroFactura = $lastFactura
-                        ? str_pad((int) $lastFactura->numeroFactura + 1, 5, '0', STR_PAD_LEFT)
-                        : '00001';
-                    $factura->fecha = \Carbon\Carbon::now();
-                    $factura->valor = 0;
-                    $factura->valorIva = 0;
-                    $factura->valorMasIva = 0;
-                    $factura->idTercero = $terceroEstudiante->id;
-                    $factura->idCompany = $formulario->idCompany;
-                    $factura->idTipoFactura = \App\Models\TipoFactura::VENTA;
-                    $factura->save();
-
-                    // Detalle Factura
-                    $detalleFactura = new \App\Models\DetalleFactura();
-                    $detalleFactura->idFactura = $factura->id;
-                    
-                    $configPago = \App\Models\ConfiguracionPago::find($idConfigPago);
-                    $detalleFactura->detalle = $configPago ? $configPago->titulo : ($programName ?: 'Proceso académico');
-                    $detalleFactura->valor = 0;
-                    if (\Schema::hasColumn('detalleFactura', 'idConfiguracionPago')) {
-                        $detalleFactura->idConfiguracionPago = $idConfigPago;
-                    }
-                    $detalleFactura->save();
-
-                    // Transacción pendiente
-                    $transaccion = new \App\Models\Transaccion();
-                    $transaccion->valor = 0;
-                    $transaccion->hora = \Carbon\Carbon::now()->format('H:i');
-                    $transaccion->fechaTransaccion = \Carbon\Carbon::now();
-                    $transaccion->idTipoTransaccion = \App\Models\TipoTransaccion::VENTA;
-                    $transaccion->idEstado = \App\Models\Status::ID_PENDIENTE;
-                    $transaccion->excedente = 0;
-                    $transaccion->save();
-
-                    $asignacionFacturaTransaccion = new \App\Models\AsignacionFacturaTransaccion();
-                    $asignacionFacturaTransaccion->idFactura = $factura->id;
-                    $asignacionFacturaTransaccion->idTransaccion = $transaccion->id;
-                    $asignacionFacturaTransaccion->save();
-
-                    $pago = new \App\Models\Pago();
-                    $pago->fechaPago = \Carbon\Carbon::now();
-                    $pago->fechaReg = \Carbon\Carbon::now();
-                    $pago->valor = 0;
-                    $pago->excedente = 0;
-                    $pago->idEstado = \App\Models\Status::ID_PENDIENTE;
-                    $pago->idTransaccion = $transaccion->id;
-                    $pago->save();
-                } else {
-                    $matricula = \App\Models\Matricula::where('idPersona', $personEstudiante->id)
-                        ->where('idCompany', $formulario->idCompany)
-                        ->orderBy('id', 'desc')
-                        ->first();
-                    if ($matricula) {
-                        $matricula->update([
-                            'idAcudiente' => $idAcudiente,
-                            'idGrado' => $gradoId,
+                    if (!empty($resultadoFactura['error'])) {
+                        $advertenciaFactura = $resultadoFactura['error'];
+                        Log::warning('Inscripción: no se generó factura automática', [
+                            'idTercero' => $terceroEstudiante->id,
+                            'idProceso' => $proceso->id,
+                            'programName' => $programName,
+                            'error' => $resultadoFactura['error'],
                         ]);
                     }
+                } else {
+                    $advertenciaFactura = 'No se identificó el proceso académico para generar la factura. Verifique el campo programa del formulario y la configuración de valores económicos.';
+                    Log::warning('Inscripción sin proceso resuelto para factura', [
+                        'idTercero' => $terceroEstudiante->id,
+                        'programName' => $programName,
+                        'idCompany' => $formulario->idCompany,
+                    ]);
                 }
             }
 
             DB::commit();
 
-            return response()->json(['message' => 'Respuesta guardada con éxito', 'data' => $respuesta]);
+            $responsePayload = [
+                'message' => 'Respuesta guardada con éxito',
+                'data' => $respuesta,
+            ];
+
+            if (isset($facturaInscripcion) && $facturaInscripcion) {
+                $responsePayload['idFactura'] = $facturaInscripcion->id;
+                $responsePayload['numeroFactura'] = $facturaInscripcion->numeroFactura;
+            }
+            if (isset($advertenciaFactura) && $advertenciaFactura) {
+                $responsePayload['advertenciaFactura'] = $advertenciaFactura;
+            }
+
+            return response()->json($responsePayload);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['error' => $e->getMessage()], 500);
@@ -755,6 +734,60 @@ class FormularioController extends Controller
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+
+    private function normalizarTituloPregunta(string $titulo): string
+    {
+        $t = mb_strtolower(trim($titulo));
+        $t = preg_replace('/\?+/u', '', $t) ?? $t;
+        $reemplazos = [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n',
+            'ü' => 'u',
+        ];
+
+        return preg_replace('/\s+/', ' ', strtr($t, $reemplazos)) ?? $t;
+    }
+
+
+    private function resolverProcesoInscripcionFormulario(?string $programName, int $idCompany): ?Proceso
+    {
+        $programName = trim((string) $programName);
+        if ($programName !== '') {
+            $proceso = Proceso::where('nombreProceso', $programName)->first();
+            if (!$proceso) {
+                $proceso = Proceso::where('nombreProceso', 'like', '%' . $programName . '%')->first();
+            }
+            if ($proceso) {
+                return $proceso;
+            }
+        }
+
+        $conteoPorProceso = AsignacionProcesoPago::query()
+            ->whereHas('configuracionPago', function ($query) use ($idCompany) {
+                $query->where('idCompany', $idCompany)
+                    ->where('estado', 'ACTIVO');
+            })
+            ->selectRaw('idProceso, COUNT(*) as total')
+            ->groupBy('idProceso')
+            ->orderByDesc('total')
+            ->get();
+
+        if ($conteoPorProceso->isEmpty()) {
+            return null;
+        }
+
+        $procesoPreferido = $conteoPorProceso->first(function ($row) {
+            $nombre = mb_strtolower((string) Proceso::where('id', $row->idProceso)->value('nombreProceso'));
+
+            return str_contains($nombre, 'matricula') || str_contains($nombre, 'inscripcion');
+        });
+
+        $idProceso = $procesoPreferido
+            ? (int) $procesoPreferido->idProceso
+            : (int) $conteoPorProceso->first()->idProceso;
+
+        return Proceso::find($idProceso);
     }
 }
 
