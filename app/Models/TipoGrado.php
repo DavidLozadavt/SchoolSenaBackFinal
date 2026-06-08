@@ -17,4 +17,9 @@ class TipoGrado extends Model
         'created_at',
         'updated_at',
     ];
+
+    public function ficha()
+    {
+        return $this->hasMany(Ficha::class, 'idTipoGrado', 'id');
+    }
 }

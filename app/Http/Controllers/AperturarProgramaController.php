@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\AperturarProgramaResource;
 use App\Models\AperturarPrograma;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,10 +17,28 @@ class AperturarProgramaController extends Controller
         return response()->json(AperturarProgramaResource::collection($data));
     }
 
+    public function aperturasDisponibles(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'idPrograma' => 'required|exists:programa,id',
+            'idSede' => 'nullable|exists:sedes,id'
+        ]);
+
+        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'jornada:id,nombreJornada'])
+            ->where('fechaFinalPlanMejoramiento', '>=', Carbon::today()->toDateString())
+            ->where('idPrograma', $validated['idPrograma'])
+            ->when(isset($validated['idSede']), function ($query) use ($validated) {
+                $query->where('idSede', $validated['idSede']);
+            })
+            ->get();
+
+        return response()->json(AperturarProgramaResource::collection($data));
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'observacion' => 'required|string|max:1000',
+            'observacion' => 'nullable|string|max:1000',
 
             'idPeriodo' => 'required|exists:periodo,id',
             'idPrograma' => 'required|exists:programa,id',
@@ -34,6 +53,14 @@ class AperturarProgramaController extends Controller
             'fechaInicialPlanMejoramiento' => 'required|date',
             'fechaFinalPlanMejoramiento' => 'required|date|after_or_equal:fechaInicialPlanMejoramiento',
             'tipoCalificacion' => 'required|in:NUMERICO,DESEMPEÑO',
+            //Diferecnia al sena:
+            'pension' => 'nullable|boolean',
+            'valorPension' => 'nullable|numeric',
+            'diasMoraMatricula' => 'nullable|integer',
+            'porcentajeMoraPension' => 'nullable|numeric',
+            'diaCobro' => 'nullable|integer',
+            //Nuevo campo
+            'idJornada' => 'required|exists:jornadas,id'
         ]);
 
         $apertura = AperturarPrograma::create($validated);
@@ -71,6 +98,14 @@ class AperturarProgramaController extends Controller
             'fechaInicialPlanMejoramiento' => 'nullable|date',
             'fechaFinalPlanMejoramiento' => 'nullable|date|after_or_equal:fechaInicialPlanMejoramiento',
             'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
+            //Diferecnia al sena:
+            'pension' => 'nullable|boolean',
+            'valorPension' => 'nullable|numeric',
+            'diasMoraMatricula' => 'nullable|integer',
+            'porcentajeMoraPension' => 'nullable|numeric',
+            'diaCobro' => 'nullable|integer',
+            //Nuevo campo
+            'idJornada' => 'nullable|exists:jornadas,id'
         ]);
 
         $apertura->update($validated);

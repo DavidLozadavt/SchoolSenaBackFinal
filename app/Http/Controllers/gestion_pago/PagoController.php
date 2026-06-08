@@ -4,19 +4,25 @@ namespace App\Http\Controllers\gestion_pago;
 
 use App\Http\Controllers\Controller;
 use App\Mail\MailService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use App\Models\ActivationCompanyUser;
 use App\Models\AgregarPagoCuenta;
 use App\Models\AporteSocio;
+use App\Models\AsignacionFacturaTransaccion;
 use App\Models\AsignacionPagoAdicional;
 use App\Models\AsignacionProcesoPago;
 use App\Models\AsignacionProcesoTipoDocumento;
 use App\Models\ConfiguracionPago;
+use App\Models\ConfiguracionPagoVigencia;
+use App\Models\DetalleFactura;
+use App\Models\Factura;
 use App\Models\Contract;
 use App\Models\ContratoTransaccion;
 use App\Models\DocumentoContrato;
 use App\Models\DocumentoEstado;
 use App\Models\DocumentoPago;
 use App\Models\Notificacion;
+use App\Models\Matricula;
 use App\Models\Pago;
 use App\Models\Person;
 use App\Models\Proceso;
@@ -24,12 +30,16 @@ use App\Models\Rol;
 use App\Models\Status;
 use App\Models\Tercero;
 use App\Models\TipoDocumento;
+use App\Models\TipoFactura;
+use App\Models\TipoTransaccion;
 use App\Models\Transaccion;
 use App\Models\User;
 use App\Util\KeyUtil;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Session;
 
@@ -899,29 +909,91 @@ class PagoController extends Controller
 
     public function getConfiguracionesPago()
     {
-        $documents = AsignacionProcesoPago::with('configuracionPago', 'proceso')
-            ->whereHas('configuracionPago', function ($query) {
-                $query->where('estado', 'ACTIVO');
-            })
+        $hoy = Carbon::today()->toDateString();
+        $pagos = ConfiguracionPago::with([
+            'asignacionProcesoPago.proceso',
+            'configuracionPagoVigencias' => function ($query) use ($hoy) {
+                $query->whereDate('fechaInicial', '<=', $hoy)
+                    ->whereDate('fechaFinal', '>=', $hoy)
+                    ->orderBy('fechaInicial', 'desc');
+            }
+        ])
             ->get();
 
-        return response()->json($documents);
+        $pagos->each(function ($config) {
+            $config->setAttribute('configuracionPagoVigenciaActual', $config->configuracionPagoVigencias->first());
+            unset($config->configuracionPagoVigencias);
+        });
+
+        return response()->json($pagos);
     }
 
 
 
     public function storeConfiguracionPago(Request $request)
     {
-
+        $vigenciasInput = $request->input('configuracionPagoVigencia');
+        if (!is_array($vigenciasInput) || empty($vigenciasInput)) {
+            $vigenciasInput = [[
+                'fechaInicial' => $request->input('vigenciaFechaInicial'),
+                'fechaFinal' => $request->input('vigenciaFechaFinal'),
+                'valor' => $request->input('valor'),
+            ]];
+        }
 
         $configuracionPago = new ConfiguracionPago();
         $configuracionPago->titulo = $request->input('titulo');
         $configuracionPago->detalle = $request->input('detalle');
         $configuracionPago->estado = $request->input('estado');
         $configuracionPago->valor = $request->input('valor');
+        $configuracionPago->porcentajeIva = $request->input('porcentajeIva');
+        $configuracionPago->frecuenciaPago = $request->input('frecuenciaPago');
         $configuracionPago->idCompany = KeyUtil::idCompany();
-
+        $configuracionPago->idContabilizacion = $request->input('idContabilizacion');
+        $configuracionPago->obligatorio = $request->input('obligatorio', false);
+        $configuracionPago->porcentaje = $request->input('porcentaje');
+        $configuracionPago->topeValor = $request->input('topeValor');
+        $configuracionPago->frecuenciaTope = $request->input('frecuenciaTope');
+        $configuracionPago->tipoMovimiento = $request->input('tipoMovimiento');
+        $configuracionPago->idCentroCosto = $request->input('idCentroCosto');
+        $configuracionPago->idClaseVehiculo = $request->input('idClaseVehiculo');
         $configuracionPago->save();
+
+        foreach ($vigenciasInput as $vigencia) {
+            $fechaInicial = $vigencia['fechaInicial'] ?? null;
+            $fechaFinal = $vigencia['fechaFinal'] ?? null;
+            $tieneFechaInicial = !empty($fechaInicial);
+            $tieneFechaFinal = !empty($fechaFinal);
+
+            if ($tieneFechaInicial xor $tieneFechaFinal) {
+                $configuracionPago->delete();
+                return response()->json([
+                    'error' => 'Para registrar vigencia debe enviar fechaInicial y fechaFinal.'
+                ], 422);
+            }
+
+            if (!$tieneFechaInicial && !$tieneFechaFinal) {
+                continue;
+            }
+
+            if ($this->existeCruceVigenciaConfiguracionPago(
+                (int) $configuracionPago->id,
+                (string) $fechaInicial,
+                (string) $fechaFinal
+            )) {
+                $configuracionPago->delete();
+                return response()->json([
+                    'error' => 'Ya existe una vigencia con rango de fechas que se cruza para esta configuración de pago.'
+                ], 422);
+            }
+
+            $confiVigenciaValor = new ConfiguracionPagoVigencia();
+            $confiVigenciaValor->idConfiguracionPago = $configuracionPago->id;
+            $confiVigenciaValor->fechaInicial = $fechaInicial;
+            $confiVigenciaValor->fechaFinal = $fechaFinal;
+            $confiVigenciaValor->valor = $vigencia['valor'] ?? $configuracionPago->valor;
+            $confiVigenciaValor->save();
+        }
 
         $asignacion = new AsignacionProcesoPago();
         $asignacion->idConfiguracionPago = $configuracionPago->id;
@@ -929,25 +1001,112 @@ class PagoController extends Controller
 
         $asignacion->save();
 
+
+
+
+
         return response()->json($asignacion, 201);
     }
 
 
     public function updateConfiguracionPago(Request $request, int $id)
     {
-        $asignacion = AsignacionProcesoPago::where('id', $id)->firstOrFail();
+        $vigenciasInput = $request->input('configuracionPagoVigencia');
+        if (!is_array($vigenciasInput) || empty($vigenciasInput)) {
+            $vigenciasInput = [[
+                'fechaInicial' => $request->input('vigenciaFechaInicial'),
+                'fechaFinal' => $request->input('vigenciaFechaFinal'),
+                'valor' => $request->input('valor'),
+            ]];
+        }
 
-        $configuracionPago = ConfiguracionPago::findOrFail($asignacion->idConfiguracionPago);
+        $configuracionPago = ConfiguracionPago::findOrFail($id);
+
+
+        $asignacion = AsignacionProcesoPago::where('idConfiguracionPago', $configuracionPago->id)->first();
+
 
         $configuracionPago->titulo = $request->input('titulo', $configuracionPago->titulo);
         $configuracionPago->detalle = $request->input('detalle', $configuracionPago->detalle);
         $configuracionPago->estado = $request->input('estado', $configuracionPago->estado);
         $configuracionPago->valor = $request->input('valor', $configuracionPago->valor);
-
+        $configuracionPago->porcentajeIva = $request->input('porcentajeIva');
+        $configuracionPago->frecuenciaPago = $request->input('frecuenciaPago');
+        $configuracionPago->idContabilizacion = $request->input('idContabilizacion');
+        $configuracionPago->obligatorio = $request->input('obligatorio', false);
+        $configuracionPago->porcentaje = $request->input('porcentaje');
+        $configuracionPago->topeValor = $request->input('topeValor');
+        $configuracionPago->idClaseVehiculo = $request->input('idClaseVehiculo');
+        $configuracionPago->frecuenciaTope = $request->input('frecuenciaTope');
+        $configuracionPago->tipoMovimiento = $request->input('tipoMovimiento');
+        $configuracionPago->idCentroCosto = $request->input('idCentroCosto');
         $configuracionPago->save();
+
+        if (!$asignacion) {
+            if (!$request->filled('idProceso')) {
+                return response()->json([
+                    'error' => 'No existe asignación para esta configuración. Debe enviar idProceso para crearla.'
+                ], 422);
+            }
+
+            $asignacion = new AsignacionProcesoPago();
+            $asignacion->idConfiguracionPago = $configuracionPago->id;
+        }
 
         $asignacion->idProceso = $request->input('idProceso', $asignacion->idProceso);
         $asignacion->save();
+
+        foreach ($vigenciasInput as $vigencia) {
+            $idVigencia = isset($vigencia['id']) ? (int) $vigencia['id'] : null;
+            $fechaInicial = $vigencia['fechaInicial'] ?? null;
+            $fechaFinal = $vigencia['fechaFinal'] ?? null;
+            $tieneFechaInicial = !empty($fechaInicial);
+            $tieneFechaFinal = !empty($fechaFinal);
+
+            if ($tieneFechaInicial xor $tieneFechaFinal) {
+                return response()->json([
+                    'error' => 'Para registrar vigencia debe enviar fechaInicial y fechaFinal.'
+                ], 422);
+            }
+
+            if (!$tieneFechaInicial && !$tieneFechaFinal) {
+                continue;
+            }
+
+            if ($this->existeCruceVigenciaConfiguracionPago(
+                (int) $configuracionPago->id,
+                (string) $fechaInicial,
+                (string) $fechaFinal,
+                $idVigencia
+            )) {
+                return response()->json([
+                    'error' => 'Ya existe una vigencia con rango de fechas que se cruza para esta configuraci�n de pago.'
+                ], 422);
+            }
+
+            if (!empty($idVigencia)) {
+                $confiVigenciaValor = ConfiguracionPagoVigencia::where('idConfiguracionPago', $configuracionPago->id)
+                    ->where('id', $idVigencia)
+                    ->first();
+
+                if (!$confiVigenciaValor) {
+                    return response()->json([
+                        'error' => 'La vigencia indicada no existe para esta configuraci�n de pago.'
+                    ], 404);
+                }
+            } else {
+                $confiVigenciaValor = new ConfiguracionPagoVigencia();
+                $confiVigenciaValor->idConfiguracionPago = $configuracionPago->id;
+            }
+
+            $confiVigenciaValor->fechaInicial = $fechaInicial;
+            $confiVigenciaValor->fechaFinal = $fechaFinal;
+            $confiVigenciaValor->valor = $vigencia['valor'] ?? $configuracionPago->valor;
+            $confiVigenciaValor->save();
+        }
+
+
+
 
         return response()->json([
             'configuracionPago' => $configuracionPago,
@@ -958,13 +1117,1623 @@ class PagoController extends Controller
 
     public function destroyConfiguracionPago(int $id)
     {
-        $asignacion = AsignacionProcesoPago::findOrFail($id);
+        $configuracionPago = ConfiguracionPago::findOrFail($id);
 
-        $configuracionPago = ConfiguracionPago::findOrFail($asignacion->idConfiguracionPago);
 
-        $asignacion->delete();
+        AsignacionProcesoPago::where('idConfiguracionPago', $configuracionPago->id)->delete();
         $configuracionPago->delete();
 
         return response()->json([], 204);
+    }
+
+
+    private function existeCruceVigenciaConfiguracionPago(
+        int $idConfiguracionPago,
+        string $fechaInicial,
+        string $fechaFinal,
+        ?int $ignorarIdVigencia = null
+    ): bool {
+        $query = ConfiguracionPagoVigencia::where('idConfiguracionPago', $idConfiguracionPago)
+            ->whereDate('fechaInicial', '<=', $fechaFinal)
+            ->whereDate('fechaFinal', '>=', $fechaInicial);
+
+        if (!empty($ignorarIdVigencia)) {
+            $query->where('id', '!=', $ignorarIdVigencia);
+        }
+
+        return $query->exists();
+    }
+
+
+    /**
+     * Genera o reutiliza factura individual de inscripción para un aspirante (idempotente).
+     * Usado desde FormularioController al enviar formulario público de inscripción.
+     *
+     * @return array{factura: ?Factura, creada: bool, error: ?string}
+     */
+    public function crearFacturaIndividualInscripcion(int $idProceso, int $idCompany, int $idTercero): array
+    {
+        $proceso = Proceso::find($idProceso);
+        if (!$proceso) {
+            return ['factura' => null, 'creada' => false, 'error' => 'Proceso no encontrado.'];
+        }
+
+        $existente = $this->buscarFacturaInscripcionExistente($idTercero, $idProceso, $idCompany);
+        if ($existente) {
+            return ['factura' => $existente, 'creada' => false, 'error' => null];
+        }
+
+        $resuelto = $this->resolverLineasFacturaAcademicaProceso($idProceso, $idCompany, []);
+        if (!empty($resuelto['error'])) {
+            return ['factura' => null, 'creada' => false, 'error' => $resuelto['error']];
+        }
+
+        try {
+            $factura = $this->persistirFacturaAcademicaLineas(
+                $resuelto['lineas'],
+                $idCompany,
+                $idTercero,
+                $resuelto['proceso'],
+                null
+            );
+
+            return ['factura' => $factura, 'creada' => true, 'error' => null];
+        } catch (\Exception $e) {
+            Log::error('Error creando factura de inscripción: ' . $e->getMessage(), [
+                'idProceso' => $idProceso,
+                'idCompany' => $idCompany,
+                'idTercero' => $idTercero,
+            ]);
+
+            return ['factura' => null, 'creada' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+
+    /**
+     * Genera factura de venta y líneas desde configuraciones económicas activas de un proceso.
+     * No modifica configuracionPago ni vigencias.
+     */
+    public function generarFacturaValoresEconomicos(Request $request)
+    {
+        $idProceso = $request->input('idProceso');
+        if (empty($idProceso)) {
+            return response()->json(['error' => 'idProceso es obligatorio.'], 422);
+        }
+
+        $idCompany = (int) ($request->input('idCompany') ?: KeyUtil::idCompany());
+        $idTercero = $request->input('idTercero') ?: $request->input('idEstudiante');
+        $conceptosInput = $request->input('conceptos', []);
+
+        $resuelto = $this->resolverLineasFacturaAcademicaProceso((int) $idProceso, $idCompany, $conceptosInput);
+        if (!empty($resuelto['error'])) {
+            $status = ($resuelto['error'] === 'Proceso no encontrado.') ? 404 : 422;
+
+            return response()->json(['error' => $resuelto['error']], $status);
+        }
+
+        $proceso = $resuelto['proceso'];
+
+        try {
+            $factura = $this->persistirFacturaAcademicaLineas(
+                $resuelto['lineas'],
+                $idCompany,
+                !empty($idTercero) ? (int) $idTercero : null,
+                $proceso,
+                auth()->check() ? (int) auth()->id() : null
+            );
+
+            return response()->json([
+                'message' => 'Factura académica generada correctamente.',
+                'factura' => $this->formatearFacturaAcademica($factura, $proceso),
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'No fue posible generar la factura académica.',
+                'detalle' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+
+    /**
+     * @return array{proceso: ?Proceso, lineas: array, error: ?string}
+     */
+    private function resolverLineasFacturaAcademicaProceso(
+        int $idProceso,
+        int $idCompany,
+        array $conceptosInput
+    ): array {
+        $proceso = Proceso::find($idProceso);
+        if (!$proceso) {
+            return ['proceso' => null, 'lineas' => [], 'error' => 'Proceso no encontrado.'];
+        }
+
+        $asignaciones = AsignacionProcesoPago::with('configuracionPago')
+            ->where('idProceso', $idProceso)
+            ->whereHas('configuracionPago', function ($query) use ($idCompany) {
+                $query->where('idCompany', $idCompany)
+                    ->where('estado', 'ACTIVO');
+            })
+            ->get();
+
+        $idsSolicitados = collect($conceptosInput)
+            ->pluck('idConfiguracionPago')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($idsSolicitados->isNotEmpty()) {
+            $idsDelProceso = $asignaciones->pluck('idConfiguracionPago')->map(fn ($id) => (int) $id);
+            $invalidos = $idsSolicitados->diff($idsDelProceso);
+            if ($invalidos->isNotEmpty()) {
+                return [
+                    'proceso' => $proceso,
+                    'lineas' => [],
+                    'error' => 'Uno o más conceptos no pertenecen al proceso seleccionado o no están activos.',
+                ];
+            }
+            $asignaciones = $asignaciones->filter(
+                fn ($a) => $idsSolicitados->contains((int) $a->idConfiguracionPago)
+            )->values();
+        }
+
+        if ($asignaciones->isEmpty()) {
+            return [
+                'proceso' => $proceso,
+                'lineas' => [],
+                'error' => 'No hay conceptos económicos activos asociados al proceso.',
+            ];
+        }
+
+        $lineas = [];
+        $idsUsados = [];
+
+        foreach ($asignaciones as $asignacion) {
+            $config = $asignacion->configuracionPago;
+            if (!$config || strtoupper((string) $config->estado) !== 'ACTIVO') {
+                continue;
+            }
+
+            $idConfig = (int) $config->id;
+            if (in_array($idConfig, $idsUsados, true)) {
+                continue;
+            }
+            $idsUsados[] = $idConfig;
+
+            $valorLinea = $this->resolverValorLineaConfiguracion($config, $conceptosInput, $idConfig);
+            if ($valorLinea < 0) {
+                return [
+                    'proceso' => $proceso,
+                    'lineas' => [],
+                    'error' => 'No se permiten valores negativos en los conceptos.',
+                ];
+            }
+
+            $porcentajeIva = (float) ($config->porcentajeIva ?? 0);
+            $ivaLinea = $porcentajeIva > 0 ? round($valorLinea * ($porcentajeIva / 100), 2) : 0.0;
+
+            $lineas[] = [
+                'config' => $config,
+                'valor' => $valorLinea,
+                'iva' => $ivaLinea,
+            ];
+        }
+
+        if (empty($lineas)) {
+            return [
+                'proceso' => $proceso,
+                'lineas' => [],
+                'error' => 'No se encontraron conceptos válidos para generar la factura.',
+            ];
+        }
+
+        return ['proceso' => $proceso, 'lineas' => $lineas, 'error' => null];
+    }
+
+
+    private function persistirFacturaAcademicaLineas(
+        array $lineas,
+        int $idCompany,
+        ?int $idTercero,
+        Proceso $proceso,
+        ?int $idUser = null
+    ): Factura {
+        $totalSinIva = round(collect($lineas)->sum(fn ($l) => $l['valor']), 2);
+        $totalIva = round(collect($lineas)->sum(fn ($l) => $l['iva']), 2);
+        $valorMasIva = round($totalSinIva + $totalIva, 2);
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        $factura = new Factura();
+        $lastFactura = Factura::where('idTipoFactura', TipoFactura::VENTA)
+            ->orderBy('id', 'desc')
+            ->first();
+        $factura->numeroFactura = $lastFactura
+            ? str_pad((int) $lastFactura->numeroFactura + 1, 5, '0', STR_PAD_LEFT)
+            : '00001';
+        $factura->fecha = Carbon::now();
+        $factura->valor = $totalSinIva;
+        $factura->valorIva = $totalIva;
+        $factura->valorMasIva = $valorMasIva;
+        if (!empty($idTercero)) {
+            $factura->idTercero = $idTercero;
+        }
+        $factura->idCompany = $idCompany;
+        $factura->idTipoFactura = TipoFactura::VENTA;
+        if ($idUser) {
+            $factura->idUser = $idUser;
+        } elseif (auth()->check()) {
+            $factura->idUser = auth()->id();
+        }
+        $factura->save();
+
+        foreach ($lineas as $linea) {
+            $config = $linea['config'];
+            $detalleFactura = new DetalleFactura();
+            $detalleFactura->idFactura = $factura->id;
+            $detalleFactura->detalle = $config->titulo ?? $config->detalle ?? 'Concepto académico';
+            $detalleFactura->valor = $linea['valor'] + $linea['iva'];
+            if ($tieneColumnaIdConfig) {
+                $detalleFactura->idConfiguracionPago = $config->id;
+            }
+            $detalleFactura->save();
+        }
+
+        $transaccion = new Transaccion();
+        $transaccion->valor = $valorMasIva;
+        $transaccion->hora = Carbon::now()->format('H:i');
+        $transaccion->fechaTransaccion = Carbon::now();
+        $transaccion->tipoCartera = 'CXC';
+        $transaccion->idTipoTransaccion = TipoTransaccion::VENTA;
+        $transaccion->idEstado = Status::ID_PENDIENTE;
+        $transaccion->excedente = $valorMasIva;
+        $transaccion->save();
+
+        $asignacionFacturaTransaccion = new AsignacionFacturaTransaccion();
+        $asignacionFacturaTransaccion->idFactura = $factura->id;
+        $asignacionFacturaTransaccion->idTransaccion = $transaccion->id;
+        $asignacionFacturaTransaccion->save();
+
+        $pago = new Pago();
+        $pago->fechaPago = Carbon::now();
+        $pago->fechaReg = Carbon::now();
+        $pago->valor = 0;
+        $pago->excedente = $valorMasIva;
+        $pago->idEstado = Status::ID_PENDIENTE;
+        $pago->idTransaccion = $transaccion->id;
+        $pago->save();
+
+        $factura->load(['detalles', 'tercero', 'transacciones.pago.estado']);
+
+        return $factura;
+    }
+
+
+    private function buscarFacturaInscripcionExistente(int $idTercero, int $idProceso, int $idCompany): ?Factura
+    {
+        if (!Schema::hasColumn('detalleFactura', 'idConfiguracionPago')) {
+            return null;
+        }
+
+        $idsConfig = AsignacionProcesoPago::where('idProceso', $idProceso)
+            ->pluck('idConfiguracionPago')
+            ->filter()
+            ->values();
+
+        if ($idsConfig->isEmpty()) {
+            return null;
+        }
+
+        $facturas = Factura::with(['detalles', 'transacciones.pago.estado'])
+            ->where('idTercero', $idTercero)
+            ->where('idCompany', $idCompany)
+            ->where('idTipoFactura', TipoFactura::VENTA)
+            ->whereHas('detalles', function ($q) use ($idsConfig) {
+                $q->whereIn('idConfiguracionPago', $idsConfig);
+            })
+            ->orderByDesc('id')
+            ->get();
+
+        foreach ($facturas as $factura) {
+            $pago = $this->resolverPagoFacturaAcademica($factura);
+            if (!$pago) {
+                continue;
+            }
+            if (in_array((int) $pago->idEstado, [Status::ID_PENDIENTE, Status::ID_APROBADO], true)) {
+                return $factura;
+            }
+        }
+
+        return null;
+    }
+
+
+    public function getFacturasAcademicas(Request $request)
+    {
+        $idCompany = (int) ($request->input('idCompany') ?: KeyUtil::idCompany());
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        $query = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('idTipoFactura', TipoFactura::VENTA)
+            ->where(function ($q) use ($idCompany) {
+                $q->where('idCompany', $idCompany)->orWhereNull('idCompany');
+            })
+            ->orderBy('id', 'desc');
+
+        if ($tieneColumnaIdConfig) {
+            $query->whereHas('detalles', function ($q) {
+                $q->whereNotNull('idConfiguracionPago');
+            });
+        } else {
+            $idsConfig = ConfiguracionPago::where('idCompany', $idCompany)->pluck('id');
+            if ($idsConfig->isEmpty()) {
+                return response()->json([]);
+            }
+            $titulos = ConfiguracionPago::whereIn('id', $idsConfig)->pluck('titulo')->filter();
+            $query->whereHas('detalles', function ($q) use ($titulos) {
+                $q->where(function ($inner) use ($titulos) {
+                    foreach ($titulos as $titulo) {
+                        $inner->orWhere('detalle', $titulo);
+                    }
+                });
+            });
+        }
+
+        $facturas = $query->get();
+
+        $resultado = $facturas->map(function (Factura $factura) {
+            $proceso = $this->inferirProcesoFacturaAcademica($factura);
+            return $this->formatearFacturaAcademica($factura, $proceso);
+        });
+
+        return response()->json($resultado->values());
+    }
+
+
+    public function getFacturaAcademica(int $id)
+    {
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('id', $id)
+            ->where(function ($q) use ($idCompany) {
+                $q->where('idCompany', $idCompany)->orWhereNull('idCompany');
+            })
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $proceso = $this->inferirProcesoFacturaAcademica($factura);
+
+        return response()->json($this->formatearFacturaAcademica($factura, $proceso));
+    }
+
+
+    /**
+     * Registra el pago de una factura académica contra su transacción y el registro en pagos.
+     * Usado en validación de solicitudes de inscripción / matrícula.
+     */
+    public function registrarPagoFacturaAcademica(Request $request, int $id)
+    {
+        $request->validate([
+            'idMedioPago' => ['required', 'integer'],
+            'idTipoPago' => ['nullable', 'integer'],
+            'valorAbono' => ['nullable', 'numeric', 'min:0.01'],
+            'contexto' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('id', $id)
+            ->where(function ($q) use ($idCompany) {
+                $q->where('idCompany', $idCompany)->orWhereNull('idCompany');
+            })
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $transaccion = $factura->transacciones->first();
+        if (!$transaccion) {
+            return response()->json(['error' => 'La factura no tiene transacción asociada.'], 422);
+        }
+
+        $pago = $transaccion->pago->first();
+        if (!$pago) {
+            return response()->json(['error' => 'La transacción no tiene registro de pago.'], 422);
+        }
+
+        if ((int) $pago->idEstado === Status::ID_APROBADO && (float) $pago->excedente <= 0) {
+            $proceso = $this->inferirProcesoFacturaAcademica($factura);
+
+            return response()->json([
+                'message' => 'La factura ya está pagada.',
+                'idTransaccion' => $transaccion->id,
+                'factura' => $this->formatearFacturaAcademica($factura, $proceso),
+            ]);
+        }
+
+        $valorAbono = $request->has('valorAbono')
+            ? (float) $request->input('valorAbono')
+            : (float) $pago->excedente;
+
+        if ($valorAbono <= 0 || (float) $pago->excedente <= 0) {
+            return response()->json(['error' => 'No hay saldo pendiente por registrar.'], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $restarExcedente = min((float) $pago->excedente, $valorAbono);
+            $pago->excedente = round((float) $pago->excedente - $restarExcedente, 2);
+            $pago->valor = round((float) $pago->valor + $restarExcedente, 2);
+            $pago->fechaPago = Carbon::now()->format('Y-m-d');
+            $pago->fechaReg = Carbon::now()->format('Y-m-d');
+            $pago->idMedioPago = (int) $request->input('idMedioPago');
+            $pago->numeroFact = $factura->numeroFactura;
+
+            if ((float) $pago->excedente <= 0) {
+                $pago->idEstado = Status::ID_APROBADO;
+            }
+
+            $pago->save();
+
+            if ($request->filled('idTipoPago')) {
+                $transaccion->idTipoPago = (int) $request->input('idTipoPago');
+            }
+
+            if (isset($transaccion->excedente) && (float) $transaccion->excedente > 0) {
+                $transaccion->excedente = max(
+                    0,
+                    round((float) $transaccion->excedente - $restarExcedente, 2)
+                );
+            }
+
+            if ((float) $pago->excedente <= 0) {
+                $transaccion->idEstado = Status::ID_APROBADO;
+            }
+
+            $transaccion->save();
+
+            DB::commit();
+
+            $factura->refresh();
+            $factura->load(['detalles', 'tercero', 'transacciones.pago.estado']);
+            $proceso = $this->inferirProcesoFacturaAcademica($factura);
+
+            return response()->json([
+                'message' => 'Pago registrado correctamente.',
+                'idTransaccion' => $transaccion->id,
+                'factura' => $this->formatearFacturaAcademica($factura, $proceso),
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'error' => 'No fue posible registrar el pago.',
+                'detalle' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+
+    private function resolverValorLineaConfiguracion(
+        ConfiguracionPago $config,
+        array $conceptosInput,
+        int $idConfig
+    ): float {
+        foreach ($conceptosInput as $item) {
+            if ((int) ($item['idConfiguracionPago'] ?? 0) === $idConfig && isset($item['valor'])) {
+                $valorManual = (float) $item['valor'];
+                return max(0, $valorManual);
+            }
+        }
+
+        $hoy = Carbon::today()->toDateString();
+        $vigencia = ConfiguracionPagoVigencia::where('idConfiguracionPago', $config->id)
+            ->whereDate('fechaInicial', '<=', $hoy)
+            ->whereDate('fechaFinal', '>=', $hoy)
+            ->orderBy('fechaInicial', 'desc')
+            ->first();
+
+        if ($vigencia && $vigencia->valor !== null) {
+            return max(0, (float) $vigencia->valor);
+        }
+
+        return max(0, (float) ($config->valor ?? 0));
+    }
+
+
+    private function inferirProcesoFacturaAcademica(Factura $factura): ?Proceso
+    {
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        foreach ($factura->detalles as $detalle) {
+            $idConfig = $tieneColumnaIdConfig ? ($detalle->idConfiguracionPago ?? null) : null;
+
+            if (!$idConfig) {
+                $config = ConfiguracionPago::where('titulo', $detalle->detalle)
+                    ->orWhere('detalle', $detalle->detalle)
+                    ->first();
+                $idConfig = $config?->id;
+            }
+
+            if (!$idConfig) {
+                continue;
+            }
+
+            $asignacion = AsignacionProcesoPago::with('proceso')
+                ->where('idConfiguracionPago', $idConfig)
+                ->first();
+
+            if ($asignacion?->proceso) {
+                return $asignacion->proceso;
+            }
+        }
+
+        return null;
+    }
+
+
+    private function formatearFacturaAcademica(Factura $factura, $proceso): array
+    {
+        $estado = 'PENDIENTE';
+        $transaccion = $factura->transacciones->first();
+        $pago = $transaccion?->pago?->first();
+
+        if ($pago) {
+            if ((int) $pago->idEstado === Status::ID_APROBADO && (float) $pago->excedente <= 0) {
+                $estado = 'PAGADO';
+            } elseif ((int) $pago->idEstado === Status::ID_PENDIENTE) {
+                $estado = 'PENDIENTE';
+            } elseif ($pago->estado) {
+                $estado = $pago->estado->estado ?? $pago->estado->nombre ?? 'PENDIENTE';
+            }
+        }
+
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        $detalles = $factura->detalles->map(function (DetalleFactura $detalle) use ($tieneColumnaIdConfig) {
+            $idConfig = $tieneColumnaIdConfig ? ($detalle->idConfiguracionPago ?? null) : null;
+            $config = $idConfig ? ConfiguracionPago::find($idConfig) : null;
+
+            return [
+                'id' => $detalle->id,
+                'idFactura' => $detalle->idFactura,
+                'idConfiguracionPago' => $idConfig,
+                'concepto' => $config?->titulo ?? $detalle->detalle,
+                'detalle' => $detalle->detalle,
+                'valor' => (float) $detalle->valor,
+            ];
+        })->values();
+
+        $procesoPayload = null;
+        if ($proceso instanceof Proceso) {
+            $procesoPayload = [
+                'id' => $proceso->id,
+                'nombreProceso' => $proceso->nombreProceso,
+            ];
+        }
+
+        $valorFacturaOriginal = (float) ($factura->valorMasIva ?? $factura->valor);
+        
+        // Si el valor viene en 0, calcularlo sumando los detalles (cantidad * valor)
+        if ($valorFacturaOriginal <= 0) {
+            $valorCalculado = $detalles->sum(function ($detalle) {
+                return (float) ($detalle['valor'] ?? 0) * (float) ($detalle['cantidad'] ?? 1);
+            });
+            $valorFinal = $valorCalculado;
+        } else {
+            $valorFinal = $valorFacturaOriginal;
+        }
+
+        return [
+            'id' => $factura->id,
+            'numeroFactura' => $factura->numeroFactura,
+            'fecha' => $factura->fecha,
+            'valor' => $valorFinal,
+            'valorSinIva' => $valorFinal,
+            'valorIva' => (float) ($factura->valorIva ?? 0),
+            'estado' => $estado,
+            'saldoPendiente' => $pago ? max(0, (float) $pago->excedente) : $valorFinal,
+            'idTransaccion' => $transaccion?->id,
+            'idTercero' => $factura->idTercero,
+            'tercero' => $factura->tercero,
+            'proceso' => $procesoPayload,
+            'detalles' => $detalles,
+        ];
+    }
+
+
+    /**
+     * Listado de solicitudes de inscripción/matricula derivadas de facturas académicas pendientes de validar.
+     * idSolicitud = id de la factura académica.
+     */
+    public function getSolicitudesInscripcion(Request $request)
+    {
+        $idCompany = (int) ($request->input('idCompany') ?: KeyUtil::idCompany());
+        $filtroEstadoFactura = strtoupper((string) $request->input('estadoFactura', 'TODOS'));
+        $filtroEstadoSolicitud = strtoupper((string) $request->input('estadoSolicitud', 'PENDIENTES'));
+
+        $facturas = $this->queryFacturasAcademicas($idCompany)->get();
+
+        $items = $facturas
+            ->map(function (Factura $factura) use ($idCompany) {
+                $proceso = $this->inferirProcesoFacturaAcademica($factura);
+                $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+
+                return $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
+            })
+            ->filter(function (array $item) use ($filtroEstadoFactura, $filtroEstadoSolicitud) {
+                if ($filtroEstadoFactura !== 'TODOS') {
+                    $estadoFactura = strtoupper((string) ($item['estadoFactura'] ?? ''));
+                    if ($estadoFactura !== $filtroEstadoFactura) {
+                        return false;
+                    }
+                }
+
+                $estadoSolicitud = strtoupper((string) ($item['estado'] ?? ''));
+
+                if ($filtroEstadoSolicitud === 'PENDIENTES') {
+                    return ($item['estado'] ?? '') === 'PENDIENTE';
+                }
+
+                if ($filtroEstadoSolicitud === 'APROBADAS') {
+                    return ($item['estado'] ?? '') === 'APROBADA';
+                }
+
+                if ($filtroEstadoSolicitud === 'RECHAZADAS') {
+                    return $estadoSolicitud === 'RECHAZADA';
+                }
+
+                return true;
+            })
+            ->values();
+
+        return response()->json($items);
+    }
+
+
+    /**
+     * Marca la validación administrativa de inscripción como aprobada (paso final del wizard).
+     * Requiere factura pagada. Persiste la marca en pagos.observacion.
+     */
+    public function aprobarValidacionSolicitudInscripcion(Request $request, int $idFactura)
+    {
+        $request->validate([
+            'observaciones' => ['nullable', 'string', 'max:480'],
+        ]);
+
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = $this->queryFacturasAcademicas($idCompany)
+            ->where('id', $idFactura)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Solicitud no encontrada.'], 404);
+        }
+
+        $proceso = $this->inferirProcesoFacturaAcademica($factura);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $estadoFactura = strtoupper((string) ($facturaPayload['estado'] ?? 'PENDIENTE'));
+
+        if (!in_array($estadoFactura, ['PAGADO', 'PAGADA'], true)) {
+            return response()->json([
+                'error' => 'La factura debe estar pagada antes de aprobar la validación.',
+            ], 422);
+        }
+
+        if ($this->solicitudValidacionAprobada($factura)) {
+            $solicitud = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
+
+            return response()->json([
+                'message' => 'La solicitud ya estaba aprobada.',
+                'solicitud' => $solicitud,
+            ]);
+        }
+
+        $pago = $this->resolverPagoFacturaAcademica($factura);
+        if (!$pago) {
+            return response()->json(['error' => 'No se encontró el registro de pago de la factura.'], 422);
+        }
+
+        $this->aplicarMarcaValidacionInscripcionEnPago(
+            $pago,
+            $request->input('observaciones')
+        );
+        $pago->save();
+
+        $factura->refresh();
+        $factura->load(['detalles', 'tercero', 'transacciones.pago.estado']);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $solicitud = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
+
+        return response()->json([
+            'message' => 'Validación de inscripción aprobada.',
+            'solicitud' => $solicitud,
+        ]);
+    }
+
+
+    /**
+     * Genera un token HMAC firmado para acceso público al portal del aspirante.
+     * No requiere base de datos — el token codifica idFactura e idCompany.
+     */
+    private function generarTokenPortalAspirante(int $idFactura, int $idCompany): string
+    {
+        $payload = "{$idCompany}:{$idFactura}";
+        $secret  = config('app.key');
+        $hmac    = hash_hmac('sha256', $payload, $secret);
+        return rtrim(strtr(base64_encode("{$payload}:{$hmac}"), '+/', '-_'), '=');
+    }
+
+    /**
+     * Verifica un token de portal y retorna [idCompany, idFactura] o null si inválido.
+     */
+    private function verificarTokenPortalAspirante(string $token): ?array
+    {
+        $padded  = str_pad(strtr($token, '-_', '+/'), strlen($token) % 4 === 0 ? strlen($token) : strlen($token) + (4 - strlen($token) % 4), '=');
+        $decoded = base64_decode($padded, true);
+        if (!$decoded) {
+            return null;
+        }
+        $parts = explode(':', $decoded, 3);
+        if (count($parts) !== 3) {
+            return null;
+        }
+        [$idCompany, $idFactura, $hmacRecibido] = $parts;
+        $payload      = "{$idCompany}:{$idFactura}";
+        $secret       = config('app.key');
+        $hmacEsperado = hash_hmac('sha256', $payload, $secret);
+        if (!hash_equals($hmacEsperado, $hmacRecibido)) {
+            return null;
+        }
+        return ['idCompany' => (int) $idCompany, 'idFactura' => (int) $idFactura];
+    }
+
+    /**
+     * Endpoint público (sin auth) para el portal del aspirante.
+     * Verifica el token HMAC y retorna datos de la factura e inscripción.
+     */
+    public function getPortalAspirante(string $token)
+    {
+        $datos = $this->verificarTokenPortalAspirante($token);
+        if (!$datos) {
+            return response()->json(['error' => 'Enlace de acceso inválido o expirado.'], 403);
+        }
+
+        $idCompany = $datos['idCompany'];
+        $idFactura = $datos['idFactura'];
+
+        $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('id', $idFactura)
+            ->where('idCompany', $idCompany)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Solicitud no encontrada.'], 404);
+        }
+
+        $proceso        = $this->inferirProcesoFacturaAcademica($factura);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $solicitud      = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
+        $estudiante     = $this->formatearEstudianteSolicitud($factura, $idCompany);
+        $company        = \App\Models\Company::find($idCompany);
+
+        // Resolver campos específicos solicitados
+        $transaccion = $factura->transacciones->first();
+        $pago = $transaccion?->pago?->first();
+
+        return response()->json([
+            'solicitud'          => $solicitud,
+            'factura'            => $facturaPayload,
+            'estudiante'         => $estudiante,
+            'nombreInstitucion'  => $company?->razonSocial ?? 'La institución',
+            // Agregando la estructura JSON requerida explícitamente en el root de la respuesta
+            'detalleFactura'     => $facturaPayload['detalles'] ?? [],
+            'transaccion'        => $transaccion,
+            'pagos'              => $pago,
+            'saldoPendiente'     => (float) ($facturaPayload['saldoPendiente'] ?? 0),
+            'valorTotal'         => (float) ($facturaPayload['valor'] ?? 0),
+            'numeroFactura'      => $factura->numeroFactura,
+            'pdfUrl'             => url("api/portal-aspirante/{$token}/factura-pdf"),
+        ]);
+    }
+
+    /**
+     * Sube un comprobante de pago en pdf/imagen y lo asocia al pago de la transacción de la factura.
+     */
+    public function subirComprobantePortalAspirante(Request $request, string $token)
+    {
+        $datos = $this->verificarTokenPortalAspirante($token);
+        if (!$datos) {
+            return response()->json(['error' => 'Enlace de acceso inválido o expirado.'], 403);
+        }
+
+        $request->validate([
+            'comprobante' => ['required', 'file', 'mimes:pdf,jpeg,png,jpg', 'max:5120'],
+        ]);
+
+        $idCompany = $datos['idCompany'];
+        $idFactura = $datos['idFactura'];
+
+        $factura = Factura::with(['transacciones.pago'])
+            ->where('id', $idFactura)
+            ->where('idCompany', $idCompany)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $transaccion = $factura->transacciones->first();
+        $pago = $transaccion?->pago?->first();
+
+        if (!$pago) {
+            return response()->json(['error' => 'No se encontró un registro de pago asociado a la factura.'], 400);
+        }
+
+        if ($request->hasFile('comprobante')) {
+            $file = $request->file('comprobante');
+            $extension = $file->getClientOriginalExtension();
+            $filename = 'comprobante_' . $pago->id . '_' . time() . '.' . $extension;
+            $path = $file->storeAs(Pago::PATH, $filename, 'public');
+
+            // Guardar documento comprobante de pago
+            $documentoPago = new DocumentoPago();
+            $documentoPago->idPago = $pago->id;
+            $documentoPago->idEstado = Status::ID_PENDIENTE; // Pendiente de revisión
+            $documentoPago->ruta = 'storage/' . $path;
+            $documentoPago->fechaCarga = \Carbon\Carbon::now()->toDateTimeString();
+            $documentoPago->save();
+
+            // Cambiar estado del pago a PAGO_EN_REVISION o equivalente (ID_EN_ESPERA es usado en bandeja administrativa de revisión)
+            $pago->idEstado = Status::ID_EN_ESPERA; 
+            $pago->save();
+
+            return response()->json([
+                'message' => 'Comprobante cargado con éxito.',
+                'documento' => $documentoPago
+            ]);
+        }
+
+        return response()->json(['error' => 'No se recibió ningún archivo.'], 400);
+    }
+
+    /**
+     * Genera y devuelve el PDF de la factura académica para el portal del aspirante.
+     * Endpoint público: GET /api/portal-aspirante/{token}/factura-pdf
+     */
+    public function generarFacturaPdfPortalAspirante(string $token)
+    {
+        $datos = $this->verificarTokenPortalAspirante($token);
+        if (!$datos) {
+            return response()->json(['error' => 'Enlace de acceso inválido o expirado.'], 403);
+        }
+
+        $idCompany = $datos['idCompany'];
+        $idFactura = $datos['idFactura'];
+
+        $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('id', $idFactura)
+            ->where('idCompany', $idCompany)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $proceso        = $this->inferirProcesoFacturaAcademica($factura);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $estudiante     = $this->formatearEstudianteSolicitud($factura, $idCompany);
+        $company        = \App\Models\Company::find($idCompany);
+        $nombreInstitucion = $company?->razonSocial ?? 'La Institución';
+
+        $procesoPayload = null;
+        if ($proceso instanceof \App\Models\Proceso) {
+            $procesoPayload = ['nombreProceso' => $proceso->nombreProceso];
+        }
+
+        $pdf = Pdf::loadView('pdf.factura-academica', [
+            'factura'           => $facturaPayload,
+            'estudiante'        => $estudiante,
+            'proceso'           => $procesoPayload,
+            'nombreInstitucion' => $nombreInstitucion,
+        ])->setPaper('a4', 'portrait');
+
+        $filename = 'factura-academica-' . ($factura->numeroFactura ?? $idFactura) . '.pdf';
+
+        return $pdf->stream($filename);
+    }
+
+
+    /**
+     * Envía correo enriquecido de confirmación de recepción al aspirante.
+     * Se llama desde el Paso 1 del wizard de validación al hacer clic en "Siguiente".
+     * Usa la plantilla email-inscripcion.blade.php con tabla de datos y botón CTA.
+     * No modifica estados ni genera facturas.
+     */
+    public function notificarRecepcionSolicitudInscripcion(Request $request, int $idFactura)
+    {
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = $this->queryFacturasAcademicas($idCompany)
+            ->where('id', $idFactura)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Solicitud no encontrada.'], 404);
+        }
+
+        // ── Resolver datos del aspirante ──────────────────────────────────
+        $emailAspirante  = $factura->tercero?->email ?? null;
+        $nombreAspirante = $factura->tercero?->nombre ?? 'Aspirante';
+        $documento       = $factura->tercero?->identificacion ?? '';
+
+        $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany, $factura);
+        if ($matricula?->person) {
+            $emailAspirante  = $emailAspirante  ?? ($matricula->person->email ?? null);
+            $nombreAspirante = $this->formatearNombrePersona($matricula->person) ?? $nombreAspirante;
+            $documento       = $documento !== '' ? $documento : ($matricula->person->identificacion ?? '');
+        }
+
+        $respFormObj = $this->resolverRespuestaFormularioObj($documento, $idCompany, $factura);
+        if ($respFormObj) {
+            $datosRespuesta = $this->extraerDatosAspiranteDesdeRespuesta($respFormObj);
+            $emailAspirante = $emailAspirante ?: ($datosRespuesta['email'] ?? null);
+            $nombreAspirante = ($datosRespuesta['nombreCompleto'] ?? '') ?: $nombreAspirante;
+            $documento = $documento !== '' ? $documento : ($datosRespuesta['documento'] ?? '');
+        }
+
+        if (!$emailAspirante) {
+            return response()->json([
+                'message'        => 'No se encontró correo del aspirante. Se omitió el envío.',
+                'correo_enviado' => false,
+            ]);
+        }
+
+        // ── Datos del proceso y factura ───────────────────────────────────
+        $proceso        = $this->inferirProcesoFacturaAcademica($factura);
+        $nombrePrograma = $proceso instanceof \App\Models\Proceso
+            ? ($proceso->nombreProceso ?? 'Proceso académico')
+            : 'Proceso académico';
+
+        $facturaPayload  = $this->formatearFacturaAcademica($factura, $proceso);
+        $valorTotal      = (float) ($facturaPayload['valor'] ?? 0);
+        $saldoPendiente  = (float) ($facturaPayload['saldoPendiente'] ?? $valorTotal);
+        $numeroFactura   = $factura->numeroFactura ?? "FAC-{$idFactura}";
+        $estadoFactura   = strtoupper((string) ($facturaPayload['estado'] ?? 'PENDIENTE'));
+
+        $estadoTexto = match (true) {
+            in_array($estadoFactura, ['PAGADA', 'PAGADO'], true) => 'PAGADA – Pendiente de validación final',
+            $estadoFactura === 'ANULADA'                          => 'ANULADA',
+            default                                               => 'PENDIENTE DE PAGO',
+        };
+
+        $fechaLimite = $saldoPendiente > 0
+            ? \Carbon\Carbon::now()->addDays(15)->format('d/m/Y')
+            : '';
+
+        $company           = \App\Models\Company::find($idCompany);
+        $nombreInstitucion = $company?->razonSocial ?? 'La institución';
+
+        // ── Generar URL del portal público ────────────────────────────────
+        $token       = $this->generarTokenPortalAspirante($idFactura, $idCompany);
+        $frontendUrl = rtrim(env('FRONTEND_URL', 'https://sena-school.virtualt.org'), '/');
+        $portalUrl   = "{$frontendUrl}/portal-aspirante/{$token}";
+
+        // ── Enviar correo con la plantilla HTML enriquecida ───────────────
+        $subject = "Solicitud de inscripción recibida – {$nombrePrograma}";
+
+        try {
+            Mail::send('email-inscripcion', [
+                'nombreAspirante'   => $nombreAspirante,
+                'documento'         => $documento,
+                'programa'          => $nombrePrograma,
+                'estadoInscripcion' => $estadoTexto,
+                'valorTotal'        => $saldoPendiente > 0 ? $saldoPendiente : $valorTotal,
+                'numeroFactura'     => $numeroFactura,
+                'fechaLimite'       => $fechaLimite,
+                'portalUrl'         => $portalUrl,
+                'nombreInstitucion' => $nombreInstitucion,
+            ], function ($mail) use ($emailAspirante, $subject, $nombreInstitucion) {
+                $mail->to($emailAspirante)
+                     ->subject($subject)
+                     ->from(config('mail.from.address'), $nombreInstitucion);
+            });
+        } catch (\Exception $e) {
+            \Log::error('Error enviando correo inscripción: ' . $e->getMessage());
+            return response()->json([
+                'message'        => 'No se pudo enviar el correo al aspirante.',
+                'correo_enviado' => false,
+                'error'          => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'message'        => 'Correo de recepción enviado al aspirante.',
+            'correo_enviado' => true,
+            'email'          => $emailAspirante,
+            'portal_url'     => $portalUrl,
+        ]);
+    }
+
+
+    /**
+     * Detalle de una solicitud (por id de factura académica) para el wizard de validación.
+     */
+    public function getSolicitudInscripcion(int $idFactura)
+    {
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = $this->queryFacturasAcademicas($idCompany)
+            ->where('id', $idFactura)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Solicitud no encontrada.'], 404);
+        }
+
+        $proceso = $this->inferirProcesoFacturaAcademica($factura);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $solicitud = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
+        $estudiante = $this->formatearEstudianteSolicitud($factura, $idCompany);
+
+        $matriculaTmp = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany, $factura);
+        $documento = $matriculaTmp?->person?->identificacion
+            ?? $factura->tercero?->identificacion
+            ?? '';
+        $respuestasFormulario = $this->resolverRespuestasFormulario($documento, $idCompany, $factura);
+
+        $transaccion = $factura->transacciones->first();
+        $pago = $transaccion?->pago?->first();
+        $documentosPago = $pago ? \App\Models\DocumentoPago::with('estado')->where('idPago', $pago->id)->get() : [];
+
+        return response()->json([
+            'solicitud' => $solicitud,
+            'factura' => $facturaPayload,
+            'estudiante' => $estudiante,
+            'respuestasFormulario' => $respuestasFormulario,
+            'documentosPago' => $documentosPago,
+        ]);
+    }
+
+    private function resolverRespuestaFormularioObj(string $documento, int $idCompany, ?Factura $factura = null)
+    {
+        $company = \App\Models\Company::find($idCompany);
+        if (!$company || !$company->idFormularioInscripcion) {
+            return null;
+        }
+
+        $respuestaObj = null;
+
+        // 1. Intentar resolver usando FormResponseID guardado en la matricula
+        if ($factura) {
+            $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany, $factura);
+            if ($matricula && $matricula->observacion && strpos($matricula->observacion, 'FormResponseID:') === 0) {
+                $respId = (int) str_replace('FormResponseID:', '', $matricula->observacion);
+                if ($respId > 0) {
+                    $respuestaObj = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)
+                        ->where('id', $respId)
+                        ->first();
+                }
+            }
+        }
+
+        // 2. Fallback: Buscar por documento (si no es '0' y no está vacío)
+        if (!$respuestaObj && !empty($documento) && $documento !== '0') {
+            $respuestas = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)->get();
+            foreach ($respuestas as $resp) {
+                $listaResp = $resp->respuestas;
+                if (is_array($listaResp)) {
+                    foreach ($listaResp as $r) {
+                        $valorResp = $r['valor'] ?? '';
+                        if (is_array($valorResp)) {
+                            $valorResp = implode(', ', $valorResp);
+                        }
+                        if ($documento !== '' && (string) $valorResp === (string) $documento) {
+                            $respuestaObj = $resp;
+                            break 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback: Para registros de prueba existentes, buscar por coincidencia de fecha/hora de creación (margen de 5 segundos)
+        if (!$respuestaObj && $factura) {
+            $createdAt = $factura->created_at;
+            if ($createdAt) {
+                $respuestaObj = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)
+                    ->whereBetween('created_at', [
+                        $createdAt->copy()->subSeconds(5),
+                        $createdAt->copy()->addSeconds(5)
+                    ])
+                    ->first();
+            }
+        }
+
+        return $respuestaObj;
+    }
+
+    private function resolverRespuestasFormulario(string $documento, int $idCompany, ?Factura $factura = null)
+    {
+        $company = \App\Models\Company::find($idCompany);
+        if (!$company || !$company->idFormularioInscripcion) {
+            return null;
+        }
+
+        $respuestaObj = $this->resolverRespuestaFormularioObj($documento, $idCompany, $factura);
+
+        // 4. Formatear la respuesta si se encontró
+        if ($respuestaObj) {
+            $listaResp = $respuestaObj->respuestas;
+            $result = [];
+            if (is_array($listaResp)) {
+                foreach ($listaResp as $rInner) {
+                    $preg = \App\Models\FormularioPregunta::find($rInner['idPregunta'] ?? 0);
+                    $result[] = [
+                        'pregunta' => $preg ? $preg->titulo : 'Pregunta sin título',
+                        'respuesta' => $rInner['valor'] ?? ''
+                    ];
+                }
+            }
+            return [
+                'formulario' => \App\Models\Formulario::where('id', $company->idFormularioInscripcion)->value('titulo'),
+                'respuestas' => $result
+            ];
+        }
+
+        return null;
+    }
+
+
+    private function queryFacturasAcademicas(int $idCompany)
+    {
+        $tieneColumnaIdConfig = Schema::hasColumn('detalleFactura', 'idConfiguracionPago');
+
+        $query = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('idTipoFactura', TipoFactura::VENTA)
+            ->where(function ($q) use ($idCompany) {
+                $q->where('idCompany', $idCompany)->orWhereNull('idCompany');
+            })
+            ->orderBy('id', 'desc');
+
+        if ($tieneColumnaIdConfig) {
+            $query->whereHas('detalles', function ($q) {
+                $q->whereNotNull('idConfiguracionPago');
+            });
+        } else {
+            $idsConfig = ConfiguracionPago::where('idCompany', $idCompany)->pluck('id');
+            if ($idsConfig->isEmpty()) {
+                return $query->whereRaw('1 = 0');
+            }
+            $titulos = ConfiguracionPago::whereIn('id', $idsConfig)->pluck('titulo')->filter();
+            $query->whereHas('detalles', function ($q) use ($titulos) {
+                $q->where(function ($inner) use ($titulos) {
+                    foreach ($titulos as $titulo) {
+                        $inner->orWhere('detalle', $titulo);
+                    }
+                });
+            });
+        }
+
+        return $query;
+    }
+
+
+    private function formatearSolicitudInscripcion(
+        array $facturaPayload,
+        Factura $factura,
+        $proceso,
+        int $idCompany
+    ): array {
+        $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany, $factura);
+        $persona = $matricula?->person;
+        $respFormObj = $this->resolverRespuestaFormularioObj(
+            $persona?->identificacion ?? ($factura->tercero?->identificacion ?? ''),
+            $idCompany,
+            $factura
+        );
+        $datosRespuesta = $respFormObj
+            ? $this->extraerDatosAspiranteDesdeRespuesta($respFormObj)
+            : [];
+
+        $nombreEstudiante = $datosRespuesta['nombreCompleto']
+            ?? $this->formatearNombrePersona($persona)
+            ?? ($factura->tercero?->nombre ?? 'Estudiante');
+        $documento = $datosRespuesta['documento']
+            ?? $persona?->identificacion
+            ?? ($factura->tercero?->identificacion ?? '');
+        $estadoFactura = strtoupper((string) ($facturaPayload['estado'] ?? 'PENDIENTE'));
+        $saldoPendiente = (float) ($facturaPayload['saldoPendiente'] ?? 0);
+        $validacionAprobada = $this->solicitudValidacionAprobada($factura);
+        $estadoSolicitud = $this->mapearEstadoSolicitud(
+            $estadoFactura,
+            $matricula,
+            $validacionAprobada,
+            $saldoPendiente
+        );
+
+        $editado = false;
+        $fechaEditado = null;
+        if ($respFormObj && $respFormObj->updated_at && $respFormObj->created_at) {
+            if ($respFormObj->updated_at->diffInSeconds($respFormObj->created_at) > 5) {
+                $editado = true;
+                $fechaEditado = $respFormObj->updated_at->toDateTimeString();
+            }
+        }
+
+        return [
+            'idSolicitud' => (int) $factura->id,
+            'idFactura' => (int) $factura->id,
+            'numeroSolicitud' => 'SOL-FAC-' . ($factura->numeroFactura ?? $factura->id),
+            'numeroFactura' => $factura->numeroFactura,
+            'idEstudiante' => $persona?->id ?? ($factura->idTercero ?? null),
+            'idTercero' => $factura->idTercero,
+            'nombreEstudiante' => $nombreEstudiante,
+            'documento' => $documento,
+            'email' => $datosRespuesta['email']
+                ?? $persona?->email
+                ?? ($factura->tercero?->email ?? null),
+            'telefono' => $datosRespuesta['telefono']
+                ?? $persona?->celular
+                ?? ($factura->tercero?->telefono ?? null),
+            'idMatricula' => $matricula?->id,
+            'estadoMatricula' => $matricula?->estado,
+            'idPrograma' => $proceso instanceof Proceso ? (int) $proceso->id : null,
+            'nombrePrograma' => $proceso instanceof Proceso
+                ? ($proceso->nombreProceso ?? 'Proceso académico')
+                : 'Proceso académico',
+            'codigoPrograma' => $proceso instanceof Proceso ? ('PROC-' . $proceso->id) : '—',
+            'idProceso' => $proceso instanceof Proceso ? (int) $proceso->id : null,
+            'nombreProceso' => $proceso instanceof Proceso ? $proceso->nombreProceso : null,
+            'fechaSolicitud' => $factura->fecha
+                ? Carbon::parse($factura->fecha)->toDateString()
+                : ($factura->created_at?->toDateString() ?? Carbon::today()->toDateString()),
+            'estado' => $estadoSolicitud,
+            'validacionCompletada' => $validacionAprobada || $estadoSolicitud === 'APROBADA',
+            'estadoFactura' => $estadoFactura,
+            'saldoPendiente' => $saldoPendiente,
+            'totalFactura' => (float) ($facturaPayload['valor'] ?? 0),
+            'idTransaccion' => $facturaPayload['idTransaccion'] ?? null,
+            'requierePago' => $saldoPendiente > 0 && $estadoFactura === 'PENDIENTE',
+            'editado' => $editado,
+            'fechaEditado' => $fechaEditado,
+        ];
+    }
+
+
+    private function formatearEstudianteSolicitud(Factura $factura, int $idCompany): ?array
+    {
+        $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany, $factura);
+        $persona = $matricula?->person;
+        $documentoBase = $factura->tercero?->identificacion
+            ?? $persona?->identificacion
+            ?? '';
+        $respFormObj = $this->resolverRespuestaFormularioObj($documentoBase, $idCompany, $factura);
+        $datosRespuesta = $respFormObj
+            ? $this->extraerDatosAspiranteDesdeRespuesta($respFormObj)
+            : [];
+
+        if (!$persona && $factura->tercero) {
+            return [
+                'idPersona' => null,
+                'idMatricula' => $matricula?->id,
+                'nombreCompleto' => $datosRespuesta['nombreCompleto'] ?? ($factura->tercero->nombre ?? 'Estudiante'),
+                'tipoDocumento' => $datosRespuesta['tipoDocumento'] ?? 'CC',
+                'documento' => $datosRespuesta['documento'] ?? ($factura->tercero->identificacion ?? ''),
+                'email' => $datosRespuesta['email'] ?? $factura->tercero->email,
+                'celular' => $datosRespuesta['telefono'] ?? $factura->tercero->telefono,
+                'telefono' => $datosRespuesta['telefono'] ?? $factura->tercero->telefono,
+                'estadoMatricula' => $matricula?->estado,
+            ];
+        }
+
+        if (!$persona && !empty($datosRespuesta)) {
+            return [
+                'idPersona' => null,
+                'idMatricula' => $matricula?->id,
+                'nombreCompleto' => $datosRespuesta['nombreCompleto'] ?? 'Estudiante',
+                'tipoDocumento' => $datosRespuesta['tipoDocumento'] ?? 'CC',
+                'documento' => $datosRespuesta['documento'] ?? '',
+                'email' => $datosRespuesta['email'] ?? null,
+                'celular' => $datosRespuesta['telefono'] ?? null,
+                'telefono' => $datosRespuesta['telefono'] ?? null,
+                'estadoMatricula' => $matricula?->estado,
+            ];
+        }
+
+        if (!$persona) {
+            return null;
+        }
+
+        $tipoDoc = $persona->relationLoaded('tipoIdentificacion')
+            ? ($persona->tipoIdentificacion?->tipo ?? $persona->tipoIdentificacion?->nombre ?? 'CC')
+            : 'CC';
+
+        return [
+            'idPersona' => (int) $persona->id,
+            'idMatricula' => $matricula?->id,
+            'nombreCompleto' => ($datosRespuesta['nombreCompleto'] ?? '')
+                ?: ($this->formatearNombrePersona($persona) ?? $persona->nombre1),
+            'tipoDocumento' => ($datosRespuesta['tipoDocumento'] ?? '') ?: $tipoDoc,
+            'documento' => ($datosRespuesta['documento'] ?? '') ?: $persona->identificacion,
+            'email' => ($datosRespuesta['email'] ?? '') ?: $persona->email,
+            'celular' => ($datosRespuesta['telefono'] ?? '') ?: $persona->celular,
+            'telefono' => ($datosRespuesta['telefono'] ?? '') ?: $persona->telefonoFijo,
+            'fechaNacimiento' => $persona->fechaNac
+                ? Carbon::parse($persona->fechaNac)->toDateString()
+                : null,
+            'direccion' => $persona->direccion,
+            'estadoMatricula' => $matricula?->estado,
+        ];
+    }
+
+
+    private function resolverMatriculaEstudiante(?Tercero $tercero, int $idCompany, ?Factura $factura = null): ?Matricula
+    {
+        $estados = [
+            'INSCRIPCION',
+            'PENDIENTE',
+            'EN ESPERA',
+            'MATRICULADO',
+            'EN FORMACION',
+            'CURSANDO',
+        ];
+
+        if ($tercero && !empty($tercero->identificacion) && $tercero->identificacion !== '0') {
+            $matricula = Matricula::with(['person.tipoIdentificacion'])
+                ->where('idCompany', $idCompany)
+                ->whereHas('person', function ($query) use ($tercero) {
+                    $query->where('identificacion', $tercero->identificacion);
+                })
+                ->whereIn('estado', $estados)
+                ->orderByDesc('id')
+                ->first();
+
+            if ($matricula) {
+                return $matricula;
+            }
+        }
+
+        if ($factura && $tercero) {
+            $matriculas = Matricula::with(['person.tipoIdentificacion'])
+                ->where('idCompany', $idCompany)
+                ->where('observacion', 'like', 'FormResponseID:%')
+                ->whereIn('estado', $estados)
+                ->orderByDesc('id')
+                ->get();
+
+            foreach ($matriculas as $matriculaCandidata) {
+                $respId = (int) str_replace('FormResponseID:', '', (string) $matriculaCandidata->observacion);
+                if ($respId <= 0) {
+                    continue;
+                }
+
+                $respuesta = \App\Models\FormularioRespuesta::find($respId);
+                if ($respuesta && $this->respuestaCoincideTercero($respuesta, $tercero)) {
+                    return $matriculaCandidata;
+                }
+            }
+        }
+
+        return null;
+    }
+
+
+    private function respuestaCoincideTercero(\App\Models\FormularioRespuesta $respuesta, Tercero $tercero): bool
+    {
+        $datos = $this->extraerDatosAspiranteDesdeRespuesta($respuesta);
+        $docRespuesta = trim((string) ($datos['documento'] ?? ''));
+        $docTercero = trim((string) ($tercero->identificacion ?? ''));
+
+        if ($docRespuesta !== '' && $docTercero !== '' && $docRespuesta === $docTercero) {
+            return true;
+        }
+
+        $emailRespuesta = mb_strtolower(trim((string) ($datos['email'] ?? '')));
+        $emailTercero = mb_strtolower(trim((string) ($tercero->email ?? '')));
+
+        return $emailRespuesta !== '' && $emailTercero !== '' && $emailRespuesta === $emailTercero;
+    }
+
+
+    private function extraerDatosAspiranteDesdeRespuesta(\App\Models\FormularioRespuesta $respuesta): array
+    {
+        $nombre = '';
+        $tipoDocumento = 'CC';
+        $documento = '';
+        $email = '';
+        $telefono = '';
+
+        foreach ($respuesta->respuestas ?? [] as $resp) {
+            $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
+            if (!$preg) {
+                continue;
+            }
+
+            $val = $resp['valor'] ?? '';
+            if (is_array($val)) {
+                $val = implode(', ', $val);
+            }
+            $val = trim((string) $val);
+            $titleLower = $this->normalizarTituloPreguntaInscripcion($preg->titulo);
+
+            if (
+                (str_contains($titleLower, 'nombre') && (
+                    str_contains($titleLower, 'estudiante')
+                    || str_contains($titleLower, 'aspirante')
+                    || str_contains($titleLower, 'participante')
+                    || str_contains($titleLower, 'alumno')
+                ))
+                || str_contains($titleLower, 'nombre completo')
+                || str_contains($titleLower, 'nombres y apellidos')
+            ) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $nombre = $val;
+                }
+            } elseif (str_contains($titleLower, 'tipo') && str_contains($titleLower, 'documento')) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $tipoDocumento = $val !== '' ? $val : $tipoDocumento;
+                }
+            } elseif (
+                str_contains($titleLower, 'numero')
+                || (str_contains($titleLower, 'documento') && !str_contains($titleLower, 'tipo'))
+                || str_contains($titleLower, 'identificacion')
+            ) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $documento = $val;
+                }
+            } elseif (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $email = $val;
+                }
+            } elseif (
+                str_contains($titleLower, 'telefono')
+                || str_contains($titleLower, 'celular')
+                || str_contains($titleLower, 'movil')
+                || (str_contains($titleLower, 'tel') && !str_contains($titleLower, 'satelite'))
+            ) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $telefono = $val;
+                }
+            }
+        }
+
+        return [
+            'nombreCompleto' => $nombre,
+            'tipoDocumento' => $tipoDocumento,
+            'documento' => $documento,
+            'email' => $email,
+            'telefono' => $telefono,
+        ];
+    }
+
+
+    private function normalizarTituloPreguntaInscripcion(string $titulo): string
+    {
+        $t = mb_strtolower(trim($titulo));
+        $t = preg_replace('/\?+/u', '', $t) ?? $t;
+        $reemplazos = [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n',
+            'ü' => 'u',
+        ];
+
+        return preg_replace('/\s+/', ' ', strtr($t, $reemplazos)) ?? $t;
+    }
+
+
+    private function formatearNombrePersona(?Person $persona): ?string
+    {
+        if (!$persona) {
+            return null;
+        }
+
+        $partes = array_filter([
+            $persona->nombre1,
+            $persona->nombre2,
+            $persona->apellido1,
+            $persona->apellido2,
+        ]);
+
+        $nombre = trim(implode(' ', $partes));
+
+        return $nombre !== '' ? $nombre : null;
+    }
+
+
+    private function mapearEstadoSolicitud(
+        string $estadoFactura,
+        ?Matricula $matricula,
+        bool $validacionAprobada = false,
+        float $saldoPendiente = 0
+    ): string {
+        if ($validacionAprobada) {
+            return 'APROBADA';
+        }
+
+        if ($matricula && strtoupper((string) $matricula->estado) === 'MATRICULADO') {
+            return 'APROBADA';
+        }
+
+        if (
+            $saldoPendiente <= 0
+            && in_array($estadoFactura, ['PAGADO', 'PAGADA', 'APROBADO'], true)
+        ) {
+            return 'APROBADA';
+        }
+
+        if (in_array($estadoFactura, ['PAGADO', 'PAGADA', 'APROBADO'], true)) {
+            return 'APROBADA';
+        }
+
+        if (in_array($estadoFactura, ['ANULADA', 'ANULADO'], true)) {
+            return 'RECHAZADA';
+        }
+
+        return 'PENDIENTE';
+    }
+
+
+    private const MARCA_VALIDACION_INSCRIPCION = 'VALIDACION_INSCRIPCION:APROBADA';
+
+
+    private function resolverPagoFacturaAcademica(Factura $factura): ?Pago
+    {
+        $transaccion = $factura->transacciones->first();
+
+        return $transaccion?->pago?->first();
+    }
+
+
+    private function solicitudValidacionAprobada(Factura $factura): bool
+    {
+        $transaccion = $factura->transacciones->first();
+        $pago = $this->resolverPagoFacturaAcademica($factura);
+
+        if ($pago && (int) $pago->idEstado === Status::ID_APROBADO && (float) $pago->excedente <= 0) {
+            return true;
+        }
+
+        if (
+            $transaccion
+            && (int) $transaccion->idEstado === Status::ID_APROBADO
+            && (!$pago || (float) $pago->excedente <= 0)
+        ) {
+            return true;
+        }
+
+        if ($pago && str_contains((string) ($pago->observacion ?? ''), self::MARCA_VALIDACION_INSCRIPCION)) {
+            return true;
+        }
+
+        return false;
+    }
+
+
+    private function aplicarMarcaValidacionInscripcionEnPago(Pago $pago, ?string $observaciones = null): void
+    {
+        $notas = trim((string) ($observaciones ?? ''));
+        $marca = self::MARCA_VALIDACION_INSCRIPCION;
+
+        if ($this->solicitudValidacionAprobadaDesdePago($pago)) {
+            if ($notas !== '' && !str_contains((string) $pago->observacion, $notas)) {
+                $pago->observacion = trim((string) $pago->observacion . ' | ' . $notas);
+            }
+
+            return;
+        }
+
+        $pago->observacion = $notas !== ''
+            ? $marca . ' | ' . $notas
+            : $marca;
+    }
+
+
+    private function solicitudValidacionAprobadaDesdePago(Pago $pago): bool
+    {
+        return str_contains((string) ($pago->observacion ?? ''), self::MARCA_VALIDACION_INSCRIPCION);
     }
 }

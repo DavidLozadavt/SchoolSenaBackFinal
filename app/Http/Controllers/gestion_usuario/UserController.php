@@ -399,6 +399,12 @@ class UserController extends Controller
                 $persona->firmaDigital = $this->storeFirmaDigital($request, $persona->firmaDigital);
             }
 
+            $persona->nombre1 = $request->input('nombre1');
+            $persona->nombre2 = $request->input('nombre2');
+            $persona->apellido1 = $request->input('apellido1');
+            $persona->apellido2 = $request->input('apellido2');
+            $persona->fechaNac = $request->input('fechaNac');
+
             $persona->email = $request->input('email');
             $persona->telefonoFijo = $request->input('telefonoFijo');
             $persona->celular = $request->input('celular');
@@ -409,6 +415,53 @@ class UserController extends Controller
             $persona->idTipoIdentificacion = $this->nullableIntFromRequest($request->input('idtipoIdentificacion'));
 
             $persona->save();
+
+            // --- Sincronización de datos personales desde School a NexiService ---
+            try {
+                $nexiPerson = \App\Models\NexiPerson::where('identificacion', $persona->identificacion)->first();
+                if ($nexiPerson && in_array(strtolower($nexiPerson->categoria), ['colegio', 'institucion', 'institución'])) {
+                    $nexiPerson->update([
+                        'nombre1' => $persona->nombre1,
+                        'nombre2' => $persona->nombre2,
+                        'apellido1' => $persona->apellido1,
+                        'apellido2' => $persona->apellido2,
+                        'fechaNac' => $persona->fechaNac,
+                        'email' => $persona->email,
+                        'telefonoFijo' => $persona->telefonoFijo,
+                        'celular' => $persona->celular,
+                        'direccion' => $persona->direccion,
+                        'rh' => $persona->rh,
+                        'sexo' => $persona->sexo,
+                        'idTipoIdentificacion' => $persona->idTipoIdentificacion,
+                        'updated_at' => now(),
+                    ]);
+                }
+            } catch (\Throwable $se) {
+                \Log::error('Error sincronizando datos personales al NexiService: ' . $se->getMessage());
+            }
+
+            // --- Sincronización de la Razón Social de la Empresa ---
+            try {
+                $company = \App\Models\Company::find(KeyUtil::idCompany());
+                if ($company) {
+                    $fullName = trim("{$persona->nombre1} {$persona->nombre2} {$persona->apellido1} {$persona->apellido2}");
+                    $fullName = preg_replace('/\s+/', ' ', $fullName);
+                    
+                    $company->update([
+                        'razonSocial' => $fullName
+                    ]);
+
+                    $nexiCompany = \App\Models\NexiCompany::where('nit', $company->nit)->first();
+                    if ($nexiCompany && $nexiCompany->idCategoriaEmpresa == 7) {
+                        $nexiCompany->update([
+                            'razonSocial' => $fullName,
+                            'updated_at' => now(),
+                        ]);
+                    }
+                }
+            } catch (\Throwable $se) {
+                \Log::error('Error sincronizando razonSocial al NexiService desde perfil: ' . $se->getMessage());
+            }
 
             // Perfil profesional vive en `contrato`; si el usuario tiene contrato activo, lo actualiza desde su perfil.
             if ($request->has('perfilProfesional')) {

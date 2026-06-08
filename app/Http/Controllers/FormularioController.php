@@ -11,6 +11,11 @@ use App\Models\ParticipanteEvento;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use App\Http\Controllers\gestion_pago\PagoController;
+use App\Models\AsignacionProcesoPago;
+use App\Models\Proceso;
+use App\Util\KeyUtil;
 
 class FormularioController extends Controller
 {
@@ -19,7 +24,7 @@ class FormularioController extends Controller
      */
     public function index(Request $request)
     {
-        $idCompany = $request->user()->idempresa ?? 1; // Ajustar según cómo se obtiene la empresa
+        $idCompany = KeyUtil::idCompany();
 
         $formularios = Formulario::where('idCompany', $idCompany)
             ->withCount(['preguntas', 'respuestas'])
@@ -45,7 +50,7 @@ class FormularioController extends Controller
             $user = $request->user();
             
             $formulario = Formulario::create([
-                'idCompany' => $user->idempresa ?? 1, // Obtener empresa del usuario
+                'idCompany' => KeyUtil::idCompany(), // Obtener empresa del usuario
                 'idUser' => $user->id,
                 'titulo' => $request->titulo,
                 'descripcion' => $request->descripcion,
@@ -232,9 +237,26 @@ class FormularioController extends Controller
             ->firstOrFail();
         
         $isAuth = Auth::check() || Auth::guard('api')->check();
+        $user = Auth::user() ?: Auth::guard('api')->user();
+
         if ($formulario->estado !== 'publicado' && !$isAuth) {
             return response()->json(['error' => 'Formulario no disponible'], 403);
         }
+
+        $ultimaRespuesta = null;
+        if ($user) {
+            $ultimaRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                ->where('idUser', $user->id)
+                ->orderBy('id', 'desc')
+                ->first();
+        } else {
+            $ultimaRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                ->where('ipAddress', request()->ip())
+                ->orderBy('id', 'desc')
+                ->first();
+        }
+
+        $formulario->setAttribute('ultima_respuesta', $ultimaRespuesta);
 
         return response()->json($formulario);
     }
@@ -261,20 +283,95 @@ class FormularioController extends Controller
 
         $userId = $user ? $user->id : null;
 
-        // Validar si ya respondió (si requiere auth y el formulario está publicado)
-        if ($formulario->estado === 'publicado' && $formulario->requiereAutenticacion && FormularioRespuesta::where('idFormulario', $formulario->id)->where('idUser', $userId)->exists()) {
-            return response()->json(['error' => 'Ya has respondido este formulario'], 403);
+        $studentDocNumInput = '';
+        $studentEmailInput = '';
+
+        foreach ($request->respuestas ?? [] as $resp) {
+            $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
+            if (!$preg) continue;
+            $val = $resp['valor'] ?? '';
+            if (is_array($val)) $val = implode(', ', $val);
+            $titleLower = $this->normalizarTituloPregunta($preg->titulo);
+
+            if (str_contains($titleLower, 'numero') || (str_contains($titleLower, 'documento') && !str_contains($titleLower, 'tipo')) || str_contains($titleLower, 'identificacion')) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $studentDocNumInput = trim($val);
+                }
+            }
+            elseif (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
+                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                    $studentEmailInput = trim($val);
+                }
+            }
         }
 
         try {
             DB::beginTransaction();
 
-            $respuesta = FormularioRespuesta::create([
-                'idFormulario' => $formulario->id,
-                'idUser' => $userId,
-                'ipAddress' => $request->ip(),
-                'respuestas' => $request->respuestas ?? [],
-            ]);
+            $existingRespuesta = null;
+            if ($userId) {
+                $existingRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                    ->where('idUser', $userId)
+                    ->first();
+            }
+
+            if (!$existingRespuesta && (!empty($studentDocNumInput) || !empty($studentEmailInput))) {
+                $allResponses = FormularioRespuesta::where('idFormulario', $formulario->id)->get();
+                foreach ($allResponses as $resp) {
+                    $listaResp = $resp->respuestas;
+                    if (is_array($listaResp)) {
+                        $hasMatchingDoc = false;
+                        $hasMatchingEmail = false;
+                        foreach ($listaResp as $r) {
+                            $preg = \App\Models\FormularioPregunta::find($r['idPregunta'] ?? 0);
+                            if (!$preg) continue;
+                            $val = trim(is_array($r['valor']) ? implode(', ', $r['valor']) : ($r['valor'] ?? ''));
+                            $titleLower = $this->normalizarTituloPregunta($preg->titulo);
+
+                            if (str_contains($titleLower, 'numero') || (str_contains($titleLower, 'documento') && !str_contains($titleLower, 'tipo')) || str_contains($titleLower, 'identificacion')) {
+                                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                                    if (!empty($studentDocNumInput) && $val === $studentDocNumInput) {
+                                        $hasMatchingDoc = true;
+                                    }
+                                }
+                            }
+                            if (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
+                                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                                    if (!empty($studentEmailInput) && strcasecmp($val, $studentEmailInput) === 0) {
+                                        $hasMatchingEmail = true;
+                                    }
+                                }
+                            }
+                        }
+                        if ($hasMatchingDoc || $hasMatchingEmail) {
+                            $existingRespuesta = $resp;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!$existingRespuesta) {
+                $existingRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                    ->where('ipAddress', $request->ip())
+                    ->first();
+            }
+
+            $isEditing = false;
+            if ($existingRespuesta) {
+                $existingRespuesta->update([
+                    'respuestas' => $request->respuestas ?? [],
+                ]);
+                $respuesta = $existingRespuesta;
+                $isEditing = true;
+            } else {
+                $respuesta = FormularioRespuesta::create([
+                    'idFormulario' => $formulario->id,
+                    'idUser' => $userId,
+                    'ipAddress' => $request->ip(),
+                    'respuestas' => $request->respuestas ?? [],
+                ]);
+            }
 
             // Auto-inscribir a evento si está asociado
             $evento = Evento::where('idFormularioInterno', $formulario->id)->first();
@@ -300,9 +397,284 @@ class FormularioController extends Controller
                 }
             }
 
+            // Si es el formulario de inscripción pública de estudiantes o el configurado para la empresa, generar registros académicos y factura para validar
+            $isEnrollmentForm = false;
+            $companyConfig = \App\Models\Company::find($formulario->idCompany);
+            if ($companyConfig && $companyConfig->idFormularioInscripcion == $formulario->id) {
+                $isEnrollmentForm = true;
+            }
+
+            $facturaInscripcion = null;
+            $advertenciaFactura = null;
+
+            if ($formulario->slug === 'inscripcion-estudiantes' || $isEnrollmentForm) {
+                $studentName = '';
+                $studentDocType = 'CC';
+                $studentDocNum = '';
+                $studentBirthDate = null;
+                $studentEmail = '';
+                $studentPhone = '';
+                $studentPhoneSec = '';
+                $programName = '';
+                $tutorName = '';
+                $tutorParentesco = '';
+                $tutorDocNum = '';
+                $tutorPhone = '';
+                $tutorEmail = '';
+
+                foreach ($respuesta->respuestas as $resp) {
+                    $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
+                    if (!$preg) continue;
+                    $val = $resp['valor'] ?? '';
+                    if (is_array($val)) $val = implode(', ', $val);
+                    $titleLower = $this->normalizarTituloPregunta($preg->titulo);
+
+                    // Student name
+                    if ((str_contains($titleLower, 'nombre') && (str_contains($titleLower, 'estudiante') || str_contains($titleLower, 'aspirante') || str_contains($titleLower, 'participante') || str_contains($titleLower, 'alumno'))) || str_contains($titleLower, 'nombre completo') || str_contains($titleLower, 'nombres y apellidos')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            $studentName = $val;
+                        }
+                    }
+                    // Student doc type
+                    elseif (str_contains($titleLower, 'tipo') && str_contains($titleLower, 'documento')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            $studentDocType = $val;
+                        }
+                    }
+                    // Student doc num
+                    elseif (str_contains($titleLower, 'número') || str_contains($titleLower, 'numero') || str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            $studentDocNum = $val;
+                        }
+                    }
+                    // Student birth date
+                    elseif (str_contains($titleLower, 'fecha') && str_contains($titleLower, 'nacimiento')) {
+                        $studentBirthDate = $val;
+                    }
+                    // Student email
+                    elseif (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            $studentEmail = $val;
+                        }
+                    }
+                    // Student phone
+                    elseif (str_contains($titleLower, 'telefono') || str_contains($titleLower, 'celular') || str_contains($titleLower, 'movil') || (str_contains($titleLower, 'tel') && !str_contains($titleLower, 'satelite'))) {
+                        if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
+                            if (str_contains($titleLower, 'secundario')) {
+                                $studentPhoneSec = $val;
+                            } else {
+                                $studentPhone = $val;
+                            }
+                        }
+                    }
+                    // Program interest
+                    elseif (str_contains($titleLower, 'programa') || str_contains($titleLower, 'curso') || str_contains($titleLower, 'carrera') || str_contains($titleLower, 'interés') || str_contains($titleLower, 'interes')) {
+                        $programName = $val;
+                    }
+                    // Tutor name
+                    elseif (str_contains($titleLower, 'nombre') && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
+                        $tutorName = $val;
+                    }
+                    // Tutor relationship
+                    elseif (str_contains($titleLower, 'parentesco') || str_contains($titleLower, 'relación') || str_contains($titleLower, 'relacion')) {
+                        $tutorParentesco = $val;
+                    }
+                    // Tutor doc num
+                    elseif ((str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion') || str_contains($titleLower, 'cédula') || str_contains($titleLower, 'cedula')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
+                        $tutorDocNum = $val;
+                    }
+                    // Tutor phone
+                    elseif ((str_contains($titleLower, 'teléfono') || str_contains($titleLower, 'telefono') || str_contains($titleLower, 'celular') || str_contains($titleLower, 'móvil') || str_contains($titleLower, 'movil')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
+                        $tutorPhone = $val;
+                    }
+                    // Tutor email
+                    elseif ((str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
+                        $tutorEmail = $val;
+                    }
+                }
+
+                // Generar partes del nombre del estudiante
+                $parts = explode(' ', preg_replace('/\s+/', ' ', trim($studentName)));
+                $nombre1 = $parts[0] ?? '';
+                $nombre2 = count($parts) > 2 ? implode(' ', array_slice($parts, 1, -1)) : '';
+                $apellido1 = count($parts) > 1 ? end($parts) : '';
+                $apellido2 = '';
+
+                // 1. Crear o actualizar Tercero del estudiante
+                $terceroEstudiante = \App\Models\Tercero::updateOrCreate(
+                    ['identificacion' => $studentDocNum ?: '0', 'idCompany' => $formulario->idCompany],
+                    [
+                        'nombre' => $studentName ?: 'Aspirante Inscrito',
+                        'email' => $studentEmail ?: '',
+                        'telefono' => $studentPhone ?: '',
+                        'idCompany' => $formulario->idCompany
+                    ]
+                );
+
+                $tipoId = \DB::table('tipoIdentificacion')->value('id') ?? 1;
+
+                // 2. Crear o actualizar Person del estudiante
+                $personEstudiante = \App\Models\Person::updateOrCreate(
+                    ['identificacion' => $studentDocNum ?: '0'],
+                    [
+                        'nombre1' => $nombre1 ?: 'Aspirante',
+                        'nombre2' => $nombre2 ?: '',
+                        'apellido1' => $apellido1 ?: 'Inscrito',
+                        'apellido2' => $apellido2 ?: '',
+                        'email' => $studentEmail ?: '',
+                        'celular' => $studentPhone ?: '',
+                        'fechaNac' => $studentBirthDate ?: '2000-01-01',
+                        'direccion' => 'Desconocida',
+                        'sexo' => 'M',
+                        'perfil' => '',
+                        'idTipoIdentificacion' => $tipoId,
+                    ]
+                );
+
+                // 3. Crear Tutor/Acudiente si es menor de edad
+                $idAcudiente = null;
+                $isMenorEdad = false;
+                if ($studentBirthDate) {
+                    $birth = \Carbon\Carbon::parse($studentBirthDate);
+                    if ($birth->age < 18) {
+                        $isMenorEdad = true;
+                    }
+                }
+                
+                // Also check if they answered "Sí" to a "menor de edad" question
+                foreach ($respuesta->respuestas as $resp) {
+                    $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
+                    if (!$preg) continue;
+                    $titleLower = $this->normalizarTituloPregunta($preg->titulo);
+                    if (str_contains($titleLower, 'menor de edad') || str_contains($titleLower, 'menor de 18')) {
+                        $val = mb_strtolower(trim($resp['valor'] ?? ''));
+                        if ($val === 'sí' || $val === 'si' || $val === 'yes') {
+                            $isMenorEdad = true;
+                        }
+                    }
+                }
+
+                if ($isMenorEdad && !empty($tutorDocNum)) {
+                    $tutorTercero = \App\Models\Tercero::updateOrCreate(
+                            ['identificacion' => $tutorDocNum, 'idCompany' => $formulario->idCompany],
+                            [
+                                'nombre' => $tutorName ?: 'Tutor Acudiente',
+                                'email' => $tutorEmail ?: '',
+                                'telefono' => $tutorPhone ?: '',
+                                'idCompany' => $formulario->idCompany
+                            ]
+                        );
+
+                        $tParts = explode(' ', preg_replace('/\s+/', ' ', trim($tutorName)));
+                        $tNombre1 = $tParts[0] ?? '';
+                        $tNombre2 = count($tParts) > 2 ? implode(' ', array_slice($tParts, 1, -1)) : '';
+                        $tApellido1 = count($tParts) > 1 ? end($tParts) : '';
+
+                        $tPerson = \App\Models\Person::updateOrCreate(
+                            ['identificacion' => $tutorDocNum],
+                            [
+                                'nombre1' => $tNombre1 ?: 'Tutor',
+                                'nombre2' => $tNombre2 ?: '',
+                                'apellido1' => $tApellido1 ?: 'Acudiente',
+                                'email' => $tutorEmail ?: '',
+                                'celular' => $tutorPhone ?: '',
+                                'fechaNac' => '2000-01-01',
+                                'direccion' => 'Desconocida',
+                                'sexo' => 'M',
+                                'perfil' => '',
+                                'idTipoIdentificacion' => $tipoId,
+                            ]
+                        );
+                        $idAcudiente = $tPerson->id;
+                    }
+
+                // Find a matching Grado or default to 1
+                $gradoId = 1;
+                if (!empty($programName)) {
+                    $matchedGrado = \App\Models\Grado::where('nombreGrado', 'like', "%{$programName}%")->first();
+                    if ($matchedGrado) {
+                        $gradoId = $matchedGrado->id;
+                    }
+                }
+
+                $fichaId = \App\Models\Ficha::value('id') ?? 1;
+
+                // 4. Crear o actualizar matrícula en estado INSCRIPCION
+                $observacionMatricula = 'FormResponseID:' . $respuesta->id;
+                $matricula = \App\Models\Matricula::where('observacion', $observacionMatricula)
+                    ->where('idCompany', $formulario->idCompany)
+                    ->first();
+
+                if ($matricula) {
+                    $matricula->update([
+                        'idPersona' => $personEstudiante->id,
+                        'idAcudiente' => $idAcudiente,
+                        'idGrado' => $gradoId,
+                        'observacion' => $observacionMatricula,
+                    ]);
+                } else {
+                    $matricula = \App\Models\Matricula::create([
+                        'idPersona' => $personEstudiante->id,
+                        'idAcudiente' => $idAcudiente,
+                        'estado' => 'INSCRIPCION',
+                        'idCompany' => $formulario->idCompany,
+                        'fecha' => \Carbon\Carbon::now(),
+                        'idGrado' => $gradoId,
+                        'idFicha' => $fichaId,
+                        'observacion' => $observacionMatricula,
+                    ]);
+                }
+
+                // 5. Generar factura individual (idempotente) con valores económicos del proceso
+                $proceso = $this->resolverProcesoInscripcionFormulario($programName, (int) $formulario->idCompany);
+
+                if ($proceso) {
+                    /** @var PagoController $pagoController */
+                    $pagoController = app(PagoController::class);
+                    $resultadoFactura = $pagoController->crearFacturaIndividualInscripcion(
+                        (int) $proceso->id,
+                        (int) $formulario->idCompany,
+                        (int) $terceroEstudiante->id
+                    );
+
+                    if (!empty($resultadoFactura['factura'])) {
+                        $facturaInscripcion = $resultadoFactura['factura'];
+                    }
+                    if (!empty($resultadoFactura['error'])) {
+                        $advertenciaFactura = $resultadoFactura['error'];
+                        Log::warning('Inscripción: no se generó factura automática', [
+                            'idTercero' => $terceroEstudiante->id,
+                            'idProceso' => $proceso->id,
+                            'programName' => $programName,
+                            'error' => $resultadoFactura['error'],
+                        ]);
+                    }
+                } else {
+                    $advertenciaFactura = 'No se identificó el proceso académico para generar la factura. Verifique el campo programa del formulario y la configuración de valores económicos.';
+                    Log::warning('Inscripción sin proceso resuelto para factura', [
+                        'idTercero' => $terceroEstudiante->id,
+                        'programName' => $programName,
+                        'idCompany' => $formulario->idCompany,
+                    ]);
+                }
+            }
+
             DB::commit();
 
-            return response()->json(['message' => 'Respuesta guardada con éxito', 'data' => $respuesta]);
+            $responsePayload = [
+                'message' => 'Respuesta guardada con éxito',
+                'data' => $respuesta,
+            ];
+
+            if (isset($facturaInscripcion) && $facturaInscripcion) {
+                $responsePayload['idFactura'] = $facturaInscripcion->id;
+                $responsePayload['numeroFactura'] = $facturaInscripcion->numeroFactura;
+            }
+            if (isset($advertenciaFactura) && $advertenciaFactura) {
+                $responsePayload['advertenciaFactura'] = $advertenciaFactura;
+            }
+
+            return response()->json($responsePayload);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['error' => $e->getMessage()], 500);
@@ -362,6 +734,60 @@ class FormularioController extends Controller
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+
+    private function normalizarTituloPregunta(string $titulo): string
+    {
+        $t = mb_strtolower(trim($titulo));
+        $t = preg_replace('/\?+/u', '', $t) ?? $t;
+        $reemplazos = [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n',
+            'ü' => 'u',
+        ];
+
+        return preg_replace('/\s+/', ' ', strtr($t, $reemplazos)) ?? $t;
+    }
+
+
+    private function resolverProcesoInscripcionFormulario(?string $programName, int $idCompany): ?Proceso
+    {
+        $programName = trim((string) $programName);
+        if ($programName !== '') {
+            $proceso = Proceso::where('nombreProceso', $programName)->first();
+            if (!$proceso) {
+                $proceso = Proceso::where('nombreProceso', 'like', '%' . $programName . '%')->first();
+            }
+            if ($proceso) {
+                return $proceso;
+            }
+        }
+
+        $conteoPorProceso = AsignacionProcesoPago::query()
+            ->whereHas('configuracionPago', function ($query) use ($idCompany) {
+                $query->where('idCompany', $idCompany)
+                    ->where('estado', 'ACTIVO');
+            })
+            ->selectRaw('idProceso, COUNT(*) as total')
+            ->groupBy('idProceso')
+            ->orderByDesc('total')
+            ->get();
+
+        if ($conteoPorProceso->isEmpty()) {
+            return null;
+        }
+
+        $procesoPreferido = $conteoPorProceso->first(function ($row) {
+            $nombre = mb_strtolower((string) Proceso::where('id', $row->idProceso)->value('nombreProceso'));
+
+            return str_contains($nombre, 'matricula') || str_contains($nombre, 'inscripcion');
+        });
+
+        $idProceso = $procesoPreferido
+            ? (int) $procesoPreferido->idProceso
+            : (int) $conteoPorProceso->first()->idProceso;
+
+        return Proceso::find($idProceso);
     }
 }
 

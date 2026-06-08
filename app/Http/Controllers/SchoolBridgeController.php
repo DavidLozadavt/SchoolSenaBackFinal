@@ -38,6 +38,7 @@ class SchoolBridgeController extends Controller
             'nit' => 'required|string|max:45',
             'telefono' => 'nullable|string|max:45',
             'direccion' => 'nullable|string|max:255',
+            'contrasena_hash' => 'nullable|string',
         ]);
 
         try {
@@ -54,15 +55,32 @@ class SchoolBridgeController extends Controller
                 return response()->json(['error' => 'El correo electrónico ya se encuentra registrado en el sistema.'], 422);
             }
 
-            $company = Company::create([
+            $companyId = DB::table('empresa')->insertGetId([
                 'razonSocial' => $request->nombre_institucion,
                 'nit' => $request->nit,
                 'representanteLegal' => $request->nombre_representante,
                 'direccion' => $request->direccion ?? 'No especificada',
                 'email' => $request->email,
                 'digitoVerificacion' => 0,
-                'idCiudad' => 1, // Default o primera ciudad
+                'idCiudad' => 1,
+                'rutaLogo' => '',
+                'reelsUrls' => '',
+                'valorIva' => 0.00,
+                'devolucion' => 0,
+                'garantia' => 0,
+                'servicios' => 1,
+                'catalogo' => 0,
+                'productos' => 0,
+                'responsableIva' => 0,
+                'retenciones' => 0,
+                'telefono' => $request->telefono ?? '',
+                'facturaElectronica' => 0,
+                'parafiscalesEmpresa' => 0,
+                'urlDocumento' => '',
+                'created_at' => now(),
+                'updated_at' => now(),
             ]);
+            $company = Company::find($companyId);
 
             // 4. Crear el registro en tabla 'persona' para el representante
             // Usamos el nit como identificador de persona si no se tiene
@@ -80,16 +98,25 @@ class SchoolBridgeController extends Controller
                 'idTipoIdentificacion' => 1, // CC
                 'celular' => $request->telefono ?? '0000000',
                 'idCiudadUbicacion' => 1,
+                'perfil' => 'Admin',
+                'sexo' => 'M',
+                'rh' => '',
+                'firmaDigital' => '',
+                'ciudadExpedicion' => 1,
+                'tipoPersona' => 'natural',
             ]);
 
-            // 5. Crear el registro en tabla 'usuario' (Credenciales por defecto)
-            // Se le genera una contraseña inicial por defecto: 'VirtualT2026!'
+            // 5. Crear el registro en tabla 'usuario' (Credenciales por defecto o sincronizadas)
             $tempPassword = 'VirtualT2026!';
             $user = new User();
             $user->idpersona = $person->id;
             $user->email = $request->email;
-            $user->contrasena = bcrypt($tempPassword); // Columna principal de contraseña
-            $user->password = bcrypt($tempPassword);   // Laravel compatible
+            
+            if ($request->filled('contrasena_hash')) {
+                $user->contrasena = $request->contrasena_hash; // Ya viene encriptada del ERP
+            } else {
+                $user->contrasena = bcrypt($tempPassword); // Columna principal de contraseña
+            }
             $user->save();
 
             // 6. Vincular el usuario a la empresa mediante 'activation_company_users'
@@ -102,11 +129,9 @@ class SchoolBridgeController extends Controller
             $activation->fechaFin = now()->addYears(5)->format('Y-m-d');
             $activation->save();
 
-            // 7. Crear el rol de 'Admin' asignado a este tenant y asignárselo
+            // 7. Crear el rol de 'administradorVT' asignado a este tenant y asignárselo
             $role = Role::firstOrCreate([
-                'name' => 'Admin',
-                'company_id' => $company->id,
-            ], [
+                'name' => 'administradorVT',
                 'guard_name' => 'web',
             ]);
 
@@ -124,7 +149,6 @@ class SchoolBridgeController extends Controller
                 'GESTION_CONTRATOS',
                 'GESTION_PAGOS_CONTRATOS',
                 'GESTION_LABORAL',
-                'GESTION_CHAT',
             ];
             $role->syncPermissions($permissions);
 

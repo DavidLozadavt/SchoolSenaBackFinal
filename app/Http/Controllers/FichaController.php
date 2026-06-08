@@ -11,6 +11,7 @@ use App\Models\Sede;
 use App\Models\Status;
 use App\Models\SesionMateria;
 use App\Enums\EstadoSesionMateria;
+use App\Models\CentrosFormacion;
 use App\Util\KeyUtil;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -20,59 +21,78 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use App\Models\TipoGrado;
 
 class FichaController extends Controller
 {
+    public function getTiposGrado(): JsonResponse
+    {
+        $tiposGrado = TipoGrado::all();
+
+        $tiposGradoArray = $tiposGrado->map(function ($tipo) {
+            return [
+                'value' => $tipo->id,
+                'label' => $tipo->nombreTipoGrado,
+            ];
+        });
+
+        return response()->json($tiposGradoArray);
+    }
+
+    public function storeMultiple(Request $request)
+    {
+        $validated = $request->validate([
+            // Ficha
+            'idAsignacion' => 'required|exists:aperturarprograma,id',
+            'cantidadGrados' => 'required|integer|min:1',
+            'idTipoGrado' => 'required|exists:tipoGrado,id'
+        ]);
+
+        $apertura = AperturarPrograma::findOrFail($validated['idAsignacion']);
+        $idRegional = KeyUtil::idCompany();
+
+        try {
+            for ($i = 1; $i <= $validated['cantidadGrados']; $i++) {
+                Ficha::create([
+                    'idAsignacion' => $validated['idAsignacion'],
+                    'codigo' => str_pad($i, 2, '0', STR_PAD_LEFT),
+                    'idSede' => $apertura->idSede ?? null,
+                    'documento' => null,
+                    'idInfraestructura' => null,
+                    'porcentajeEjecucion' => 100,
+                    'idRegional' => $idRegional ?? null,
+                    'idTipoGrado' => $validated['idTipoGrado'] ?? null,
+                ]);
+            }
+        } catch (\Exception $e) {
+            DB::rollBack(); 
+            return response()->json([
+                'message' => 'Error al crear los grupos',
+                ], 400
+            );
+        }
+
+        return response()->json([
+            'message' => 'Grupos creados correctamente',
+        ], 201);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            // Apertura programa
-            'observacion' => 'nullable|string|max:1000',
-            'idPeriodo' => 'required|exists:periodo,id',
-            'idPrograma' => 'required|exists:programa,id',
-            'estado' => 'nullable|string',
-            'idSede' => 'required|exists:sedes,id',
-            'idInfraestructura' => 'nullable|exists:infraestructura,id',
-            'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
-
-            // apertura Fechas:
-            'fechaInicialClases' => 'required|date',
-            'fechaFinalClases' => 'required|date|after_or_equal:fechaInicialClases',
-            'fechaInicialPlanMejoramiento' => 'required|date',
-            'fechaFinalPlanMejoramiento' => 'required|date|after_or_equal:fechaInicialPlanMejoramiento',
-            'fechaInicialInscripciones' => 'required|date',
-            'fechaFinalInscripciones' => 'required|date|after_or_equal:fechaInicialInscripciones',
-            'fechaInicialMatriculas' => 'required|date',
-            'fechaFinalMatriculas' => 'required|date|after_or_equal:fechaInicialMatriculas',
-
             // Ficha
-            'idJornada' => 'required|exists:jornadas,id',
-            'idRegional' => 'required|exists:empresa,id',
-            'codigo' => 'required|string|unique:ficha,codigo',
+            'idSede' => 'required|exists:sedes,id',
+            'idAsignacion' => 'required|exists:aperturarprograma,id',
+            'codigo' => 'required|string',
             'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'documento' => 'nullable|file|mimes:pdf|max:5120',
+            'idPrograma' => 'required|exists:programa,id',
+            'idInfraestructura' => 'required|exists:infraestructura,id',
         ]);
 
         DB::beginTransaction();
 
         try {
-            $apertura = AperturarPrograma::create([
-                'observacion' => $validated['observacion'] ?? null,
-                'idPeriodo' => $validated['idPeriodo'],
-                'idPrograma' => $validated['idPrograma'],
-                'estado' => $validated['estado'] ?? 'EN CURSO',
-                'idSede' => $validated['idSede'],
-                'tipoCalificacion' => $validated['tipoCalificacion'] ?? 'NUMERICO',
-
-                'fechaInicialClases' => $validated['fechaInicialClases'],
-                'fechaFinalClases' => $validated['fechaFinalClases'],
-                'fechaInicialPlanMejoramiento' => $validated['fechaInicialPlanMejoramiento'],
-                'fechaFinalPlanMejoramiento' => $validated['fechaFinalPlanMejoramiento'],
-                'fechaInicialInscripciones' => $validated['fechaInicialInscripciones'],
-                'fechaFinalInscripciones' => $validated['fechaFinalInscripciones'],
-                'fechaInicialMatriculas' => $validated['fechaInicialMatriculas'],
-                'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
-            ]);
 
             // Crear la carpeta para la ficha usando el código
             $sanitize = function ($string) {
@@ -86,7 +106,9 @@ class FichaController extends Controller
             };
 
             $sede = Sede::findOrFail($validated['idSede']);
+            $centro = CentrosFormacion::findOrFail($sede->idCentroFormacion);
             $programa = Programa::findOrFail($validated['idPrograma']);
+
             $codigoFicha = $validated['codigo'];
             //Limpiar los nombres:
             $sedeName = $sanitize($sede->nombre);
@@ -106,14 +128,13 @@ class FichaController extends Controller
             }
 
             $ficha = Ficha::create([
-                'idJornada' => $validated['idJornada'],
-                'idAsignacion' => $apertura->id,
+                'idAsignacion' => $validated['idAsignacion'],
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
                 'documento' => $rutaDocumento,
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
-                'idRegional' => $validated['idRegional'],
                 'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
+                'idRegional' => $centro->idEmpresa,
             ]);
 
 
@@ -122,8 +143,7 @@ class FichaController extends Controller
             return response()->json([
                 'message' => 'Ficha creada correctamente',
                 'data' => [
-                    'ficha' => $ficha,
-                    'apertura' => $apertura
+                    'ficha' => $ficha
                 ]
             ], 201);
         } catch (\Throwable $e) {
@@ -207,20 +227,17 @@ class FichaController extends Controller
             'data' => $fichas
         ]);
     }
-    public function fichasPorPrograma(int $idPrograma, int $idCentro): JsonResponse
+    public function fichasPorPrograma(int $idApertura): JsonResponse
     {
         $fichas = Ficha::query()
-            ->whereHas('asignacion', function ($query) use ($idPrograma) {
-                $query->where('idPrograma', $idPrograma);
-            })
-            ->whereHas('sede', function ($sede) use ($idCentro) {
-                $sede->where('idCentroFormacion', $idCentro);
+            ->whereHas('asignacion', function ($query) use ($idApertura) {
+                $query->where('id', $idApertura);
             })
             ->with([
-                'jornada:id,nombreJornada',
                 'sede:id,nombre,idCentroFormacion',
                 'regional:id,razonSocial',
-                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
+                'asignacion.jornada:id,nombreJornada',
+                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma,idJornada',
                 'asignacion.programa:id,nombrePrograma',
                 'asignacion.programa.grados', //Ya puedo capturar en idgrado
                 'instructorLider:id,idpersona', // Especificar campos para que Laravel resuelva correctamente la relación
@@ -258,7 +275,6 @@ class FichaController extends Controller
         })->toArray();
 
         return response()->json([
-            'idPrograma' => $idPrograma,
             'total' => $fichas->count(),
             'data' => $fichasArray
         ]);
@@ -348,8 +364,8 @@ class FichaController extends Controller
 
             $idPrograma = $ficha->asignacion->idPrograma;
 
-            \Log::info('Buscando instructores para programa ID: ' . $idPrograma);
-            \Log::info('ID Empresa: ' . KeyUtil::idCompany());
+            Log::info('Buscando instructores para programa ID: ' . $idPrograma);
+            Log::info('ID Empresa: ' . KeyUtil::idCompany());
 
             // Primero verificamos si hay contratos con este programa
             $contratosConPrograma = DB::table('asignacion_contrato_programa')
@@ -357,8 +373,8 @@ class FichaController extends Controller
                 ->pluck('idContrato')
                 ->toArray();
 
-            \Log::info('Contratos con programa ' . $idPrograma . ': ' . count($contratosConPrograma));
-            \Log::info('IDs de contratos: ' . json_encode($contratosConPrograma));
+            Log::info('Contratos con programa ' . $idPrograma . ': ' . count($contratosConPrograma));
+            Log::info('IDs de contratos: ' . json_encode($contratosConPrograma));
 
             // Usar método directo con whereIn para mayor confiabilidad
             if (!empty($contratosConPrograma)) {
@@ -376,7 +392,7 @@ class FichaController extends Controller
                 $instructores = collect([]);
             }
 
-            \Log::info('Instructores encontrados para programa ' . $idPrograma . ': ' . $instructores->count());
+            Log::info('Instructores encontrados para programa ' . $idPrograma . ': ' . $instructores->count());
 
             // Log adicional para debug
             if ($instructores->count() === 0) {
@@ -384,7 +400,7 @@ class FichaController extends Controller
                 $totalContratosActivos = Contract::where('idEstado', Status::ID_ACTIVE)
                     ->where('idempresa', KeyUtil::idCompany())
                     ->count();
-                \Log::info('Total contratos activos de la empresa: ' . $totalContratosActivos);
+                Log::info('Total contratos activos de la empresa: ' . $totalContratosActivos);
 
                 // Verificar si hay algún contrato con programas asignados
                 $contratosConProgramas = DB::table('asignacion_contrato_programa')
@@ -392,7 +408,7 @@ class FichaController extends Controller
                     ->where('contrato.idEstado', Status::ID_ACTIVE)
                     ->where('contrato.idempresa', KeyUtil::idCompany())
                     ->count();
-                \Log::info('Contratos activos con programas asignados: ' . $contratosConProgramas);
+                Log::info('Contratos activos con programas asignados: ' . $contratosConProgramas);
             }
 
             return response()->json([
@@ -410,7 +426,7 @@ class FichaController extends Controller
                 'data' => []
             ], 404);
         } catch (\Exception $e) {
-            \Log::error('Error en getInstructoresDisponiblesPorFicha: ' . $e->getMessage());
+            Log::error('Error en getInstructoresDisponiblesPorFicha: ' . $e->getMessage());
             return response()->json([
                 'status' => 'error',
                 'message' => 'Error al obtener instructores',
@@ -426,7 +442,7 @@ class FichaController extends Controller
     {
         try {
             $validated = $request->validate([
-                'idInstructorLider' => 'required|exists:contrato,id'
+                'idInstructorLider' => 'nullable|exists:contrato,id'
             ]);
 
             $ficha = Ficha::with('asignacion.programa')->findOrFail($idFicha);
@@ -441,6 +457,7 @@ class FichaController extends Controller
             $idInstructorLider = $validated['idInstructorLider'];
 
             // Verificar que el instructor tenga el programa asignado
+            if ($idInstructorLider !== null) {
             $instructor = Contract::whereHas('programas', function ($query) use ($idPrograma) {
                 $query->where('programa.id', $idPrograma);
             })
@@ -452,6 +469,7 @@ class FichaController extends Controller
                 return response()->json([
                     'message' => 'El instructor seleccionado no tiene el programa de la ficha asignado en su contrato'
                 ], 422);
+            }
             }
 
             // Actualizar la ficha
@@ -495,12 +513,11 @@ class FichaController extends Controller
         try {
             // Buscar la ficha con todas sus relaciones
             $ficha = Ficha::with([
-                'jornada',
                 'asignacion' => function ($query) {
                     $query->with([
                         'periodo',
                         'programa',
-                        'sede'
+                        'sede',
                     ]);
                 },
                 'sede',
@@ -533,36 +550,15 @@ class FichaController extends Controller
     public function update(Request $request, $id): JsonResponse
     {
         $validated = $request->validate([
-            // Apertura programa
-            'observacion' => 'nullable|string|max:1000',
-            'idPeriodo' => 'required|exists:periodo,id',
-            'idPrograma' => 'required|exists:programa,id',
-            'estado' => 'nullable|string',
-            'idSede' => 'required|exists:sedes,id',
-            'idInfraestructura' => 'nullable|exists:infraestructura,id',
-            'tipoCalificacion' => 'nullable|in:NUMERICO,DESEMPEÑO',
-
-            // Apertura Fechas
-            'fechaInicialClases' => 'required|date',
-            'fechaFinalClases' => 'required|date|after_or_equal:fechaInicialClases',
-            'fechaInicialPlanMejoramiento' => 'required|date',
-            'fechaFinalPlanMejoramiento' => 'required|date|after_or_equal:fechaInicialPlanMejoramiento',
-            'fechaInicialInscripciones' => 'required|date',
-            'fechaFinalInscripciones' => 'required|date|after_or_equal:fechaInicialInscripciones',
-            'fechaInicialMatriculas' => 'required|date',
-            'fechaFinalMatriculas' => 'required|date|after_or_equal:fechaInicialMatriculas',
-
             // Ficha
-            'idJornada' => 'required|exists:jornadas,id',
-            'idRegional' => 'required|exists:empresa,id',
+            'idSede' => 'required|exists:sedes,id',
+            'idAsignacion' => 'required|exists:aperturarprograma,id',
+            'codigo' => ['required','string'],
             'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
-            'codigo' => [
-                'required',
-                'string',
-                // Validar que el código sea único excepto para esta ficha
-                Rule::unique('ficha', 'codigo')->ignore($id)
-            ],
-            'documento' => 'nullable|file|mimes:pdf|max:5120', // 5MB
+            'documento' => 'nullable|file|mimes:pdf|max:5120',
+            'idPrograma' => 'required|exists:programa,id',
+            'idInfraestructura' => 'required|exists:infraestructura,id',
+            'idTipoGrado' => 'nullable|exists:tipoGrado,id',
         ]);
 
         DB::beginTransaction();
@@ -570,6 +566,7 @@ class FichaController extends Controller
         try {
             // Buscar la ficha
             $ficha = Ficha::findOrFail($id);
+            $idCompany = KeyUtil::idCompany();
 
             // Buscar la apertura relacionada
             $apertura = AperturarPrograma::findOrFail($ficha->idAsignacion);
@@ -579,25 +576,6 @@ class FichaController extends Controller
             $oldCodigo   = $ficha->codigo;
             $oldSede     = $ficha->idSede;
             $oldPrograma = $apertura->idPrograma;
-
-            // Actualizar la apertura
-            $apertura->update([
-                'observacion' => $validated['observacion'] ?? null,
-                'idPeriodo' => $validated['idPeriodo'],
-                'idPrograma' => $validated['idPrograma'],
-                'estado' => $validated['estado'] ?? 'EN CURSO',
-                'idSede' => $validated['idSede'],
-                'tipoCalificacion' => $validated['tipoCalificacion'] ?? 'NUMERICO',
-
-                'fechaInicialClases' => $validated['fechaInicialClases'],
-                'fechaFinalClases' => $validated['fechaFinalClases'],
-                'fechaInicialPlanMejoramiento' => $validated['fechaInicialPlanMejoramiento'],
-                'fechaFinalPlanMejoramiento' => $validated['fechaFinalPlanMejoramiento'],
-                'fechaInicialInscripciones' => $validated['fechaInicialInscripciones'],
-                'fechaFinalInscripciones' => $validated['fechaFinalInscripciones'],
-                'fechaInicialMatriculas' => $validated['fechaInicialMatriculas'],
-                'fechaFinalMatriculas' => $validated['fechaFinalMatriculas'],
-            ]);
 
             $rutaDocumento = $ficha->documento;
 
@@ -621,6 +599,8 @@ class FichaController extends Controller
                 };
 
                 $sede = Sede::findOrFail($validated['idSede']);
+
+                $centro = CentrosFormacion::findOrFail($sede->idCentroFormacion);
                 $programa = Programa::findOrFail($validated['idPrograma']);
 
                 $sedeName = $sanitize($sede->nombre);
@@ -693,28 +673,23 @@ class FichaController extends Controller
                 }
             }
 
-
-
-
-
             // Actualizar la ficha
             $ficha->update([
-                'idJornada' => $validated['idJornada'],
                 'codigo' => $validated['codigo'],
                 'idSede' => $validated['idSede'],
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
-                'idRegional' => $validated['idRegional'],
+                'idRegional' => $centro->idEmpresa ?? $idCompany,
                 'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
                 'documento' => $rutaDocumento,
+                'idAsignacion' => $validated['idAsignacion'],
+                'idTipoGrado' => $validated['idTipoGrado'] ?? null,
             ]);
-
-
 
             DB::commit();
 
             // Recargar las relaciones
             $ficha->load([
-                'jornada',
+                'tipoGrado',
                 'asignacion',
                 'sede',
                 'infraestructura',
@@ -972,7 +947,7 @@ class FichaController extends Controller
 
             // Una fila por PK horarioMateria (entero; evita colisión string/int al agrupar).
             $clases = collect($clases)
-                ->keyBy(fn ($row) => (int) ($row->idHorarioMateria ?? 0))
+                ->keyBy(fn($row) => (int) ($row->idHorarioMateria ?? 0))
                 ->values();
 
             // Procesar resultados para calcular estado, total_sesiones y sesiones_restantes
@@ -1928,7 +1903,7 @@ class FichaController extends Controller
                     $meta->jornada_nombre ?? null
                 );
             })
-            ->map(fn ($s) => Carbon::parse($s->fechaSesion)->format('Y-m-d'))
+            ->map(fn($s) => Carbon::parse($s->fechaSesion)->format('Y-m-d'))
             ->unique()
             ->count();
     }
@@ -2776,14 +2751,15 @@ class FichaController extends Controller
             ->whereIn('id', $slotIds)
             ->whereNotNull('idContrato')
             ->pluck('idContrato')
-            ->map(fn ($id) => (int) $id)
+            ->map(fn($id) => (int) $id)
             ->unique()->values()->all();
     }
 
     private function instructoresRapPayload(array $contratoIdsConRol): array
     {
         $ids = array_values(array_unique(array_filter(array_map(
-            fn ($item) => (int) ($item['id'] ?? 0), $contratoIdsConRol
+            fn($item) => (int) ($item['id'] ?? 0),
+            $contratoIdsConRol
         ))));
         if (empty($ids)) return [];
 
@@ -2805,7 +2781,7 @@ class FichaController extends Controller
             $out[] = [
                 'idContrato' => $id,
                 'nombre'     => trim((string) ($r->nombre ?? '')) ?: 'Instructor',
-                'rutaFotoUrl'=> $r->rutaFotoUrl ?? null,
+                'rutaFotoUrl' => $r->rutaFotoUrl ?? null,
                 'rol'        => (string) ($item['rol'] ?? 'titular'),
             ];
         }

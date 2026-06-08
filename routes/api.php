@@ -164,6 +164,7 @@ use App\Http\Controllers\SancionesController;
 use App\Http\Controllers\AnexoActaController;
 use App\Http\Controllers\gestion_solicitudes_instructor\SolicitudMateriaController;
 use App\Http\Controllers\InstructorLiderController;
+use App\Http\Controllers\ReunionesTemporalesController;
 
 /*
 |--------------------------------------------------------------------------
@@ -199,6 +200,7 @@ Route::group([
     Route::post('permissions', [AuthController::class, 'getPermissions']);
     Route::get('user_mobile', [AuthController::class, 'getUserAppMobile']);
     Route::get('get_users_and_groups', [Gestion_usuarioUserController::class, 'getUsersAndGroups']);
+    Route::post('token_livekit', [AuthController::class, 'tokenLivekit']);
 });
 
 //olvidaste contraseña
@@ -264,6 +266,13 @@ Route::post('update_status_user/{id}', [Gestion_usuarioUserController::class, 'u
 
 
 
+
+// Configuración de Inscripción para Colegios
+Route::middleware('auth:api')->group(function () {
+    Route::get('inscripcion/configuracion', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'getConfig']);
+    Route::post('inscripcion/configuracion', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'saveConfig']);
+    Route::get('inscripcion/formularios', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'getFormularios']);
+});
 
 Route::get('users_company', [CompanyController::class, 'getUsersCompany']);
 
@@ -760,6 +769,20 @@ Route::get('configuraciones_pago', [PagoController::class, 'getConfiguracionesPa
 Route::post('store_configuracion_pago', [PagoController::class, 'storeConfiguracionPago']);
 Route::put('update_configuracion_pago/{id}', [PagoController::class, 'updateConfiguracionPago']);
 Route::delete('delete_configuracion_pago/{id}', [PagoController::class, 'destroyConfiguracionPago']);
+Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
+Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
+Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);
+Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
+Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
+Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/notificar_recepcion', [PagoController::class, 'notificarRecepcionSolicitudInscripcion']);
+// Ruta pública para el portal del aspirante (sin autenticación requerida)
+Route::get('portal-aspirante/{token}', [PagoController::class, 'getPortalAspirante']);
+Route::post('portal-aspirante/{token}/comprobante', [PagoController::class, 'subirComprobantePortalAspirante']);
+Route::get('portal-aspirante/{token}/factura-pdf', [PagoController::class, 'generarFacturaPdfPortalAspirante']);
+
+
 
 
 
@@ -1240,11 +1263,6 @@ Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
 Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'getSedesByRegional']); //Para filtrar las sedes por regional
 
 
-//rutas SHOOL SENA para gestión de aperturaPrograma:
-Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
-Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
-Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
-Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Fichas:
 // IMPORTANTE: Las rutas específicas deben ir ANTES de las genéricas
@@ -1255,9 +1273,11 @@ Route::get('fichas/instructor/historial-sesiones', [FichaController::class, 'his
 Route::get('fichas/instructor/{idInstructor}/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
 Route::get('fichas/estudiante/clases', [FichaController::class, 'clasesEstudiante']);
 Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
-Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('fichas/programa/{idApertura}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('tipos-grado', [FichaController::class, 'getTiposGrado']); // trimestre, semestre, etc.
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
+Route::post('fichas/multiples', [FichaController::class, 'storeMultiple']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas', [FichaController::class, 'store']);
@@ -1692,3 +1712,17 @@ Route::prefix('invitado')->group(function () {
     Route::delete('/{id}', [GestionEventoHermanoController::class, 'destroy']);
 });
 
+
+//rutas SHOOL SENA para gestión de aperturaPrograma:
+Route::middleware('auth:api')->group(function () {
+    Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
+    Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
+    Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
+    Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
+    Route::get('aperturarprograma/disponibles', [AperturarProgramaController::class, 'aperturasDisponibles']);
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('reuniones_temporales', ReunionesTemporalesController::class);
+    Route::post('reuniones_temporales/{reunion}/extend', [ReunionesTemporalesController::class, 'extend']);
+});
