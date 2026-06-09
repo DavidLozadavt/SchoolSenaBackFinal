@@ -1524,55 +1524,95 @@ class PagoController extends Controller
             'contexto' => ['nullable', 'string', 'max:120'],
         ]);
 
-        $idCompany = (int) KeyUtil::idCompany();
+        $resultado = $this->aplicarPagoFacturaAcademicaInterno(
+            $id,
+            (int) KeyUtil::idCompany(),
+            (int) $request->input('idMedioPago'),
+            $request->filled('idTipoPago') ? (int) $request->input('idTipoPago') : null,
+            $request->has('valorAbono') ? (float) $request->input('valorAbono') : null,
+            $request->input('contexto')
+        );
+
+        return response()->json($resultado['payload'], $resultado['httpStatus']);
+    }
+
+
+    /**
+     * Núcleo financiero compartido: HTTP admin, webhook Wompi y futuros consumidores server-side.
+     * Actualiza el mismo registro en pagos/transaccion creado al generar la factura académica.
+     *
+     * @return array{httpStatus: int, payload: array}
+     */
+    public function aplicarPagoFacturaAcademicaInterno(
+        int $idFactura,
+        int $idCompany,
+        int $idMedioPago,
+        ?int $idTipoPago = null,
+        ?float $valorAbono = null,
+        ?string $contexto = null
+    ): array {
         $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
-            ->where('id', $id)
+            ->where('id', $idFactura)
             ->where(function ($q) use ($idCompany) {
                 $q->where('idCompany', $idCompany)->orWhereNull('idCompany');
             })
             ->first();
 
         if (!$factura) {
-            return response()->json(['error' => 'Factura no encontrada.'], 404);
+            return [
+                'httpStatus' => 404,
+                'payload' => ['error' => 'Factura no encontrada.'],
+            ];
         }
 
         $transaccion = $factura->transacciones->first();
         if (!$transaccion) {
-            return response()->json(['error' => 'La factura no tiene transacción asociada.'], 422);
+            return [
+                'httpStatus' => 422,
+                'payload' => ['error' => 'La factura no tiene transacción asociada.'],
+            ];
         }
 
         $pago = $transaccion->pago->first();
         if (!$pago) {
-            return response()->json(['error' => 'La transacción no tiene registro de pago.'], 422);
+            return [
+                'httpStatus' => 422,
+                'payload' => ['error' => 'La transacción no tiene registro de pago.'],
+            ];
         }
 
         if ((int) $pago->idEstado === Status::ID_APROBADO && (float) $pago->excedente <= 0) {
             $proceso = $this->inferirProcesoFacturaAcademica($factura);
 
-            return response()->json([
-                'message' => 'La factura ya está pagada.',
-                'idTransaccion' => $transaccion->id,
-                'factura' => $this->formatearFacturaAcademica($factura, $proceso),
-            ]);
+            return [
+                'httpStatus' => 200,
+                'payload' => [
+                    'message' => 'La factura ya está pagada.',
+                    'idTransaccion' => $transaccion->id,
+                    'factura' => $this->formatearFacturaAcademica($factura, $proceso),
+                    'contexto' => $contexto,
+                ],
+            ];
         }
 
-        $valorAbono = $request->has('valorAbono')
-            ? (float) $request->input('valorAbono')
-            : (float) $pago->excedente;
+        $montoAbono = $valorAbono ?? (float) $pago->excedente;
 
-        if ($valorAbono <= 0 || (float) $pago->excedente <= 0) {
-            return response()->json(['error' => 'No hay saldo pendiente por registrar.'], 422);
+        if ($montoAbono <= 0 || (float) $pago->excedente <= 0) {
+            return [
+                'httpStatus' => 422,
+                'payload' => ['error' => 'No hay saldo pendiente por registrar.'],
+            ];
         }
 
         try {
             DB::beginTransaction();
 
-            $restarExcedente = min((float) $pago->excedente, $valorAbono);
+            $restarExcedente = min((float) $pago->excedente, $montoAbono);
             $pago->excedente = round((float) $pago->excedente - $restarExcedente, 2);
             $pago->valor = round((float) $pago->valor + $restarExcedente, 2);
             $pago->fechaPago = Carbon::now()->format('Y-m-d');
             $pago->fechaReg = Carbon::now()->format('Y-m-d');
-            $pago->idMedioPago = (int) $request->input('idMedioPago');
+            $pago->idMedioPago = $idMedioPago;
             $pago->numeroFact = $factura->numeroFactura;
 
             if ((float) $pago->excedente <= 0) {
@@ -1581,8 +1621,8 @@ class PagoController extends Controller
 
             $pago->save();
 
-            if ($request->filled('idTipoPago')) {
-                $transaccion->idTipoPago = (int) $request->input('idTipoPago');
+            if ($idTipoPago !== null) {
+                $transaccion->idTipoPago = $idTipoPago;
             }
 
             if (isset($transaccion->excedente) && (float) $transaccion->excedente > 0) {
@@ -1604,18 +1644,25 @@ class PagoController extends Controller
             $factura->load(['detalles', 'tercero', 'transacciones.pago.estado']);
             $proceso = $this->inferirProcesoFacturaAcademica($factura);
 
-            return response()->json([
-                'message' => 'Pago registrado correctamente.',
-                'idTransaccion' => $transaccion->id,
-                'factura' => $this->formatearFacturaAcademica($factura, $proceso),
-            ]);
+            return [
+                'httpStatus' => 200,
+                'payload' => [
+                    'message' => 'Pago registrado correctamente.',
+                    'idTransaccion' => $transaccion->id,
+                    'factura' => $this->formatearFacturaAcademica($factura, $proceso),
+                    'contexto' => $contexto,
+                ],
+            ];
         } catch (\Exception $e) {
             DB::rollBack();
 
-            return response()->json([
-                'error' => 'No fue posible registrar el pago.',
-                'detalle' => $e->getMessage(),
-            ], 500);
+            return [
+                'httpStatus' => 500,
+                'payload' => [
+                    'error' => 'No fue posible registrar el pago.',
+                    'detalle' => $e->getMessage(),
+                ],
+            ];
         }
     }
 
@@ -1923,6 +1970,10 @@ class PagoController extends Controller
         $estudiante     = $this->formatearEstudianteSolicitud($factura, $idCompany);
         $company        = \App\Models\Company::find($idCompany);
 
+        /** @var \App\Services\EmpresaPasarelaPagoService $pasarelaService */
+        $pasarelaService = app(\App\Services\EmpresaPasarelaPagoService::class);
+        $publicConfig    = $pasarelaService->getPublicConfig($idCompany);
+
         // Resolver campos específicos solicitados
         $transaccion = $factura->transacciones->first();
         $pago = $transaccion?->pago?->first();
@@ -1940,6 +1991,11 @@ class PagoController extends Controller
             'valorTotal'         => (float) ($facturaPayload['valor'] ?? 0),
             'numeroFactura'      => $factura->numeroFactura,
             'pdfUrl'             => url("api/portal-aspirante/{$token}/factura-pdf"),
+            'pasarelaPago'       => [
+                'disponible'        => $publicConfig && !empty($publicConfig['publicKey']),
+                'habilitarPSE'      => (bool) ($publicConfig['habilitarPSE'] ?? false),
+                'habilitarTarjetas' => (bool) ($publicConfig['habilitarTarjetas'] ?? false),
+            ],
         ]);
     }
 
@@ -2001,6 +2057,98 @@ class PagoController extends Controller
         }
 
         return response()->json(['error' => 'No se recibió ningún archivo.'], 400);
+    }
+
+    /**
+     * Prepara datos del Web Checkout WOMPI sin registrar pagos ni modificar estados.
+     * POST /api/portal-aspirante/{token}/iniciar-pago
+     */
+    public function iniciarPagoPortalAspirante(Request $request, string $token)
+    {
+        $datos = $this->verificarTokenPortalAspirante($token);
+        if (!$datos) {
+            return response()->json(['error' => 'Enlace de acceso inválido o expirado.'], 403);
+        }
+
+        $request->validate([
+            'metodo' => 'nullable|string|in:PSE,CARD,TARJETA,TARJETAS',
+        ]);
+
+        $idCompany = $datos['idCompany'];
+        $idFactura = $datos['idFactura'];
+
+        $factura = Factura::with(['detalles', 'tercero'])
+            ->where('id', $idFactura)
+            ->where('idCompany', $idCompany)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $proceso        = $this->inferirProcesoFacturaAcademica($factura);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $saldoPendiente = (float) ($facturaPayload['saldoPendiente'] ?? 0);
+
+        if ($saldoPendiente <= 0) {
+            return response()->json(['error' => 'Esta factura no tiene saldo pendiente.'], 422);
+        }
+
+        /** @var \App\Services\EmpresaPasarelaPagoService $pasarelaService */
+        $pasarelaService = app(\App\Services\EmpresaPasarelaPagoService::class);
+        $publicConfig    = $pasarelaService->getPublicConfig($idCompany);
+
+        if (!$publicConfig || empty($publicConfig['publicKey'])) {
+            return response()->json(['error' => 'Pago en línea no disponible para esta institución.'], 503);
+        }
+
+        $habilitarPSE      = (bool) ($publicConfig['habilitarPSE'] ?? false);
+        $habilitarTarjetas = (bool) ($publicConfig['habilitarTarjetas'] ?? false);
+
+        if (!$habilitarPSE && !$habilitarTarjetas) {
+            return response()->json(['error' => 'No hay métodos de pago en línea habilitados.'], 503);
+        }
+
+        $metodo = strtoupper((string) $request->input('metodo', ''));
+        if (in_array($metodo, ['TARJETA', 'TARJETAS'], true)) {
+            $metodo = 'CARD';
+        }
+        if ($metodo === 'PSE' && !$habilitarPSE) {
+            return response()->json(['error' => 'PSE no está habilitado para esta institución.'], 422);
+        }
+        if ($metodo === 'CARD' && !$habilitarTarjetas) {
+            return response()->json(['error' => 'Pago con tarjeta no está habilitado para esta institución.'], 422);
+        }
+
+        $currency      = 'COP';
+        $amountInCents = (int) round($saldoPendiente * 100);
+
+        if ($amountInCents < 1) {
+            return response()->json(['error' => 'El monto a pagar es inválido.'], 422);
+        }
+
+        $reference          = $pasarelaService->generarReferencia($idFactura, $idCompany);
+        $integritySignature = $pasarelaService->generarFirmaIntegridad($idCompany, $reference, $amountInCents, $currency);
+
+        if (!$integritySignature) {
+            return response()->json(['error' => 'No se pudo inicializar el pago. Contacte a la institución.'], 500);
+        }
+
+        $company     = \App\Models\Company::find($idCompany);
+        $frontendUrl = rtrim(config('services.school.frontend_url', 'http://localhost:5173'), '/');
+        $redirectUrl = "{$frontendUrl}/portal-aspirante/{$token}?pago=retorno";
+
+        return response()->json([
+            'publicKey'           => $publicConfig['publicKey'],
+            'currency'            => $currency,
+            'amountInCents'       => $amountInCents,
+            'reference'           => $reference,
+            'integritySignature'  => $integritySignature,
+            'redirectUrl'         => $redirectUrl,
+            'companyName'         => $company?->razonSocial ?? 'La institución',
+            'habilitarPSE'        => $habilitarPSE,
+            'habilitarTarjetas'   => $habilitarTarjetas,
+        ]);
     }
 
     /**
@@ -2196,7 +2344,53 @@ class PagoController extends Controller
             'estudiante' => $estudiante,
             'respuestasFormulario' => $respuestasFormulario,
             'documentosPago' => $documentosPago,
+            'pagoWompi' => $this->resolverPagoWompiAuditoria($idFactura),
         ]);
+    }
+
+    /**
+     * Último pago WOMPI conciliado por webhook para una factura académica.
+     */
+    private function resolverPagoWompiAuditoria(int $idFactura): ?array
+    {
+        if (!Schema::hasTable('wompiAuditoriaPago') || !Schema::hasColumn('wompiAuditoriaPago', 'idFactura')) {
+            return null;
+        }
+
+        $row = DB::table('wompiAuditoriaPago')
+            ->where('idFactura', $idFactura)
+            ->where('status', 'PROCESADO')
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$row) {
+            return null;
+        }
+
+        $payload = json_decode($row->payload ?? '{}', true);
+        $paymentMethodType = $payload['transaction']['payment_method_type'] ?? null;
+
+        return [
+            'metodo'          => $this->formatearMetodoPagoWompi($paymentMethodType),
+            'referencia'      => $row->referencia,
+            'transactionId'   => $row->transactionId ?? null,
+            'fechaTransaccion'=> $row->updated_at ?? $row->created_at,
+            'estado'          => 'APROBADO',
+            'monto'           => $row->amount,
+            'currency'        => $row->currency ?? 'COP',
+        ];
+    }
+
+    private function formatearMetodoPagoWompi(?string $paymentMethodType): string
+    {
+        $type = strtoupper((string) $paymentMethodType);
+
+        return match ($type) {
+            'PSE' => 'PSE',
+            'CARD', 'CREDIT_CARD' => 'Tarjeta',
+            'NEQUI' => 'Nequi',
+            default => $type !== '' ? $type : 'WOMPI',
+        };
     }
 
     private function resolverRespuestaFormularioObj(string $documento, int $idCompany, ?Factura $factura = null)

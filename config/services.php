@@ -43,4 +43,13 @@ return [
         'secret' => env('LIVEKIT_API_SECRET'),
         'url' => env('LIVEKIT_URL'),
     ],
+
+    'erp' => [
+        'base_url' => env('ERP_BASE_URL', 'http://localhost:8001/api'),
+        'service_token' => env('ERP_SERVICE_TOKEN'),
+    ],
+
+    'school' => [
+        'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+    ],
 ];

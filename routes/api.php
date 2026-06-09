@@ -17,7 +17,7 @@ use App\Http\Controllers\VentaController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CajaController;
 use App\Http\Controllers\LugarController;
-use App\Http\Controllers\WompiController;
+use App\Http\Controllers\WompiWebhookController;
 use App\Http\Controllers\CiudadController;
 use App\Http\Controllers\auth\AuthController;
 use App\Http\Controllers\auth\AuthFactusController;
@@ -437,25 +437,32 @@ Route::post('generar_cuenta_cobro_cxc/{idTransaccion}/{idTercero}', [ProductoEmp
 //cuentas por cobrar
 Route::get('cuentas_pendientes', [ProductoEmpresarialController::class, 'getCuentasPendientes']);
 
-//wompi
-Route::group([], function () {
+// Wompi legacy — deprecado (usar WompiConfigProvider + webhooks/wompi)
+$wompiLegacyDeprecated = static fn () => response()->json([
+    'error' => 'Endpoint Wompi legacy deprecado. Use webhooks/wompi y el flujo multiempresa del portal aspirante.',
+], 410);
 
-    //
-    Route::get('get_tokens', [WompiController::class, 'getTokens']);
-    //terminos y condciones
-    Route::get('get_permalink', [WompiController::class, 'getPermalink']);
-    //token
-    Route::get('get_only_acceptance_token', [WompiController::class, 'getOnlyAcceptanceToken']);
-    //obteiene el token con la dmas informacion personal
-    Route::get('get_all_data_with_acceptance_token', [WompiController::class, 'getAllDataWithAcceptanceToken']);
+Route::get('get_tokens', $wompiLegacyDeprecated);
+Route::get('get_permalink', $wompiLegacyDeprecated);
+Route::get('get_only_acceptance_token', $wompiLegacyDeprecated);
+Route::get('get_all_data_with_acceptance_token', $wompiLegacyDeprecated);
+Route::get('get_financial_institutions', $wompiLegacyDeprecated);
+Route::get('find_transaction_by_id/{idTransaction}', $wompiLegacyDeprecated);
+Route::post('transaction_pse', $wompiLegacyDeprecated);
+Route::post('cryptographic_hash', $wompiLegacyDeprecated);
 
-    Route::get('get_financial_institutions', [WompiController::class, 'getFinancialInstitutions']);
-    //rasteras informacion devuelve datos de la transacioj
-    Route::get('find_transaction_by_id/{idTransaction}', [WompiController::class, 'findTransactionById']);
-    //trasnacion en si
-    Route::post('transaction_pse', [WompiController::class, 'makePSEPayment']);
-    Route::post('cryptographic_hash', [WompiController::class, 'getCryptoGragraphicHash']);
-});
+// ============================================================
+// WOMPI MULTIEMPRESA (ERP → School)
+// ============================================================
+// Webhook de Wompi (público, sin auth — Wompi llama directamente)
+Route::post('webhooks/wompi', [WompiWebhookController::class, 'handle']);
+
+// Configuración pública de pasarela para el Portal Aspirante
+Route::get('wompi-config/{idEmpresa}', [WompiWebhookController::class, 'getPublicConfig']);
+
+// Generación de firma de integridad (requiere auth para que solo el servidor lo use)
+Route::post('wompi-integrity', [WompiWebhookController::class, 'generarFirmaIntegridad'])
+    ->middleware('auth:api');
 
 
 //gestion aporte socios
@@ -779,6 +786,7 @@ Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoContr
 Route::post('solicitudes_inscripcion/{idFactura}/notificar_recepcion', [PagoController::class, 'notificarRecepcionSolicitudInscripcion']);
 // Ruta pública para el portal del aspirante (sin autenticación requerida)
 Route::get('portal-aspirante/{token}', [PagoController::class, 'getPortalAspirante']);
+Route::post('portal-aspirante/{token}/iniciar-pago', [PagoController::class, 'iniciarPagoPortalAspirante']);
 Route::post('portal-aspirante/{token}/comprobante', [PagoController::class, 'subirComprobantePortalAspirante']);
 Route::get('portal-aspirante/{token}/factura-pdf', [PagoController::class, 'generarFacturaPdfPortalAspirante']);
 
