@@ -1687,9 +1687,11 @@ Route::prefix('invitado')->group(function () {
 
 //rutas SHOOL SENA para gestión de aperturaPrograma:
 Route::middleware('auth:api')->group(function () {
+    Route::get('aperturarprograma/disponibles', [AperturarProgramaController::class, 'aperturasDisponibles']);
+    Route::get('aperturaPrograma/grados', [AperturarProgramaController::class, 'indexTipoGrado']);
+    
     Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
     Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
     Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
     Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
-    Route::get('aperturarprograma/disponibles', [AperturarProgramaController::class, 'aperturasDisponibles']);
 });
