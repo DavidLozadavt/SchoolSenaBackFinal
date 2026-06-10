@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Company;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -27,12 +28,13 @@ class WompiConfigProvider
 
     public function getPublicConfig(int $idEmpresa): ?array
     {
-        $cacheKey = "wompi_public_config_{$idEmpresa}";
+        $erpEmpresaId = $this->resolveErpEmpresaId($idEmpresa);
+        $cacheKey = "wompi_public_config_{$idEmpresa}_{$erpEmpresaId}";
 
-        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($idEmpresa) {
+        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($erpEmpresaId, $idEmpresa) {
             try {
                 $response = Http::timeout(10)->get(
-                    "{$this->erpBaseUrl}/empresa/{$idEmpresa}/pasarela-pago/publica"
+                    "{$this->erpBaseUrl}/empresa/{$erpEmpresaId}/pasarela-pago/publica"
                 );
 
                 if ($response->successful()) {
@@ -54,13 +56,14 @@ class WompiConfigProvider
 
     public function getPrivateConfig(int $idEmpresa): ?array
     {
-        $cacheKey = "wompi_private_config_{$idEmpresa}";
+        $erpEmpresaId = $this->resolveErpEmpresaId($idEmpresa);
+        $cacheKey = "wompi_private_config_{$idEmpresa}_{$erpEmpresaId}";
 
-        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($idEmpresa) {
+        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($erpEmpresaId, $idEmpresa) {
             try {
                 $response = Http::timeout(10)
                     ->withHeaders($this->erpServiceHeaders())
-                    ->get("{$this->erpBaseUrl}/empresa/{$idEmpresa}/pasarela-pago/privada");
+                    ->get("{$this->erpBaseUrl}/empresa/{$erpEmpresaId}/pasarela-pago/privada");
 
                 if ($response->successful()) {
                     return $response->json();
@@ -81,8 +84,51 @@ class WompiConfigProvider
 
     public function clearCache(int $idEmpresa): void
     {
-        Cache::forget("wompi_public_config_{$idEmpresa}");
-        Cache::forget("wompi_private_config_{$idEmpresa}");
+        $erpEmpresaId = $this->resolveErpEmpresaId($idEmpresa);
+        Cache::forget("wompi_public_config_{$idEmpresa}_{$erpEmpresaId}");
+        Cache::forget("wompi_private_config_{$idEmpresa}_{$erpEmpresaId}");
+        Cache::forget("erp_empresa_id_for_school_{$idEmpresa}");
+    }
+
+    /**
+     * School y ERP pueden tener distinto ID para la misma institución.
+     * Se resuelve por NIT contra el listado de empresas del ERP.
+     */
+    public function resolveErpEmpresaId(int $schoolCompanyId): int
+    {
+        $cacheKey = "erp_empresa_id_for_school_{$schoolCompanyId}";
+
+        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($schoolCompanyId) {
+            $schoolCompany = Company::find($schoolCompanyId);
+            $nit = trim((string) ($schoolCompany?->nit ?? ''));
+
+            if ($nit === '') {
+                return $schoolCompanyId;
+            }
+
+            try {
+                $response = Http::timeout(10)->get("{$this->erpBaseUrl}/list_companies");
+
+                if ($response->successful()) {
+                    $companies = $response->json();
+                    if (!is_array($companies)) {
+                        return $schoolCompanyId;
+                    }
+
+                    foreach ($companies as $company) {
+                        if (trim((string) ($company['nit'] ?? '')) === $nit) {
+                            return (int) $company['id'];
+                        }
+                    }
+                }
+
+                Log::warning("WompiConfigProvider: no se encontró empresa ERP con NIT {$nit} (School id {$schoolCompanyId})");
+            } catch (\Throwable $e) {
+                Log::error("WompiConfigProvider: error resolviendo empresa ERP para School {$schoolCompanyId}: " . $e->getMessage());
+            }
+
+            return $schoolCompanyId;
+        });
     }
 
     public function generateIntegrityHash(

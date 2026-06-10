@@ -262,12 +262,11 @@ class WompiWebhookController extends Controller
         $type = strtoupper($paymentMethodType);
 
         $id = match ($type) {
-            'PSE' => MedioPago::where('detalleMedioPago', 'PSE')->value('id'),
-            'CARD', 'CREDIT_CARD' => MedioPago::where('detalleMedioPago', 'like', '%TARJETA%')->value('id')
-                ?? MedioPago::where('detalleMedioPago', 'WOMPI')->value('id'),
-            'NEQUI' => MedioPago::where('detalleMedioPago', 'like', '%NEQUI%')->value('id'),
-            default => MedioPago::where('detalleMedioPago', 'WOMPI')->value('id')
-                ?? MedioPago::where('detalleMedioPago', 'PAGO EN LINEA')->value('id'),
+            'PSE' => MedioPago::TRANSFERENCIA,
+            'CARD', 'CREDIT_CARD' => MedioPago::where('detalleMedioPago', 'TARJETA CREDITO')->value('id')
+                ?? MedioPago::where('detalleMedioPago', 'TARJETA DEBITO')->value('id'),
+            'NEQUI' => MedioPago::TRANSFERENCIA,
+            default => MedioPago::TRANSFERENCIA,
         };
 
         if ($id) {
@@ -276,7 +275,7 @@ class WompiWebhookController extends Controller
 
         Log::warning("WompiWebhook: medio de pago no encontrado para tipo {$type}");
 
-        return (int) (MedioPago::where('detalleMedioPago', 'EFECTIVO')->value('id') ?? MedioPago::EFECTIVO);
+        return MedioPago::EFECTIVO;
     }
 
     protected function resolverTipoPagoContado(): ?int
