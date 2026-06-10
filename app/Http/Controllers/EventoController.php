@@ -134,6 +134,14 @@ class EventoController extends Controller
                 $this->crearHistoriaMultimedia($evento, $request->input('cancion'));
             }
 
+            // Asociar actividades/items existentes
+            if ($request->has('actividades_ids')) {
+                $actividadesIds = json_decode($request->input('actividades_ids'), true) ?: [];
+                if (!empty($actividadesIds)) {
+                    \App\Models\Item::whereIn('id', $actividadesIds)->update(['idEvento' => $evento->idEvento]);
+                }
+            }
+
             DB::commit();
 
             return response()->json([
@@ -197,6 +205,17 @@ class EventoController extends Controller
 
         if (filter_var($request->input('crearHistoria'), FILTER_VALIDATE_BOOLEAN)) {
             $this->crearHistoriaMultimedia($evento, $request->input('cancion'));
+        }
+
+        // Asociar actividades/items existentes (y desasociar las que ya no están seleccionadas)
+        if ($request->has('actividades_ids')) {
+            $actividadesIds = json_decode($request->input('actividades_ids'), true) ?: [];
+            // Desasociar todas las anteriores de este evento
+            \App\Models\Item::where('idEvento', $evento->idEvento)->update(['idEvento' => null]);
+            // Asociar las nuevas seleccionadas
+            if (!empty($actividadesIds)) {
+                \App\Models\Item::whereIn('id', $actividadesIds)->update(['idEvento' => $evento->idEvento]);
+            }
         }
 
         return response()->json([
