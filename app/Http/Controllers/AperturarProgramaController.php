@@ -4,17 +4,26 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\AperturarProgramaResource;
 use App\Models\AperturarPrograma;
+use App\Models\TipoGrado;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class AperturarProgramaController extends Controller
 {
     public function index(): JsonResponse
     {
-        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre'])->get();
+        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'grado:id,nombreTipoGrado', 'cortes'])->latest()->get();
 
         return response()->json(AperturarProgramaResource::collection($data));
+    }
+
+    public function indexTipoGrado(): JsonResponse
+    {
+        $data = TipoGrado::all();
+
+        return response()->json($data);
     }
 
     public function aperturasDisponibles(Request $request): JsonResponse
@@ -24,7 +33,8 @@ class AperturarProgramaController extends Controller
             'idSede' => 'nullable|exists:sedes,id'
         ]);
 
-        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'jornada:id,nombreJornada'])
+        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'jornada:id,nombreJornada', 'grado:id,nombreTipoGrado', 'cortes'])
+            ->latest()
             ->where('fechaFinalPlanMejoramiento', '>=', Carbon::today()->toDateString())
             ->where('idPrograma', $validated['idPrograma'])
             ->when(isset($validated['idSede']), function ($query) use ($validated) {
@@ -39,7 +49,8 @@ class AperturarProgramaController extends Controller
     {
         $validated = $request->validate([
             'observacion' => 'nullable|string|max:1000',
-
+            'nombre' => 'required|string|max:255',
+            'idTipoGrado' => 'required|exists:tipoGrado,id',
             'idPeriodo' => 'required|exists:periodo,id',
             'idPrograma' => 'required|exists:programa,id',
             'estado' => 'required|in:ACTIVO,INACTIVO,OCULTO,PENDIENTE,RECHAZADO,APROBADO,CANCELADO,REPROBADO,CERRADO,ACEPTADO,LEIDO,EN ESPERA,INSCRIPCION,MATRICULADO,ABIERTO,EN CURSO,POR ACTUALIZAR,CURSANDO,ENTREVISTA,SIN ENTREVISTA,JUSTIFICADO',
@@ -53,28 +64,38 @@ class AperturarProgramaController extends Controller
             'fechaInicialPlanMejoramiento' => 'required|date',
             'fechaFinalPlanMejoramiento' => 'required|date|after_or_equal:fechaInicialPlanMejoramiento',
             'tipoCalificacion' => 'required|in:NUMERICO,DESEMPEÑO',
-            //Diferecnia al sena:
             'pension' => 'nullable|boolean',
             'valorPension' => 'nullable|numeric',
             'diasMoraMatricula' => 'nullable|integer',
             'porcentajeMoraPension' => 'nullable|numeric',
             'diaCobro' => 'nullable|integer',
-            //Nuevo campo
             'idJornada' => 'required|exists:jornadas,id'
         ]);
+        return DB::transaction(function () use ($validated, $request) {
+            $apertura = AperturarPrograma::create($validated);
 
-        $apertura = AperturarPrograma::create($validated);
+            if (isset($request->cortes) && is_array($request->cortes)) {
+                foreach ($request->cortes as $corteData) {
+                    $apertura->cortes()->create([
+                        'numero' => $corteData['numero'],
+                        'fechaInicial' => $corteData['fechaInicial'],
+                        'fechaFinal' => $corteData['fechaFinal'],
+                        'porcentaje' => $corteData['porcentaje'],
+                    ]);
+                }
+            }
 
-        return response()->json([
-            'message' => 'Programa aperturado correctamente',
-            'data' => $apertura
-        ], 201);
+            return response()->json([
+                'message' => 'Programa aperturado correctamente',
+                'data' => $apertura
+            ], 201);
+        });
     }
 
 
     public function show($id): JsonResponse
     {
-        $apertura = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre'])->findOrFail($id);
+        $apertura = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'grado:id,nombreTipoGrado', 'cortes'])->findOrFail($id);
 
         return response()->json(new AperturarProgramaResource($apertura));
     }
@@ -85,6 +106,8 @@ class AperturarProgramaController extends Controller
 
         $validated = $request->validate([
             'observacion' => 'nullable|string|max:1000',
+            'nombre' => 'nullable|string|max:255',
+            'idTipoGrado' => 'nullable|exists:tipoGrado,id',
             'idPeriodo' => 'nullable|exists:periodo,id',
             'idPrograma' => 'nullable|exists:programa,id',
             'estado' => 'nullable|in:ACTIVO,INACTIVO,OCULTO,PENDIENTE,RECHAZADO,APROBADO,CANCELADO,REPROBADO,CERRADO,ACEPTADO,LEIDO,EN ESPERA,INSCRIPCION,MATRICULADO,ABIERTO,EN CURSO,POR ACTUALIZAR,CURSANDO,ENTREVISTA,SIN ENTREVISTA,JUSTIFICADO',
@@ -109,6 +132,22 @@ class AperturarProgramaController extends Controller
         ]);
 
         $apertura->update($validated);
+
+        // Manejar cortes: Eliminar los existentes y crear los nuevos
+        if (isset($request->cortes) && is_array($request->cortes)) {
+            // Eliminar cortes existentes
+            $apertura->cortes()->delete();
+
+            // Crear nuevos cortes
+            foreach ($request->cortes as $corteData) {
+                $apertura->cortes()->create([
+                    'numero' => $corteData['numero'],
+                    'fechaInicial' => $corteData['fechaInicial'],
+                    'fechaFinal' => $corteData['fechaFinal'],
+                    'porcentaje' => $corteData['porcentaje'],
+                ]);
+            }
+        }
 
         return response()->json([
             'message' => 'Registro actualizado correctamente',

@@ -19,7 +19,7 @@ class Ficha extends Model
         'idInfraestructura',
         'idSede',
         'idRegional',
-        'idTipoGrado',
+        'idGrado',
         'porcentajeEjecucion',
     ];
 
@@ -82,8 +82,8 @@ class Ficha extends Model
         return $this->hasMany(Acta::class, 'idFicha');
     }
 
-    public function tipoGrado()
+    public function grado()
     {
-        return $this->belongsTo(TipoGrado::class, 'idTipoGrado');
+        return $this->belongsTo(Grado::class, 'idGrado');
     }
 }
