@@ -12,6 +12,7 @@ use App\Models\Status;
 use App\Models\SesionMateria;
 use App\Enums\EstadoSesionMateria;
 use App\Models\CentrosFormacion;
+use App\Models\Grado;
 use App\Util\KeyUtil;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -44,39 +45,58 @@ class FichaController extends Controller
         $validated = $request->validate([
             // Ficha
             'idAsignacion' => 'required|exists:aperturarprograma,id',
-            'cantidadGrados' => 'required|integer|min:1',
-            'idTipoGrado' => 'required|exists:tipoGrado,id'
+            'cantidadGrados' => 'required|integer|min:1'
         ]);
 
         $apertura = AperturarPrograma::findOrFail($validated['idAsignacion']);
         $idRegional = KeyUtil::idCompany();
 
+        $grados = Grado::where('idTipoGrado', $apertura->idTipoGrado??5) // Si no tiene tipo grado asignado, tomar el tipo grado 5 (año)
+            ->orderBy('numeroGrado', 'asc')
+            ->get();
+
+        // encontrar registros dentro de la apertura
+        $gradosExistentes = Ficha::where('idAsignacion', $validated['idAsignacion'])->count();
+
+        if ($gradosExistentes + $validated['cantidadGrados'] > $grados->count()) {
+            return response()->json([
+                'message' => 'Demasiados grados para registrar en este programa',
+            ], 400);
+        }
+
+        DB::beginTransaction();
         try {
-            for ($i = 1; $i <= $validated['cantidadGrados']; $i++) {
+            for ($i = 0; $i < $validated['cantidadGrados']; $i++) {
+                $nombreGrado = $grados[$gradosExistentes + $i]->nombreGrado;
+                $idGrado = $grados[$gradosExistentes + $i]->id;
+
                 Ficha::create([
                     'idAsignacion' => $validated['idAsignacion'],
-                    'codigo' => str_pad($i, 2, '0', STR_PAD_LEFT),
+                    'codigo' => $nombreGrado,
                     'idSede' => $apertura->idSede ?? null,
                     'documento' => null,
                     'idInfraestructura' => null,
                     'porcentajeEjecucion' => 100,
                     'idRegional' => $idRegional ?? null,
-                    'idTipoGrado' => $validated['idTipoGrado'] ?? null,
+                    'idGrado' => $idGrado,
                 ]);
             }
         } catch (\Exception $e) {
-            DB::rollBack(); 
+            DB::rollBack();
             return response()->json([
                 'message' => 'Error al crear los grupos',
-                ], 400
-            );
+                'error' => $e->getMessage()
+            ], 500);
         }
+
+        DB::commit();
 
         return response()->json([
             'message' => 'Grupos creados correctamente',
         ], 201);
     }
 
+    // este metodo hace una copia de una ficha seleccionada, pero solo copia las materias asignadas
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -86,7 +106,7 @@ class FichaController extends Controller
             'codigo' => 'required|string',
             'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'documento' => 'nullable|file|mimes:pdf|max:5120',
-            'idPrograma' => 'required|exists:programa,id',
+            'idFicha' => 'required|exists:ficha,id', // la ficha de la que vamos a copiar las materias
             'idInfraestructura' => 'required|exists:infraestructura,id',
         ]);
 
@@ -107,7 +127,9 @@ class FichaController extends Controller
 
             $sede = Sede::findOrFail($validated['idSede']);
             $centro = CentrosFormacion::findOrFail($sede->idCentroFormacion);
-            $programa = Programa::findOrFail($validated['idPrograma']);
+            $asignacion = AperturarPrograma::findOrFail($validated['idAsignacion']);
+            $programa = Programa::findOrFail($asignacion->idPrograma);
+            $fichaCopia = Ficha::findOrFail($validated['idFicha']);
 
             $codigoFicha = $validated['codigo'];
             //Limpiar los nombres:
@@ -135,6 +157,7 @@ class FichaController extends Controller
                 'idInfraestructura' => $validated['idInfraestructura'] ?? null,
                 'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
                 'idRegional' => $centro->idEmpresa,
+                'idGrado' => $fichaCopia->idGrado,
             ]);
 
 
@@ -499,15 +522,23 @@ class FichaController extends Controller
         }
     }
 
-    public function validarCodigo($codigo)
+    public function validarCodigo(Request $request)
     {
-        $existe = Ficha::where('codigo', $codigo)->exists();
+        $validated = $request->validate([
+            'codigo' => 'required',
+            'idAsignacion' => 'required'
+        ]);
+
+        $existe = Ficha::where('codigo', $validated['codigo'])
+            ->where('idAsignacion', $validated['idAsignacion'])
+            ->exists();
 
         return response()->json([
-            'codigo' => $codigo,
+            'codigo' => $validated['codigo'],
             'existe' => $existe
         ]);
     }
+
     public function show($id): JsonResponse
     {
         try {
@@ -556,9 +587,7 @@ class FichaController extends Controller
             'codigo' => ['required','string'],
             'porcentajeEjecucion' => 'nullable|numeric|min:1|max:100',
             'documento' => 'nullable|file|mimes:pdf|max:5120',
-            'idPrograma' => 'required|exists:programa,id',
-            'idInfraestructura' => 'required|exists:infraestructura,id',
-            'idTipoGrado' => 'nullable|exists:tipoGrado,id',
+            'idInfraestructura' => 'nullable|exists:infraestructura,id',
         ]);
 
         DB::beginTransaction();
@@ -601,7 +630,7 @@ class FichaController extends Controller
                 $sede = Sede::findOrFail($validated['idSede']);
 
                 $centro = CentrosFormacion::findOrFail($sede->idCentroFormacion);
-                $programa = Programa::findOrFail($validated['idPrograma']);
+                $programa = Programa::findOrFail($apertura->idPrograma);
 
                 $sedeName = $sanitize($sede->nombre);
                 $programaName = $sanitize($programa->nombrePrograma);
@@ -682,14 +711,12 @@ class FichaController extends Controller
                 'porcentajeEjecucion' => $validated['porcentajeEjecucion'] ?? 100,
                 'documento' => $rutaDocumento,
                 'idAsignacion' => $validated['idAsignacion'],
-                'idTipoGrado' => $validated['idTipoGrado'] ?? null,
             ]);
 
             DB::commit();
 
             // Recargar las relaciones
             $ficha->load([
-                'tipoGrado',
                 'asignacion',
                 'sede',
                 'infraestructura',
@@ -781,11 +808,6 @@ class FichaController extends Controller
 
             // Eliminar la ficha (que tiene FK hacia apertura)
             $ficha->delete();
-
-            // Eliminar la apertura asociada
-            if ($idApertura) {
-                AperturarPrograma::where('id', $idApertura)->delete();
-            }
 
             DB::commit();
 

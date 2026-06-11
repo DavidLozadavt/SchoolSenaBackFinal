@@ -18,12 +18,14 @@ class AperturarPrograma extends Model
     ];
 
     protected $fillable = [
+        'nombre',
         'observacion',
         'idPeriodo',
         'idPrograma',
         'estado',
         'idJornada',
         'idSede',
+        'idTipoGrado',
         'pension',
         'diaCobro',
         'fechaInicialClases',
@@ -43,6 +45,7 @@ class AperturarPrograma extends Model
     ];
 
     protected $casts = [
+        'nombre' => 'string',
         'pension' => 'boolean',
         'fechaInicialClases' => 'date',
         'fechaFinalClases' => 'date',
@@ -73,7 +76,7 @@ class AperturarPrograma extends Model
     {
         return $this->belongsTo(Sede::class, 'idSede');
     }
-    
+
     public function fichas()
     {
         return $this->hasMany(Ficha::class, 'idAsignacion', 'id');
@@ -82,5 +85,13 @@ class AperturarPrograma extends Model
     public function jornada()
     {
         return $this->belongsTo(Jornada::class, 'idJornada');
+    }
+    public function grado()
+    {
+        return $this->belongsTo(TipoGrado::class, 'idTipoGrado');
+    }
+    public function cortes()
+    {
+        return $this->hasMany(Corte::class, 'idApertura');
     }
 }

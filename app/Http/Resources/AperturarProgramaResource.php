@@ -10,6 +10,7 @@ class AperturarProgramaResource extends JsonResource
     {
         return array_filter([
             'id' => $this->id,
+            'nombre' => $this->nombre,
             'observacion' => $this->observacion,
             'estado' => $this->estado,
 
@@ -34,6 +35,18 @@ class AperturarProgramaResource extends JsonResource
             'programa' => $this->whenLoaded('programa'),
             'sede' => $this->whenLoaded('sede'),
             'jornada' => $this->whenLoaded('jornada'),
-        ], fn ($value) => !is_null($value));
+            'grado' => $this->whenLoaded('grado'),
+            'cortes' => $this->whenLoaded('cortes', function () {
+                return $this->cortes->map(function ($corte) {
+                    return [
+                        'id' => $corte->id,
+                        'numero' => $corte->numero,
+                        'fechaInicial' => $corte->fechaInicial,
+                        'fechaFinal' => $corte->fechaFinal,
+                        'porcentaje' => $corte->porcentaje,
+                    ];
+                });
+            }),
+        ], fn($value) => !is_null($value));
     }
 }

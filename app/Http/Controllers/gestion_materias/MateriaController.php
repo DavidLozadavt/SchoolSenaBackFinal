@@ -16,13 +16,16 @@ use Illuminate\Database\QueryException;
 use App\Models\Ficha;
 use App\Http\Controllers\Controller;
 use App\Models\AgregarMateriaPrograma;
+use App\Models\AperturarPrograma;
 use App\Models\AsignacionContratoAreaConocimiento;
 use App\Models\Contract;
+use App\Models\Grado;
 use App\Models\GradoMateria;
 use App\Models\GradoPrograma;
 use App\Models\HorarioMateria;
 use App\Models\MatriculaAcademica;
 
+use function PHPSTORM_META\map;
 use function PHPUnit\Framework\isEmpty;
 
 class MateriaController extends Controller
@@ -41,85 +44,111 @@ class MateriaController extends Controller
      * @return \Illuminate\Http\Response
      */
 
-    public function getAllCompetencesByProgram(Request $request): JsonResponse
+    public function getAllCompetences(): JsonResponse
     {
-        $idPrograma = $request->input('idPrograma');
+        $materias = Materia::where('idMateriaPadre', null)->get();
+        $resultado = $materias->map(function ($materia) {
+            return [
+                'id' => $materia->id,
+                'nombreMateria' => $materia->nombreMateria,
+                'codigo' => $materia->codigo,
+                'horas' => $materia->horas_programa,
+                'descripcion' => $materia->descripcion,
+                'isCompleta' => false,
+                'estado' => '',
+                'idCategoriaFormacion' => $materia->idCategoriaFormacion
+            ];
+        });
+        return response()->json($resultado);
+    }
+
+
+    public function getAllCompetencesByFicha(Request $request): JsonResponse
+    {
         $idFicha = $request->input('idFicha');
         try {
-            // Obtener todos los estados de matrícula de la ficha para determinar asignación y avance
-            // Esta es ahora nuestra única fuente de verdad para este reporte
-            $matriculasFicha = MatriculaAcademica::where('idFicha', $idFicha)
-                ->select('idMateria', 'estado')
+            $ficha = Ficha::findOrFail($idFicha);
+            $apertura = AperturarPrograma::findOrFail($ficha->idAsignacion);
+            $gradoPrograma = GradoPrograma::where('idGrado', $ficha->idGrado)
+                ->where('idPrograma', $apertura->idPrograma)
+                ->first();
+            
+            // obtener materias asociadas al grado (PRIMERO, SEGUNDO, ETC)
+            $gradosMateria = GradoMateria::where('idGradoPrograma', $gradoPrograma->id)
+                ->whereHas('materia', function ($query) {
+                    $query->whereNull('idMateriaPadre');
+                })
                 ->with('materia')
                 ->get();
 
-            if ($matriculasFicha->isEmpty()) {
-                return response()->json([]);
-            }
+            $resultado = $gradosMateria->map(function ($gradoMateria) use ($apertura, $ficha, $gradoPrograma) {
+                $materia = $gradoMateria->materia;
+                $fechaFinalClases = $apertura->fechaFinalClases ?? null;
+                $fechaActual = Carbon::now();
 
-            // Agrupamos por RAP para las validaciones de estado individuales
-            $matriculasAgrupadas = $matriculasFicha->groupBy('idMateria');
+                // Obtener los IDs de las materias hijas (RAPs)
+                $hijosMateriaIds = Materia::where('idMateriaPadre', $materia->id)->pluck('id');
+                
+                // Obtener los gradoMateria correspondientes a los hijos y al padre
+                $gradoMateriaIds = GradoMateria::where('idGradoPrograma', $gradoPrograma->id)
+                    ->whereIn('idMateria', $hijosMateriaIds)
+                    ->pluck('id')
+                    ->push($gradoMateria->id);
 
-            // Identificamos las competencias padre (competencias) asociadas a estos RAPs matriculados
-            // Obtenemos los padres de las materias encontradas en la matrícula
-            $padresIds = $matriculasFicha->map(fn($m) => $m->materia?->idMateriaPadre)->filter()->unique();
-            $materiasPrograma = Materia::whereIn('materia.id', $padresIds)
-                ->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
-                ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
-                ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa')
-                ->get();
+                // Obtener horarios asociados
+                $horarios = HorarioMateria::where('idFicha', $ficha->id)
+                    ->whereIn('idGradoMateria', $gradoMateriaIds)
+                    ->with(['contrato.persona', 'asignacionSesion.contrato.persona'])
+                    ->get();
 
-            // Obtenemos todos los RAPs posibles de estas competencias para cruzar con la matrícula
-            $todosRaps = Materia::whereIn('idMateriaPadre', $padresIds)
-                ->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
-                ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
-                ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa')
-                ->get()
-                ->groupBy('idMateriaPadre');
+                $asignados = $horarios->filter(function ($h) {
+                    return $h->estado !== EstadoHorarioMateria::PENDIENTE;
+                })->map(function ($h) {
+                    $persona = $h->contrato ? $h->contrato->persona : null;
+                    return [
+                        'id' => $h->id,
+                        'estado' => $h->estado,
+                        'idContrato' => $h->idContrato,
+                        'instructor' => $persona,
+                        'persona' => $persona,
+                        'asignacionSesion' => HorarioMateria::asignacionesEspecialesApi($h)
+                    ];
+                })->values()->all();
 
-            // Mapear cada competencia encontrada
-            $resultado = $materiasPrograma->map(function ($materia) use ($todosRaps, $matriculasAgrupadas) {
-                // RAPs de esta competencia particular
-                $rapsDeEstaCompetencia = $todosRaps->get($materia->id, collect());
-                $rapsIds = $rapsDeEstaCompetencia->pluck('id');
-
-                // Solo consideramos los RAPs que están realmente presentes en la matrícula de esta ficha
-                $rapsIdsEnMatricula = $rapsIds->filter(fn($id) => $matriculasAgrupadas->has($id));
-
-                if ($rapsIdsEnMatricula->isEmpty()) {
-                    return null;
-                }
-
-                $totalRaps = $rapsIdsEnMatricula->count();
-                $rapsFinalizados = 0;
-
-                foreach ($rapsIdsEnMatricula as $rapId) {
-                    $estudiantes = $matriculasAgrupadas->get($rapId, collect());
-                    // Si al menos 5 estudiantes aparecen como EVALUADO, FINALIZADO o APROBADO, se cuenta el RAP como completado
-                    if ($estudiantes->filter(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']))->count() >= 5) {
-                        $rapsFinalizados++;
-                    }
-                }
-
-                $estaFinalizada = ($rapsFinalizados >= $totalRaps);
-                if ($totalRaps === 0) $estaFinalizada = false;
+                $sinAsignar = $horarios->filter(function ($h) {
+                    return $h->estado === EstadoHorarioMateria::PENDIENTE;
+                })->map(function ($h) {
+                    return [
+                        'id' => $h->id,
+                        'estado' => $h->estado,
+                        'idContrato' => $h->idContrato,
+                        'instructor' => null,
+                        'persona' => null,
+                        'asignacionSesion' => []
+                    ];
+                })->values()->all();
 
                 return [
                     'id' => $materia->id,
                     'nombreMateria' => $materia->nombreMateria,
                     'codigo' => $materia->codigo,
-                    'horas' => $materia->horas_programa,
+                    'horas' => $materia->horas,
                     'descripcion' => $materia->descripcion,
-                    'isCompleta' => $estaFinalizada,
-                    'estado' => $estaFinalizada ? 'FINALIZADO' : 'PENDIENTE',
-                    'idCategoriaFormacion' => $materia->idCategoriaFormacion
+                    'isCompleta' => $fechaFinalClases ? $fechaActual->greaterThanOrEqualTo(Carbon::parse($fechaFinalClases)) : false,
+                    'estado' => $materia->estado ?? '',
+                    'idGradoMateria' => $gradoMateria->id,
+                    'idMateriaPadre' => $materia->idMateriaPadre,
+                    'idCategoriaFormacion' => $materia->idCategoriaFormacion,
+                    'horarios' => [
+                        'asignados' => $asignados,
+                        'sinAsignar' => $sinAsignar
+                    ]
                 ];
-            })->filter()->values();
-
+            });
             return response()->json($resultado);
         } catch (\Throwable $error) {
             return response()->json([
-                'message' => 'No se pudieron cargar las competencias',
+                'message' => 'No se pudieron cargar las materias',
                 'error' => $error->getMessage()
             ]);
         }
@@ -304,18 +333,9 @@ class MateriaController extends Controller
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
                 'idAreaConocimiento' => $datos['idAreaConocimiento'],
+                'codigo' => $datos['codigo'],
+                'creditos' => $datos['creditos'],
             ]);
-
-            if (isset($datos['idPrograma'])) {
-                $materiaPrograma = AgregarMateriaPrograma::where('idMateria', $materia->id)
-                    ->where('idPrograma', $datos['idPrograma'])
-                    ->firstOrFail();
-
-                $materiaPrograma->update([
-                    'horas' => $datos['horas'],
-                    'creditos' => $datos['creditos']
-                ]);
-            }
 
             DB::commit();
 
@@ -354,12 +374,11 @@ class MateriaController extends Controller
     {
         $idMateriaPadre = $request->input('idMateriaPadre');
         $idFicha = $request->input('idFicha');
-        $idGradoPrograma = $request->input('idGradoPrograma');
 
         // Validar TODOS los parámetros requeridos
         if (!$idMateriaPadre) {
             return response()->json([
-                'message' => 'ID de competencia padre no proporcionado'
+                'message' => 'Competencia padre no proporcionado'
             ], 400);
         }
 
@@ -369,13 +388,7 @@ class MateriaController extends Controller
             ], 400);
         }
 
-        if (!$idGradoPrograma) {
-            return response()->json([
-                'message' => 'ID de trimestre no proporcionado'
-            ], 400);
-        }
-
-        // Cargar la ficha para obtener el porcentaje de ejecución e idPrograma
+        // Cargar la ficha
         $ficha = Ficha::with('aperturarPrograma')->find($idFicha);
         if (!$ficha) {
             return response()->json([
@@ -384,170 +397,71 @@ class MateriaController extends Controller
         }
 
         $idPrograma = $ficha->aperturarPrograma->idPrograma;
+        $gradoPrograma = GradoPrograma::where('idGrado', $ficha->idGrado)
+          ->where('idPrograma', $idPrograma)
+          ->firstOrFail();
         // Buscar los RAPs asignados a esa ficha, trimestre y competencia padre
-        $raps = GradoMateria::where('idGradoPrograma', $idGradoPrograma)
+        $raps = GradoMateria::where('idGradoPrograma', $gradoPrograma->id)
             ->whereHas('materia', function ($q) use ($idMateriaPadre) {
                 $q->where('idMateriaPadre', $idMateriaPadre); // Solo materias hijas de esta competencia
             })
-            ->whereHas('horarioMateria', function ($q) use ($idFicha) {
-                $q->where('idFicha', $idFicha); // De la ficha seleccionada
-            })
-            ->with([
-                'materia' => function ($q) use ($idPrograma) {
-                    $q->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
-                        ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
-                        ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa');
-                },
-                'horarioMateria' => function ($q) use ($idFicha) {
-                    $q->where('idFicha', $idFicha)
-                        ->with(['dia', 'contrato.persona', 'asignacionSesion.contrato.persona'])
-                        ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($sq) {
-                            $sq->whereNotNull('fechaSesion');
-                        }]);
-                },
-                'gradoPrograma.grado'
-            ])
-            ->get();
-
-        // Ordenar los RAPs por el número despues del -
-        $raps = $raps->sortBy(function ($rap) {
-            $nombre = $rap->materia->nombreMateria;
-            if (preg_match('/-\s*(\d+)/', $nombre, $matches)) {
-                return $matches[1];
-            }
-            return '';
-        })->values();
-
-        // Obtener todos los estados de matrícula para determinar la finalización
-        $matriculasFicha = MatriculaAcademica::where('idFicha', $idFicha)
-            ->select('idMateria', 'estado')
+            ->with('materia')
             ->get()
-            ->groupBy('idMateria');
+            ->map(function ($gradoMateria) use ($ficha) {
+                $materia = $gradoMateria->materia;
+                $horarios = HorarioMateria::where('idFicha', $ficha->id)
+                  ->where('idGradoMateria', $gradoMateria->id)
+                  ->with(['contrato.persona', 'asignacionSesion.contrato.persona'])
+                  ->get();
 
-        $porcentajeEjecucion = $ficha ? ($ficha->porcentajeEjecucion ?? 100) : 100;
+                $asignados = $horarios->filter(function ($h) {
+                    return $h->estado !== EstadoHorarioMateria::PENDIENTE;
+                })->map(function ($h) {
+                    $persona = $h->contrato ? $h->contrato->persona : null;
+                    return [
+                        'id' => $h->id,
+                        'estado' => $h->estado,
+                        'idContrato' => $h->idContrato,
+                        'instructor' => $persona,
+                        'persona' => $persona,
+                        'asignacionSesion' => HorarioMateria::asignacionesEspecialesApi($h)
+                    ];
+                })->values()->all();
 
-        // Cargamos todos los horarios de la ficha con sus conteos de sesiones (igual que getTrimestresFicha)
-        $todosHorariosFicha = HorarioMateria::where('idFicha', $idFicha)
-            ->with(['gradoMateria', 'dia', 'contrato.persona', 'asignacionSesion.contrato.persona'])
-            ->withCount(['sesionMaterias as sesiones_realizadas_count' => function ($q) {
-                $q->whereNotNull('fechaSesion');
-            }])
-            ->get();
+                $sinAsignar = $horarios->filter(function ($h) {
+                    return $h->estado === EstadoHorarioMateria::PENDIENTE;
+                })->map(function ($h) {
+                    return [
+                        'id' => $h->id,
+                        'estado' => $h->estado,
+                        'idContrato' => $h->idContrato,
+                        'instructor' => null,
+                        'persona' => null,
+                        'asignacionSesion' => []
+                    ];
+                })->values()->all();
 
-        // Formatear la respuesta
-        $resultado = $raps->map(function ($gradoMateria) use ($todosHorariosFicha, $matriculasFicha, $porcentajeEjecucion) {
-            $materiaId = $gradoMateria->idMateria;
-            // Filtramos de todos los horarios de la ficha los que corresponden a esta materia
-            $todosLosHorariosFicha = $todosHorariosFicha->filter(function ($h) use ($materiaId) {
-                return $h->gradoMateria->idMateria == $materiaId;
+                return [
+                    'id' => $materia->id,
+                    'nombreMateria' => $materia->nombreMateria,
+                    'codigo' => $materia->codigo,
+                    'horas' => $materia->horas,
+                    'descripcion' => $materia->descripcion,
+                    'isCompleta' => false,
+                    'horarios' => [
+                        'asignados' => $asignados,
+                        'sinAsignar' => $sinAsignar
+                    ],
+                    'estado' => $materia->estado ?? '',
+                    'idGradoMateria' => $gradoMateria->id,
+                    'idMateriaPadre' => $materia->idMateriaPadre,
+                    'idCategoriaFormacion' => $materia->idCategoriaFormacion
+                ];
             });
 
-            $horasActuales = 0;
-            $fechaFinalRap = null;
-
-            foreach ($todosLosHorariosFicha as $horario) {
-                if ($horario->horaInicial && $horario->horaFinal) {
-                    $hI = Carbon::parse($horario->horaInicial);
-                    $hF = Carbon::parse($horario->horaFinal);
-                    $duracionSesion = $hF->diffInMinutes($hI, true) / 60;
-
-                    $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
-                    $horasActuales += $sesionesDadas * $duracionSesion;
-                }
-                if ($horario->fechaFinal != null && $horario->estado != EstadoHorarioMateria::PENDIENTE) {
-                    $fF = Carbon::parse($horario->fechaFinal);
-                    $fechaFinalRap = is_null($fechaFinalRap) ? $fF : ($fF > $fechaFinalRap ? $fF : $fechaFinalRap);
-                }
-            }
-
-            // Horas requeridas del RAP ajustadas por el % de ejecución de la ficha
-            $horasRap = $gradoMateria->materia->horas_programa ?? 0;
-            $horasRequeridas = $horasRap * ($porcentajeEjecucion / 100);
-
-            // Detección de estado:
-            // Por matrícula (FINALIZADO / EVALUADO / APROBADO con al menos 5 aprendices), o
-            // Por horas ejecutadas >= horas requeridas con el % de ejecución
-            $finalizadoPorMatricula = $matriculasFicha->get($materiaId, collect())
-                ->filter(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']))->count() >= 5;
-
-            $finalizadoPorHoras = $horasRequeridas > 0 && $horasActuales >= $horasRequeridas;
-
-            $estaFinalizado = $finalizadoPorMatricula || $finalizadoPorHoras;
-
-            return [
-                'id' => $gradoMateria->id,
-                'idGradoMateria' => $gradoMateria->id,
-                'idMateriaPadre' => $gradoMateria->materia->idMateriaPadre,
-                'idMateria' => $gradoMateria->idMateria,
-                'nombre' => $gradoMateria->materia->nombreMateria ?? 'Sin nombre',
-                'descripcion' => $gradoMateria->materia->descripcion ?? '',
-                'codigo' => $gradoMateria->materia->codigo ?? '',
-                'estado' => $estaFinalizado ? 'FINALIZADO' : 'PENDIENTE',
-                'fechaFinalRap' => $fechaFinalRap instanceof Carbon ? $fechaFinalRap->format('Y-m-d') : null,
-                'horas' => $gradoMateria->materia->horas_programa ?? 0,
-                'horasActuales' => round($horasActuales, 2),
-                'horasFaltantes' => round(max(0, ($gradoMateria->materia->horas_programa ?? 0) - $horasActuales), 2),
-                'porcentajeAvance' => ($gradoMateria->materia->horas_programa ?? 0) > 0
-                    ? round(($horasActuales / $gradoMateria->materia->horas_programa) * 100, 2)
-                    : 0,
-                'trimestre' => [
-                    'id' => $gradoMateria->gradoPrograma->grado->id ?? null,
-                    'numero' => $gradoMateria->gradoPrograma->grado->numeroGrado ?? null,
-                    'fechaInicio' => $gradoMateria->gradoPrograma->fechaInicio ?? null,
-                    'fechaFin' => $gradoMateria->gradoPrograma->fechaFin ?? null,
-                    'idGradoPrograma' => $gradoMateria->idGradoPrograma
-                ],
-                'horarios' => [
-                    'asignados' => $gradoMateria->horarioMateria
-                        ->filter(function ($h) {
-                            return $h->idDia != null &&
-                                $h->horaInicial != null &&
-                                $h->horaFinal != null &&
-                                $h->fechaInicial != null &&
-                                $h->idContrato != null;
-                        })
-                        ->map(function ($h) {
-                            return [
-                                'id' => $h->id,
-                                'dia' => $h->dia,
-                                'horaInicial' => $h->horaInicial,
-                                'horaFinal' => $h->horaFinal,
-                                'fechaInicial' => $h->fechaInicial,
-                                'fechaFinal' => $h->fechaFinal,
-                                'estado' => $h->estado,
-                                'instructor' => $h->contrato->persona ?? null,
-                                'asignacionSesion' => \App\Models\HorarioMateria::asignacionesEspecialesApi($h),
-                            ];
-                        })->values(),
-                    'sinAsignar' => $gradoMateria->horarioMateria
-                        ->filter(function ($h) {
-                            return $h->idDia != null &&
-                                $h->horaInicial != null &&
-                                $h->horaFinal != null &&
-                                $h->fechaInicial != null &&
-                                $h->idContrato == null &&
-                                $h->estado == EstadoHorarioMateria::PENDIENTE;
-                        })
-                        ->map(function ($h) {
-                            return [
-                                'id' => $h->id,
-                                'dia' => $h->dia,
-                                'horaInicial' => $h->horaInicial,
-                                'horaFinal' => $h->horaFinal,
-                                'fechaInicial' => $h->fechaInicial,
-                                'fechaFinal' => $h->fechaFinal,
-                                'estado' => $h->estado,
-                                'instructor' => null,
-                                'asignacionSesion' => \App\Models\HorarioMateria::asignacionesEspecialesApi($h),
-                            ];
-                        })->values()
-                ]
-            ];
-        });
-
         return response()->json([
-            'message' => 'RAPs obtenidos correctamente',
-            'data' => $resultado
+            'message' => 'materias obtenidas correctamente',
+            'data' => $raps
         ], 200);
     }
 
@@ -592,53 +506,34 @@ class MateriaController extends Controller
     {
         try {
             $datos = $request->all();
+
             DB::beginTransaction();
-            $materiaPadre = Materia::where('id', $datos['idMateriaPadre'])->firstOrFail();
-            $compe = Materia::create([
+            $materiaPadre = Materia::where('id', $datos['idMateriaPadre'])->first();
+            $idCompany = KeyUtil::idCompany();
+            $idFicha = $datos['idFicha'];
+
+            $newMateria = Materia::create([
                 'nombreMateria' => $datos['nombreMateria'],
                 'descripcion' => $datos['descripcion'],
                 'idAreaConocimiento' => $datos['idMateriaPadre'] != null ? $materiaPadre->idAreaConocimiento : $datos['idAreaConocimiento'],
                 'idMateriaPadre' => $datos['idMateriaPadre'] ?? null,
-                'idCompany' => $datos['idCompany'],
-                'idEmpresa' => $datos['idCompany']
+                'creditos' => $datos['creditos'],
+                'codigo' => $datos['codigo'],
+                'idCompany' => $idCompany,
+                'idEmpresa' => $idCompany,
             ]);
 
-            if ($compe->idMateriaPadre != null && $datos['idGradoPrograma'] != null) {
-                $gradoMateria = GradoMateria::create([
-                    'idGradoPrograma' => $datos['idGradoPrograma'],
-                    'idMateria' => $compe->id,
-                    'idCompany' => $datos['idCompany'],
-                    'idEmpresa' => $datos['idCompany']
-                ]);
-
-                HorarioMateria::create([
-                    'idGradoMateria' => $gradoMateria->id,
-                    'idFicha' => $datos['idFicha'],
-                    'idDia' => null,
-                    'horaInicial' => null,
-                    'horaFinal' => null,
-                    'fechaFinal' => null
+            if ($idFicha) {
+                $ficha = Ficha::with('aperturarPrograma')->find($idFicha);
+                $gradoPrograma = GradoPrograma::where('idGrado', $ficha->idGrado)
+                    ->where('idPrograma', $ficha->aperturarPrograma->idPrograma)
+                    ->firstOrFail();
+                GradoMateria::create([
+                    'idGradoPrograma' => $gradoPrograma->id,
+                    'idMateria' => $newMateria->id,
                 ]);
             }
 
-            // Auto-detectar idPrograma si no viene pero hay idFicha
-            if (!isset($datos['idPrograma']) && isset($datos['idFicha'])) {
-                $ficha = Ficha::with('aperturarPrograma')->find($datos['idFicha']);
-                if ($ficha && $ficha->aperturarPrograma) {
-                    $datos['idPrograma'] = $ficha->aperturarPrograma->idPrograma;
-                }
-            }
-
-            if (isset($datos['idPrograma'])) {
-                AgregarMateriaPrograma::create(
-                    [
-                        'idMateria' => $compe->id,
-                        'idPrograma' => $datos['idPrograma'],
-                        'horas' => $datos['horas'],
-                        'creditos' => $datos['creditos']
-                    ]
-                );
-            }
             DB::commit();
             return response()->json([
                 'message' => 'Competencia creada correctamente'
@@ -652,16 +547,10 @@ class MateriaController extends Controller
         }
     }
 
-    public function getById($id, Request $request)
+    public function getById(int $id)
     {
 
         $materia = Materia::with('areaConocimiento')->find($id);
-        $agregarMateriaPrograma = AgregarMateriaPrograma::where('idMateria', $id)
-            ->where('idPrograma', $request->input('idPrograma'))
-            ->firstOrFail();
-
-        $materia->horas = $agregarMateriaPrograma->horas;
-        $materia->creditos = $agregarMateriaPrograma->creditos;
 
         if (!$materia) {
             return response()->json([
@@ -676,94 +565,61 @@ class MateriaController extends Controller
         ], 200);
     }
 
-    public function deleteMateriaTrimestre(Request $request)
+    public function deleteMateriaFicha(Request $request)
     {
         try {
-            $idGradoMateria = $request->input('id');
-            $eliminarTrimestre = $request->boolean('eliminarTrimestre');
+            $idMateria = $request->input('idMateria');
             $idFicha = $request->input('idFicha');
 
             DB::beginTransaction();
 
-            $gradoMateriaABorrar = GradoMateria::with('materia')->find($idGradoMateria);
+            // gradoMateria tiene idMateria y idGradoPrograma
+            $ficha = Ficha::with('asignacion')->find($idFicha);
+            $gradoPrograma = GradoPrograma::where('idPrograma', $ficha->asignacion->idPrograma)
+              ->where('idGrado', $ficha->idGrado)
+              ->firstOrFail();
 
-            if (!$gradoMateriaABorrar) {
-                return response()->json(['message' => 'No se encontró la materia'], 404);
-            }
+            $materia = Materia::find($idMateria);
+    
+            if($materia->idMateriaPadre == null){
+                $hijos = Materia::where('idMateriaPadre', $materia->id)->get();
+                foreach($hijos as $h){
+                    $gradoMateria = GradoMateria::where('idGradoPrograma', $gradoPrograma->id)
+                    ->where('idMateria', $h->id)
+                    ->first();
 
-            $idGradoPrograma = $gradoMateriaABorrar->idGradoPrograma;
-            $idsAProcesar = [];
-
-            if ($eliminarTrimestre) {
-                // Si eliminamos el trimestre, cargamos todas sus materias para validar que estén vacías
-                $idsAProcesar = GradoMateria::where('idGradoPrograma', $idGradoPrograma)->pluck('id')->toArray();
-            } else {
-                // Si no, solo cargamos la materia seleccionada y sus hijos (RAPs) si es una competencia padre
-                $idsAProcesar = [$gradoMateriaABorrar->id];
-
-                if ($gradoMateriaABorrar->materia && is_null($gradoMateriaABorrar->materia->idMateriaPadre)) {
-                    $idMateriaPadre = $gradoMateriaABorrar->materia->id;
-                    $hijosEnTrimestre = GradoMateria::where('idGradoPrograma', $idGradoPrograma)
-                        ->whereHas('horarioMateria', function ($query) use ($idFicha) {
-                            $query->where('idFicha', $idFicha);
-                        })
-                        ->whereHas('materia', function ($query) use ($idMateriaPadre) {
-                            $query->where('idMateriaPadre', $idMateriaPadre);
-                        })->pluck('id')->toArray();
-
-                    $idsAProcesar = array_merge($idsAProcesar, $hijosEnTrimestre);
-                }
-            }
-
-            // Validar que NADA de lo que vamos a borrar tenga sesiones o datos reales en ESTA ficha
-            $registrosAProcesar = GradoMateria::whereIn('id', $idsAProcesar)
-                ->with(['materia', 'horarioMateria' => function ($query) use ($idFicha) {
-                    $query->where('idFicha', $idFicha);
-                }, 'horarioMateria.sesionMaterias'])
-                ->get();
-
-            foreach ($registrosAProcesar as $registro) {
-                if ($registro->horarioMateria) {
-                    foreach ($registro->horarioMateria as $horario) {
-                        if ($horario->sesionMaterias->isNotEmpty()) {
-                            return response()->json([
-                                'message' => "No se puede eliminar porque la materia '{$registro->materia->nombreMateria}' ya tiene sesiones dadas en este trimestre para esta ficha.",
-                            ], 400);
-                        }
-                        if (!is_null($horario->idDia) || !is_null($horario->horaInicial) || !is_null($horario->idContrato)) {
-                            return response()->json([
-                                'message' => "No se puede eliminar porque la materia '{$registro->materia->nombreMateria}' ya tiene horarios o instructor asignado en esta ficha.",
-                            ], 400);
-                        }
+                    $horarios = HorarioMateria::where('idFicha', $ficha->id)
+                      ->where('idGradoMateria', $gradoMateria->id)
+                      ->get(); 
+                    
+                    if($horarios->isNotEmpty()){
+                        return response()->json([
+                            'message' => 'No se puede eliminar la materia porque tiene horarios asociados.'
+                        ], 400);
                     }
                 }
             }
 
-            // eliminación de las materias y sus horarios vacíos para esta ficha
-            foreach ($registrosAProcesar as $registro) {
-                $registro->horarioMateria()->where('idFicha', $idFicha)->delete();
-
-                // Si la relación GradoMateria ya no tiene ningún horario (es decir, ninguna otra ficha lo usa), lo eliminamos
-                if ($registro->horarioMateria()->count() === 0) {
-                    $registro->delete();
-                }
+            $gradoMateriaPadre = GradoMateria::where('idGradoPrograma', $gradoPrograma->id)
+                ->where('idMateria', $materia->id)
+                ->first();
+            
+            // consultar horarios
+            $horarios = HorarioMateria::where('idFicha', $ficha->id)
+              ->where('idGradoMateria', $gradoMateriaPadre->id)
+              ->get(); 
+            
+            if($horarios->isNotEmpty()){
+                return response()->json([
+                    'message' => 'No se puede eliminar la materia porque tiene horarios asociados.'
+                ], 400);
             }
 
-            // Solo eliminar el trimestre si eliminarTrimestre es true
-            if ($eliminarTrimestre) {
-                // Verificar si otras fichas tienen horarios en este trimestre antes de borrarlo completamente
-                $horariosEnTrimestre = HorarioMateria::whereHas('gradoMateria', function ($query) use ($idGradoPrograma) {
-                    $query->where('idGradoPrograma', $idGradoPrograma);
-                })->count();
-
-                if ($horariosEnTrimestre === 0) {
-                    GradoPrograma::where('id', $idGradoPrograma)->delete();
-                }
-            }
+            $gradoMateriaPadre->delete();
 
             DB::commit();
             return response()->json([
-                'message' => $eliminarTrimestre ? 'Trimestre eliminado correctamente.' : 'Materia(s) eliminada(s) correctamente.'
+                'message' => 'Materia eliminada correctamente.'
             ], 200);
         } catch (\Throwable $e) {
             DB::rollBack();
@@ -774,34 +630,8 @@ class MateriaController extends Controller
     public function getMattersChildren(Request $request)
     {
         $idMateriaPadre = $request->input('idMateriaPadre');
-        $idFicha = $request->input('idFicha');
 
-        $rapsYaFinalizados = MatriculaAcademica::where('idFicha', $idFicha)
-            ->whereIn('estado', ['FINALIZADO', 'EVALUADO', 'APROBADO'])
-            ->select('idMateria')
-            ->groupBy('idMateria')
-            ->havingRaw('COUNT(*) >= 5')
-            ->pluck('idMateria')->toArray();
-
-        $raps = MatriculaAcademica::where('idFicha', $idFicha)
-            ->whereNotIn('estado', ['APROBADO', 'EVALUADO'])
-            ->whereNotIn('idMateria', $rapsYaFinalizados)
-            ->whereHas('materia', function ($query) use ($idMateriaPadre) {
-                $query->where('idMateriaPadre', $idMateriaPadre);
-            })
-            ->with('materia')
-            ->get()
-            ->pluck('materia')
-            ->unique('id')
-            ->values();
-
-        $materias = $raps->sortBy(function ($materia) {
-            $nombre = $materia->nombreMateria;
-            if (preg_match('/-\s*(\d+)/', $nombre, $matches)) {
-                return $matches[1];
-            }
-            return '';
-        })->values();
+        $materias = Materia::where('idMateriaPadre', $idMateriaPadre)->get();
 
         return response()->json([
             'message' => 'Materias encontradas correctamente',

@@ -143,7 +143,7 @@ class GradoMateriaController extends Controller
 
             $horario->load(
                 'ficha.asignacionPeriodoPrograma',
-                'ficha.jornada',
+                'ficha.aperturarPrograma.jornada',
                 'materia.materia',
                 'materia.grado',
                 'contrato.persona.usuario.persona',
@@ -189,7 +189,7 @@ class GradoMateriaController extends Controller
 
         return $horario->load([
             'ficha.asignacionPeriodoPrograma',
-            'ficha.jornada',
+            'ficha.aperturarPrograma.jornada',
             'materia.materia',
             'materia.grado',
             'contrato.persona.usuario.persona',
@@ -318,7 +318,7 @@ class GradoMateriaController extends Controller
 
             $horario = HorarioMateria::with([
                 'ficha.asignacionPeriodoPrograma',
-                'ficha.jornada',
+                'ficha.aperturarPrograma.jornada',
                 'materia.materia',
                 'materia.grado',
                 'contrato.persona.usuario.persona',
