@@ -26,6 +26,10 @@ class Company extends Model
         'rutaLogo',
         'digitoVerificacion',
         'idCiudad',
+        'idFormularioInscripcion',
+        'inscripcionHabilitada',
+        'fechaInicioInscripcion',
+        'fechaFinInscripcion',
     ];
 
 

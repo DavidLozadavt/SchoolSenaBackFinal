@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\SchoolBridgeController;
 use App\Http\Controllers\EventoController;
 use App\Http\Controllers\GestionEventoHermanoController;
 use App\Http\Controllers\GestionEventoItemController;
@@ -163,6 +164,7 @@ use App\Http\Controllers\SancionesController;
 use App\Http\Controllers\AnexoActaController;
 use App\Http\Controllers\gestion_solicitudes_instructor\SolicitudMateriaController;
 use App\Http\Controllers\InstructorLiderController;
+use App\Http\Controllers\ReunionesTemporalesController;
 
 /*
 |--------------------------------------------------------------------------
@@ -177,9 +179,13 @@ use App\Http\Controllers\InstructorLiderController;
 
 Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
+// Integración con ERP
+Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
+
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
+Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
 Route::group([
     'middleware' => 'api',
@@ -194,6 +200,7 @@ Route::group([
     Route::post('permissions', [AuthController::class, 'getPermissions']);
     Route::get('user_mobile', [AuthController::class, 'getUserAppMobile']);
     Route::get('get_users_and_groups', [Gestion_usuarioUserController::class, 'getUsersAndGroups']);
+    Route::post('token_livekit', [AuthController::class, 'tokenLivekit']);
 });
 
 //olvidaste contraseña
@@ -259,6 +266,13 @@ Route::post('update_status_user/{id}', [Gestion_usuarioUserController::class, 'u
 
 
 
+
+// Configuración de Inscripción para Colegios
+Route::middleware('auth:api')->group(function () {
+    Route::get('inscripcion/configuracion', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'getConfig']);
+    Route::post('inscripcion/configuracion', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'saveConfig']);
+    Route::get('inscripcion/formularios', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'getFormularios']);
+});
 
 Route::get('users_company', [CompanyController::class, 'getUsersCompany']);
 
@@ -755,6 +769,20 @@ Route::get('configuraciones_pago', [PagoController::class, 'getConfiguracionesPa
 Route::post('store_configuracion_pago', [PagoController::class, 'storeConfiguracionPago']);
 Route::put('update_configuracion_pago/{id}', [PagoController::class, 'updateConfiguracionPago']);
 Route::delete('delete_configuracion_pago/{id}', [PagoController::class, 'destroyConfiguracionPago']);
+Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
+Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
+Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);
+Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
+Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
+Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/notificar_recepcion', [PagoController::class, 'notificarRecepcionSolicitudInscripcion']);
+// Ruta pública para el portal del aspirante (sin autenticación requerida)
+Route::get('portal-aspirante/{token}', [PagoController::class, 'getPortalAspirante']);
+Route::post('portal-aspirante/{token}/comprobante', [PagoController::class, 'subirComprobantePortalAspirante']);
+Route::get('portal-aspirante/{token}/factura-pdf', [PagoController::class, 'generarFacturaPdfPortalAspirante']);
+
+
 
 
 
@@ -1694,4 +1722,9 @@ Route::middleware('auth:api')->group(function () {
     Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
     Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
     Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('reuniones_temporales', ReunionesTemporalesController::class);
+    Route::post('reuniones_temporales/{reunion}/extend', [ReunionesTemporalesController::class, 'extend']);
 });

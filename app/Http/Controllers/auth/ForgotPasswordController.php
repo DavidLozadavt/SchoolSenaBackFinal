@@ -58,7 +58,7 @@ class ForgotPasswordController extends Controller
             \Log::info('OTP guardado en BD');
 
             try {
-                Mail::raw("Tu código de verificación es: $otp\n\nEste código es válido por 10 minutos.\n\nSi no solicitaste este código, por favor ignora este mensaje.", function ($message) use ($email) {
+                Mail::send('mails.verification-otp', ['otp' => $otp], function ($message) use ($email) {
                     $message->to($email)
                             ->subject('Código de verificación - Recuperación de contraseña');
                 });

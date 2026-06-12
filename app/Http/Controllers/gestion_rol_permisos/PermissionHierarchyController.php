@@ -141,8 +141,10 @@ class PermissionHierarchyController extends Controller
             'path'              => ['nullable', 'string']
         ]);
 
+        $normalizedName = strtoupper(preg_replace('/\s+/', '_', trim($data['name'])));
+
         $permission = Permission::create([
-            'name'              => $data['name'],
+            'name'              => $normalizedName,
             'guard_name'        => $data['guard_name'] ?? 'web',
             'description'       => $data['description'] ?? null,
             'idPermissionPadre' => $data['idPermissionPadre'] ?? null,
