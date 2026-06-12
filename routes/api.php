@@ -313,7 +313,7 @@ Route::get('actividades_riesgo_profesional', [ContratacionController::class, 'ge
 Route::get('contrato-formas-pago', [ContratacionController::class, 'formasPagoContrato']);
 Route::post('store_actividades_riesgo_profesional', [ContratacionController::class, 'storeActividadeRiesgoProfesional']);
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
-Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
+Route::get('areas-conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
 Route::get('areas-conocimiento/programa/{idPrograma}', [ContratacionController::class, 'getAreasConocimientoPrograma']);
 Route::post('areas-conocimiento/programas', [ContratacionController::class, 'getAreasConocimientoProgramas']);
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
@@ -1284,7 +1284,7 @@ Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas/{id}', [FichaController::class, 'show']);
 Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
-Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+Route::get('/ficha/validar-codigo', [FichaController::class, 'validarCodigo']);
 
 // Rutas Actividades (módulo académico)
 Route::middleware('auth:api')->group(function () {
@@ -1396,20 +1396,20 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']); // trae todos los trimestres con las competencias de la ficha
     Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']); // crear nuevo trimestre con minimo una competencia asignada
     Route::post('competencias/trimestre', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // agregar competencias a un trimestre ya creado
-    //Route::post('trimestres-ficha/competencias', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // asignar nuevas competencias a un trimestre
 });
 
 // MATERIAS
 Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('materias-programa', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
+    Route::get('materias-programa', [MateriaController::class, 'getAllCompetences']); // materias padre asignadas al programa
     Route::get('materias/raps', [MateriaController::class, 'getCompetenciasHijas']); // materias hijas (raps-resultados)
     Route::get('materias/hijas', [MateriaController::class, 'getMattersChildren']);
+    Route::get('materias/ficha', [MateriaController::class, 'getAllCompetencesByFicha']); // materias padre asignadas a la ficha
     Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
     Route::post('materias', [MateriaController::class, 'crearCompetencia']);
     Route::put('materias/finalizar-rap', [HorarioMateriaController::class, 'finalizarRap']);
     Route::put('materias/interrumpir-rap', [HorarioMateriaController::class, 'interrumpirRap']);
     Route::put('materias/{id}', [MateriaController::class, 'update']);
-    Route::delete('grado-materia', [MateriaController::class, 'deleteMateriaTrimestre']); // elimina competencias y raps del trimestre de la ficha
+    Route::delete('grado-materia', [MateriaController::class, 'deleteMateriaFicha']); // elimina competencias y raps del trimestre de la ficha
     Route::get('materias/{id}', [MateriaController::class, 'getById']);
 });
 
@@ -1418,6 +1418,7 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::get('dias', [DiaController::class, 'index']); //,obtener todos los dias
     Route::get('raps/evaluar/contrato', [HorarioMateriaController::class, 'getRapsEvaluarContrato']);
     Route::get('horario/ficha/{idFicha}', [HorarioMateriaController::class, 'getMattersByJornadaPeriodoPrograma']); // obtener el horario de una ficha
+    Route::get('horarios/materia', [HorarioMateriaController::class, 'getHorariosMateria']);
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
     Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
