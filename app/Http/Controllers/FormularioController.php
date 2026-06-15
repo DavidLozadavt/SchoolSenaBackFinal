@@ -249,11 +249,6 @@ class FormularioController extends Controller
                 ->where('idUser', $user->id)
                 ->orderBy('id', 'desc')
                 ->first();
-        } else {
-            $ultimaRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
-                ->where('ipAddress', request()->ip())
-                ->orderBy('id', 'desc')
-                ->first();
         }
 
         $formulario->setAttribute('ultima_respuesta', $ultimaRespuesta);
@@ -351,14 +346,18 @@ class FormularioController extends Controller
                 }
             }
 
-            if (!$existingRespuesta) {
-                $existingRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
-                    ->where('ipAddress', $request->ip())
-                    ->first();
-            }
-
             $isEditing = false;
             if ($existingRespuesta) {
+                if (!$request->input('forzar_actualizacion', false)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'ya_inscrito'       => true,
+                        'mensaje'           => 'Ya tienes una respuesta registrada en este formulario.',
+                        'respuesta_anterior' => $existingRespuesta->respuestas,
+                        'registrado_en'     => $existingRespuesta->created_at,
+                        'editado_en'        => $existingRespuesta->updated_at,
+                    ], 409);
+                }
                 $existingRespuesta->update([
                     'respuestas' => $request->respuestas ?? [],
                 ]);
@@ -639,6 +638,11 @@ class FormularioController extends Controller
 
                     if (!empty($resultadoFactura['factura'])) {
                         $facturaInscripcion = $resultadoFactura['factura'];
+                        // Store direct link from Factura → FormularioRespuesta
+                        if (!$facturaInscripcion->idFormularioRespuesta) {
+                            $facturaInscripcion->idFormularioRespuesta = $respuesta->id;
+                            $facturaInscripcion->save();
+                        }
                     }
                     if (!empty($resultadoFactura['error'])) {
                         $advertenciaFactura = $resultadoFactura['error'];
@@ -710,12 +714,26 @@ class FormularioController extends Controller
     }
 
     /**
+     * Eliminar una respuesta específica de un formulario.
+     */
+    public function destroyRespuesta($formularioId, $respuestaId)
+    {
+        $respuesta = FormularioRespuesta::where('idFormulario', $formularioId)
+            ->where('id', $respuestaId)
+            ->firstOrFail();
+
+        $respuesta->delete();
+
+        return response()->json(['message' => 'Respuesta eliminada correctamente']);
+    }
+
+    /**
      * Subir archivo adjunto públicamente para formularios.
      */
     public function uploadAdjunto(Request $request)
     {
         $request->validate([
-            'archivo' => 'required|file|mimes:pdf,jpeg,png,jpg,doc,docx|max:5120',
+            'archivo' => 'required|file|mimes:pdf,jpeg,png,jpg,doc,docx|max:20480',
         ]);
 
         try {
