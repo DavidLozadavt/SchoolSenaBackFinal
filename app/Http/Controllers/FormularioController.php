@@ -14,8 +14,11 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\gestion_pago\PagoController;
 use App\Models\AsignacionProcesoPago;
+use App\Models\Factura;
 use App\Models\Proceso;
+use App\Models\TipoFactura;
 use App\Util\KeyUtil;
+use Carbon\Carbon;
 
 class FormularioController extends Controller
 {
@@ -654,12 +657,34 @@ class FormularioController extends Controller
                         ]);
                     }
                 } else {
-                    $advertenciaFactura = 'No se identificó el proceso académico para generar la factura. Verifique el campo programa del formulario y la configuración de valores económicos.';
+                    $advertenciaFactura = 'No se identificó el proceso académico. La solicitud quedó registrada y puede gestionarse manualmente.';
                     Log::warning('Inscripción sin proceso resuelto para factura', [
                         'idTercero' => $terceroEstudiante->id,
                         'programName' => $programName,
                         'idCompany' => $formulario->idCompany,
                     ]);
+                    // Crear factura placeholder para que aparezca en solicitudes pendientes
+                    $facturaExistente = Factura::where('idTercero', $terceroEstudiante->id)
+                        ->where('idCompany', $formulario->idCompany)
+                        ->where('idTipoFactura', TipoFactura::VENTA)
+                        ->whereNotNull('idFormularioRespuesta')
+                        ->where('idFormularioRespuesta', $respuesta->id)
+                        ->first();
+                    if (!$facturaExistente) {
+                        $lastFactura = Factura::where('idTipoFactura', TipoFactura::VENTA)->orderBy('id', 'desc')->first();
+                        $numeroNuevo = $lastFactura
+                            ? str_pad((int) $lastFactura->numeroFactura + 1, 5, '0', STR_PAD_LEFT)
+                            : '00001';
+                        $facturaInscripcion = new Factura();
+                        $facturaInscripcion->numeroFactura = $numeroNuevo;
+                        $facturaInscripcion->fecha = Carbon::now();
+                        $facturaInscripcion->valor = 0;
+                        $facturaInscripcion->idTercero = $terceroEstudiante->id;
+                        $facturaInscripcion->idCompany = $formulario->idCompany;
+                        $facturaInscripcion->idTipoFactura = TipoFactura::VENTA;
+                        $facturaInscripcion->idFormularioRespuesta = $respuesta->id;
+                        $facturaInscripcion->save();
+                    }
                 }
             }
 

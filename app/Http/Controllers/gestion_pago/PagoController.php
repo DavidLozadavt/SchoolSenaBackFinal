@@ -2332,22 +2332,36 @@ class PagoController extends Controller
             })
             ->orderBy('id', 'desc');
 
+        $tieneColumnaFormResp = Schema::hasColumn('factura', 'idFormularioRespuesta');
+
         if ($tieneColumnaIdConfig) {
-            $query->whereHas('detalles', function ($q) {
-                $q->whereNotNull('idConfiguracionPago');
+            $query->where(function ($q) use ($tieneColumnaFormResp) {
+                $q->whereHas('detalles', function ($inner) {
+                    $inner->whereNotNull('idConfiguracionPago');
+                });
+                if ($tieneColumnaFormResp) {
+                    $q->orWhereNotNull('idFormularioRespuesta');
+                }
             });
         } else {
             $idsConfig = ConfiguracionPago::where('idCompany', $idCompany)->pluck('id');
-            if ($idsConfig->isEmpty()) {
-                return $query->whereRaw('1 = 0');
-            }
             $titulos = ConfiguracionPago::whereIn('id', $idsConfig)->pluck('titulo')->filter();
-            $query->whereHas('detalles', function ($q) use ($titulos) {
-                $q->where(function ($inner) use ($titulos) {
-                    foreach ($titulos as $titulo) {
-                        $inner->orWhere('detalle', $titulo);
-                    }
-                });
+            $query->where(function ($q) use ($titulos, $tieneColumnaFormResp) {
+                if ($titulos->isNotEmpty()) {
+                    $q->whereHas('detalles', function ($inner) use ($titulos) {
+                        $inner->where(function ($or) use ($titulos) {
+                            foreach ($titulos as $titulo) {
+                                $or->orWhere('detalle', $titulo);
+                            }
+                        });
+                    });
+                }
+                if ($tieneColumnaFormResp) {
+                    $q->orWhereNotNull('idFormularioRespuesta');
+                }
+                if ($titulos->isEmpty() && !$tieneColumnaFormResp) {
+                    $q->whereRaw('1 = 0');
+                }
             });
         }
 

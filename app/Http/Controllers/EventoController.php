@@ -498,6 +498,8 @@ class EventoController extends Controller
 
     /**
      * Verificar inscripción de usuario externo por email (sin auth de School).
+     * Si el evento tiene formulario interno, la fuente de verdad son las respuestas
+     * del formulario: si fueron eliminadas, el usuario puede volver a inscribirse.
      */
     public function checkRegistrationPublic(Request $request, $id)
     {
@@ -506,6 +508,44 @@ class EventoController extends Controller
             return response()->json(['inscrito' => false]);
         }
 
+        $evento = Evento::find($id);
+        if (!$evento) {
+            return response()->json(['inscrito' => false]);
+        }
+
+        // Evento con formulario interno: la fuente de verdad son las respuestas del formulario
+        if ($evento->idFormularioInterno) {
+            $preguntasEmail = \App\Models\FormularioPregunta::where('idFormulario', $evento->idFormularioInterno)
+                ->get()
+                ->filter(function ($p) {
+                    $t = $this->normalizarTituloPregunta($p->titulo);
+                    return str_contains($t, 'correo') || str_contains($t, 'email') || str_contains($t, 'e-mail');
+                })
+                ->pluck('id')
+                ->toArray();
+
+            // Si el formulario tiene campo de email, verificar contra respuestas reales
+            if (!empty($preguntasEmail)) {
+                $emailLower = strtolower($email);
+                $inscrito = \App\Models\FormularioRespuesta::where('idFormulario', $evento->idFormularioInterno)
+                    ->get(['id', 'respuestas'])
+                    ->contains(function ($r) use ($preguntasEmail, $emailLower) {
+                        foreach ($r->respuestas ?? [] as $campo) {
+                            if (
+                                in_array($campo['idPregunta'] ?? null, $preguntasEmail) &&
+                                strtolower(trim($campo['valor'] ?? '')) === $emailLower
+                            ) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    });
+
+                return response()->json(['inscrito' => $inscrito]);
+            }
+        }
+
+        // Sin formulario (o sin campo email en el formulario): verificar ParticipanteEvento
         $persona = Person::where('email', $email)->first();
         if (!$persona) {
             return response()->json(['inscrito' => false]);
