@@ -241,13 +241,22 @@ class FormularioController extends Controller
         
         $isAuth = Auth::check() || Auth::guard('api')->check();
         $user = Auth::user() ?: Auth::guard('api')->user();
+        $isEmbed = request()->query('embed') === 'true';
 
-        if ($formulario->estado !== 'publicado' && !$isAuth) {
+        if ($formulario->estado !== 'publicado' && !$isAuth && !$isEmbed) {
             return response()->json(['error' => 'Formulario no disponible'], 403);
         }
 
         $ultimaRespuesta = null;
-        if ($user) {
+        if ($isEmbed) {
+            $emailParam = strtolower(trim(request()->query('email', '')));
+            if ($emailParam) {
+                $ultimaRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+                    ->where('nexiEmail', $emailParam)
+                    ->orderBy('id', 'desc')
+                    ->first();
+            }
+        } elseif ($user) {
             $ultimaRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
                 ->where('idUser', $user->id)
                 ->orderBy('id', 'desc')
@@ -270,8 +279,9 @@ class FormularioController extends Controller
 
         $isAuth = Auth::check() || Auth::guard('api')->check();
         $user = Auth::user() ?: Auth::guard('api')->user();
+        $isEmbed = $request->boolean('embed') || $request->query('embed') === 'true';
 
-        if ($formulario->estado !== 'publicado' && !$isAuth) {
+        if ($formulario->estado !== 'publicado' && !$isAuth && !$isEmbed) {
             return response()->json(['error' => 'Formulario no disponible'], 403);
         }
 
@@ -279,99 +289,113 @@ class FormularioController extends Controller
             return response()->json(['error' => 'Debe iniciar sesión para responder'], 401);
         }
 
-        $userId = $user ? $user->id : null;
-
-        $studentDocNumInput = '';
-        $studentEmailInput = '';
-
-        foreach ($request->respuestas ?? [] as $resp) {
-            $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
-            if (!$preg) continue;
-            $val = $resp['valor'] ?? '';
-            if (is_array($val)) $val = implode(', ', $val);
-            $titleLower = $this->normalizarTituloPregunta($preg->titulo);
-
-            if (str_contains($titleLower, 'numero') || (str_contains($titleLower, 'documento') && !str_contains($titleLower, 'tipo')) || str_contains($titleLower, 'identificacion')) {
-                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
-                    $studentDocNumInput = trim($val);
-                }
-            }
-            elseif (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
-                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
-                    $studentEmailInput = trim($val);
-                }
-            }
-        }
+        // Embed: identidad por nexiEmail; School nativo: por userId
+        // Lee email desde query param O desde el cuerpo (doble vía para garantizar que llegue)
+        $emailParam = strtolower(trim(
+            request()->query('email', '')
+            ?: $request->input('nexiEmail', '')
+        ));
+        $userId = $isEmbed ? null : ($user ? $user->id : null);
 
         try {
             DB::beginTransaction();
 
-            $existingRespuesta = null;
-            if ($userId) {
-                $existingRespuesta = FormularioRespuesta::where('idFormulario', $formulario->id)
+            // ── Fase 1: mismo login ───────────────────────────────────────
+            // Busca directamente por nexiEmail (embed) o userId (School nativo).
+            $existingByLogin = null;
+            if ($isEmbed && $emailParam) {
+                $existingByLogin = FormularioRespuesta::where('idFormulario', $formulario->id)
+                    ->where('nexiEmail', $emailParam)
+                    ->first();
+            } elseif (!$isEmbed && $userId) {
+                $existingByLogin = FormularioRespuesta::where('idFormulario', $formulario->id)
                     ->where('idUser', $userId)
                     ->first();
             }
 
-            if (!$existingRespuesta && (!empty($studentDocNumInput) || !empty($studentEmailInput))) {
-                $allResponses = FormularioRespuesta::where('idFormulario', $formulario->id)->get();
-                foreach ($allResponses as $resp) {
-                    $listaResp = $resp->respuestas;
-                    if (is_array($listaResp)) {
-                        $hasMatchingDoc = false;
-                        $hasMatchingEmail = false;
+            if ($existingByLogin && !$request->input('forzar_actualizacion', false)) {
+                DB::rollBack();
+                return response()->json([
+                    'ya_inscrito'        => true,
+                    'mismo_login'        => true,
+                    'mensaje'            => 'Ya tienes una inscripción registrada. Puedes editarla si deseas actualizar tus datos.',
+                    'respuesta_anterior' => $existingByLogin->respuestas,
+                    'registrado_en'      => $existingByLogin->created_at,
+                    'editado_en'         => $existingByLogin->updated_at,
+                ], 409);
+            }
+
+            // ── Fase 2: conflicto de otro login (solo si no hay match propio) ──
+            if (!$existingByLogin) {
+                $studentDocNum = '';
+                $studentEmail  = '';
+                foreach ($request->respuestas ?? [] as $resp) {
+                    $preg = \App\Models\FormularioPregunta::find($resp['idPregunta'] ?? 0);
+                    if (!$preg) continue;
+                    $val = $resp['valor'] ?? '';
+                    if (is_array($val)) $val = implode(', ', $val);
+                    $t = $this->normalizarTituloPregunta($preg->titulo);
+                    if (str_contains($t, 'tutor') || str_contains($t, 'acudiente')) continue;
+                    if (str_contains($t, 'numero') || (str_contains($t, 'documento') && !str_contains($t, 'tipo')) || str_contains($t, 'identificacion')) {
+                        $studentDocNum = trim($val);
+                    } elseif (str_contains($t, 'correo') || str_contains($t, 'email') || str_contains($t, 'e-mail')) {
+                        $studentEmail = trim($val);
+                    }
+                }
+
+                $conflictMatch = null;
+                $conflictByDoc = false;
+                if (!empty($studentDocNum) || !empty($studentEmail)) {
+                    foreach (FormularioRespuesta::where('idFormulario', $formulario->id)->get() as $existing) {
+                        $listaResp = $existing->respuestas;
+                        if (!is_array($listaResp)) continue;
+                        $hasDoc = $hasEmail = false;
                         foreach ($listaResp as $r) {
                             $preg = \App\Models\FormularioPregunta::find($r['idPregunta'] ?? 0);
                             if (!$preg) continue;
-                            $val = trim(is_array($r['valor']) ? implode(', ', $r['valor']) : ($r['valor'] ?? ''));
-                            $titleLower = $this->normalizarTituloPregunta($preg->titulo);
-
-                            if (str_contains($titleLower, 'numero') || (str_contains($titleLower, 'documento') && !str_contains($titleLower, 'tipo')) || str_contains($titleLower, 'identificacion')) {
-                                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
-                                    if (!empty($studentDocNumInput) && $val === $studentDocNumInput) {
-                                        $hasMatchingDoc = true;
-                                    }
-                                }
+                            $v = trim(is_array($r['valor']) ? implode(', ', $r['valor']) : ($r['valor'] ?? ''));
+                            $t = $this->normalizarTituloPregunta($preg->titulo);
+                            if (str_contains($t, 'tutor') || str_contains($t, 'acudiente')) continue;
+                            if (!empty($studentDocNum) && (str_contains($t, 'numero') || (str_contains($t, 'documento') && !str_contains($t, 'tipo')) || str_contains($t, 'identificacion'))) {
+                                if ($v === $studentDocNum) $hasDoc = true;
                             }
-                            if (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
-                                if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
-                                    if (!empty($studentEmailInput) && strcasecmp($val, $studentEmailInput) === 0) {
-                                        $hasMatchingEmail = true;
-                                    }
-                                }
+                            if (!empty($studentEmail) && (str_contains($t, 'correo') || str_contains($t, 'email') || str_contains($t, 'e-mail'))) {
+                                if (strcasecmp($v, $studentEmail) === 0) $hasEmail = true;
                             }
                         }
-                        if ($hasMatchingDoc || $hasMatchingEmail) {
-                            $existingRespuesta = $resp;
-                            break;
-                        }
+                        // Email match = priority; para en cuanto lo encuentra
+                        if ($hasEmail) { $conflictMatch = $existing; $conflictByDoc = false; break; }
+                        if ($hasDoc && !$conflictMatch) { $conflictMatch = $existing; $conflictByDoc = true; }
                     }
+                }
+
+                if ($conflictMatch) {
+                    DB::rollBack();
+                    return response()->json([
+                        'ya_inscrito'        => true,
+                        'mismo_login'        => false,
+                        'solo_documento'     => $conflictByDoc,
+                        'mensaje'            => $conflictByDoc
+                            ? 'El número de documento ya está registrado por otra persona.'
+                            : 'El correo electrónico ya está registrado por otra persona.',
+                        'respuesta_anterior' => null,
+                        'registrado_en'      => null,
+                        'editado_en'         => null,
+                    ], 409);
                 }
             }
 
-            $isEditing = false;
-            if ($existingRespuesta) {
-                if (!$request->input('forzar_actualizacion', false)) {
-                    DB::rollBack();
-                    return response()->json([
-                        'ya_inscrito'       => true,
-                        'mensaje'           => 'Ya tienes una respuesta registrada en este formulario.',
-                        'respuesta_anterior' => $existingRespuesta->respuestas,
-                        'registrado_en'     => $existingRespuesta->created_at,
-                        'editado_en'        => $existingRespuesta->updated_at,
-                    ], 409);
-                }
-                $existingRespuesta->update([
-                    'respuestas' => $request->respuestas ?? [],
-                ]);
-                $respuesta = $existingRespuesta;
-                $isEditing = true;
+            // ── Crear o actualizar ────────────────────────────────────────
+            if ($existingByLogin) {
+                $existingByLogin->update(['respuestas' => $request->respuestas ?? []]);
+                $respuesta = $existingByLogin;
             } else {
                 $respuesta = FormularioRespuesta::create([
                     'idFormulario' => $formulario->id,
-                    'idUser' => $userId,
-                    'ipAddress' => $request->ip(),
-                    'respuestas' => $request->respuestas ?? [],
+                    'idUser'       => $userId,
+                    'ipAddress'    => $request->ip(),
+                    'nexiEmail'    => ($isEmbed && $emailParam) ? $emailParam : null,
+                    'respuestas'   => $request->respuestas ?? [],
                 ]);
             }
 
@@ -731,6 +755,13 @@ class FormularioController extends Controller
                         $persona->apellido2 ?? '',
                     ]);
                     $r->usuario->name = implode(' ', $parts) ?: $r->usuario->email;
+                } elseif ($r->nexiEmail) {
+                    $r->usuario = (object) [
+                        'name'       => $r->nexiEmail,
+                        'email'      => $r->nexiEmail,
+                        'persona'    => null,
+                        'isNexiUser' => true,
+                    ];
                 }
                 return $r;
             });
