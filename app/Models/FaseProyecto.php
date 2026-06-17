@@ -36,4 +36,8 @@ class FaseProyecto extends Model
             'idMateria'
         )->withTimestamps();
     }
+    public function faseProyectoRaps(): HasMany
+    {
+        return $this->hasMany(FaseProyectoRap::class, 'idFaseProyecto');
+    }
 }

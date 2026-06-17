@@ -12,6 +12,7 @@ class FaseProyectoRap extends Model
     protected $fillable = [
         'idFaseProyecto',
         'idMateria',
+        'idActividadProyecto',
     ];
 
     public function fase(): BelongsTo
@@ -22,5 +23,10 @@ class FaseProyectoRap extends Model
     public function materia(): BelongsTo
     {
         return $this->belongsTo(Materia::class, 'idMateria');
+    }
+    // Relación con ActividadProyecto
+    public function actividadProyecto(): BelongsTo
+    {
+        return $this->belongsTo(ActividadProyecto::class, 'idActividadProyecto');
     }
 }
