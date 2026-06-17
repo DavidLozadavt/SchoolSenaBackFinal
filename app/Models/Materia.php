@@ -13,26 +13,26 @@ class Materia extends Model
 
     protected $table = 'materia';
 
-  
+
     public $timestamps = true;
 
     public static $snakeAttributes = false;
 
     protected $fillable = [
-        'nombreMateria', 
-        'descripcion', 
-        'idEmpresa', 
-        'idAreaConocimiento', 
-        'idMateriaPadre', 
-        'codigo', 
-        'creditos', 
+        'nombreMateria',
+        'descripcion',
+        'idEmpresa',
+        'idAreaConocimiento',
+        'idMateriaPadre',
+        'codigo',
+        'creditos',
         'horas',
         'idCompany',
         'idCategoriaFormacion'
     ];
 
     protected $hidden = [
-        'idEmpresa' 
+        'idEmpresa'
     ];
 
     protected $appends = ['DocUrl'];
@@ -51,12 +51,12 @@ class Materia extends Model
 
     // --- RELACIONES ---
 
-   /*
-public function asignacionMateriaProgramas()
-{
-    return $this->hasMany(AsignacionMateriaPrograma::class, 'idMateria');
-}
-*/
+    /*
+ public function asignacionMateriaProgramas()
+ {
+     return $this->hasMany(AsignacionMateriaPrograma::class, 'idMateria');
+ }
+ */
 
 
     public function padre()
@@ -72,12 +72,17 @@ public function asignacionMateriaProgramas()
         return $this->hasMany(AgregarMateriaPrograma::class, 'idMateria');
     }
 
-    public function areaConocimiento () {
+    public function areaConocimiento()
+    {
         return $this->belongsTo(AreaConocimiento::class, 'idAreaConocimiento');
     }
 
     public function categoriaFormacion()
     {
         return $this->belongsTo(CategoriaFormacion::class, 'idCategoriaFormacion');
+    }
+    public function hijas()
+    {
+        return $this->hasMany(Materia::class, 'idMateriaPadre');
     }
 }

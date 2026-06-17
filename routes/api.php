@@ -1266,6 +1266,10 @@ Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
 
+//proyecto Formativo
+Route::put('/fichasproyecto/{idFicha}/proyecto-formativo', [FichaController::class, 'asignarProyectoFormativo']);
+Route::get('/fichapry/{idFicha}/proyecto-formativo', [FichaController::class, 'getProyectoByFicha']);
+
 // Rutas Actividades (módulo académico)
 Route::middleware('auth:api')->group(function () {
     Route::get('actividades', [ActividadController::class, 'index']);
@@ -1459,11 +1463,11 @@ Route::post('sanciones', [SancionesController::class, 'store']);
 // asistencia e inasistencia
 Route::apiResource('asistencia', AsistenciaController::class);
 Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
-Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica',[AsistenciaController::class, 'getAllAssistance']);
-Route::put('update_assistance',[AsistenciaController::class, 'updateAssistance']);
-Route::post('update_assistance',[AsistenciaController::class, 'updateAssistance']);
-Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
-Route::get('justificaciones-inasistencia/{id}/soporte',[AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
+Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
+Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);
+Route::post('update_assistance', [AsistenciaController::class, 'updateAssistance']);
+Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
+Route::get('justificaciones-inasistencia/{id}/soporte', [AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
 Route::post('solicitar-justificacion-asistencia', [AsistenciaController::class, 'solicitarJustificacionAsistencia']);
 Route::post('solicitar-justificacion-asistencia-rango', [AsistenciaController::class, 'solicitarJustificacionAsistenciaRango']);
 Route::get('justificaciones-pendientes-instructor', [AsistenciaController::class, 'justificacionesPendientesInstructor']);
@@ -1609,14 +1613,14 @@ Route::middleware('auth:api')->group(function () {
     // Deezer
     Route::get('deezer/search', [MultimediaHistoriasController::class, 'searchTrack']);
     Route::get('deezer/search/{id}', [MultimediaHistoriasController::class, 'getTrack']);
-    
+
     // --- EVENTOS ---
     Route::get('eventos-multimedia', [EventoController::class, 'index']);
     Route::get('eventos-multimedia/{id}', [EventoController::class, 'show']);
     Route::post('eventos-multimedia', [EventoController::class, 'store']);
     Route::post('eventos-multimedia/{id}', [EventoController::class, 'update']);
     Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy']);
-    
+
     // Rutas de inscripción
     Route::get('eventos-multimedia/{id}/check-registration', [EventoController::class, 'checkRegistration']);
     Route::post('eventos-multimedia/{id}/register', [EventoController::class, 'register']);
@@ -1677,7 +1681,7 @@ Route::prefix('invitado')->group(function () {
     Route::get('/stats', [GestionEventoHermanoController::class, 'stats']);
     Route::get('/export-csv', [GestionEventoHermanoController::class, 'exportCsv']);
     Route::get('/historial-scan', [GestionEventoHermanoController::class, 'historialScan']);
-    Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']); 
+    Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']);
     Route::get('/', [GestionEventoHermanoController::class, 'index']);
     Route::get('/token/{token}', [GestionEventoHermanoController::class, 'getByToken']);
     Route::get('/token/{token}/items', [GestionEventoHermanoController::class, 'getItemsByToken']);
@@ -1687,7 +1691,7 @@ Route::prefix('invitado')->group(function () {
     Route::post('/generar-qrs', [GestionEventoHermanoController::class, 'generarQrs']);
     Route::post('/{id}/qr', [GestionEventoHermanoController::class, 'guardarQrImagen']);
     Route::post('/token/{token}/item/{itemId}/toggle', [GestionEventoHermanoController::class, 'toggleItem']);
-    Route::get('/{id}', [GestionEventoHermanoController::class, 'show']); 
+    Route::get('/{id}', [GestionEventoHermanoController::class, 'show']);
     Route::put('/{id}', [GestionEventoHermanoController::class, 'update']);
     Route::delete('/{id}', [GestionEventoHermanoController::class, 'destroy']);
 });

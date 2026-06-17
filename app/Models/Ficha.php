@@ -21,6 +21,7 @@ class Ficha extends Model
         'idSede',
         'idRegional',
         'porcentajeEjecucion',
+        'idProyectoFormativo'
     ];
 
 
@@ -85,5 +86,9 @@ class Ficha extends Model
     public function actas()
     {
         return $this->hasMany(Acta::class, 'idFicha');
+    }
+    public function proyectoFormativo()
+    {
+        return $this->belongsTo(ProyectoFormativo::class, 'idProyectoFormativo');
     }
 }
