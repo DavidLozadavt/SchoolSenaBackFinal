@@ -6,6 +6,7 @@ use App\Models\Ficha;
 use App\Models\AperturarPrograma;
 use App\Models\Company;
 use App\Models\Contract;
+use App\Models\HorarioMateria;
 use App\Models\Programa;
 use App\Models\Sede;
 use App\Models\Status;
@@ -2961,64 +2962,72 @@ class FichaController extends Controller
 
         $proyecto = $ficha->proyectoFormativo;
 
-        $fasesFormateadas = $proyecto->fases->map(function ($fase) {
-            $actividadesFormateadas = $fase->actividades->map(function ($actividad) {
-                $rapsActividad = $actividad->faseProyectoRaps->map(function ($rap) {
-                    $materia = $rap->materia;
-                    $materiaData = [
-                        'id' => $materia->id,
-                        'nombre' => $materia->nombre ?? $materia->descripcion ?? null,
-                    ];
+        // Traemos los horarios de esta ficha con el instructor asignado por materia
+        $horarios = HorarioMateria::where('idFicha', $fichaId)
+            ->whereNotNull('idContrato')
+            ->with([
+                'gradoMateria.materia',
+                'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email',
+            ])
+            ->get();
 
-                    // Agregar hijas si existen
-                    if ($materia->hijas->isNotEmpty()) {
-                        $materiaData['hijas'] = $materia->hijas->map(function ($hija) {
-                            return [
-                                'id' => $hija->id,
-                                'nombre' => $hija->nombre ?? $hija->descripcion ?? null,
-                            ];
-                        })->toArray();
-                    }
+        // Mapa idMateria => instructor(es) (puede haber más de un instructor por materia a lo largo del tiempo)
+        $instructoresPorMateria = $horarios
+            ->groupBy(fn($h) => $h->gradoMateria->idMateria)
+            ->map(function ($grupo) {
+                return $grupo
+                    ->pluck('contrato.persona')
+                    ->filter()
+                    ->unique('id')
+                    ->values()
+                    ->map(function ($persona) {
+                        return [
+                            'id' => $persona->id,
+                            'nombre' => trim("{$persona->nombre1} {$persona->nombre2} {$persona->apellido1} {$persona->apellido2}"),
+                            'email' => $persona->email,
+                            'rutaFoto' => $persona->rutaFoto,
+                        ];
+                    });
+            });
 
+        $formatearRap = function ($rap) use ($instructoresPorMateria) {
+            $materia = $rap->materia;
+            $materiaData = [
+                'id' => $materia->id,
+                'nombre' => $materia->nombreMateria ?? $materia->descripcion ?? null,
+            ];
+
+            if ($materia->hijas->isNotEmpty()) {
+                $materiaData['hijas'] = $materia->hijas->map(function ($hija) use ($instructoresPorMateria) {
                     return [
-                        'id' => $rap->id,
-                        'materia' => $materiaData,
-                        'idMateriaPadre' => $materia->idMateriaPadre,
+                        'id' => $hija->id,
+                        'nombre' => $hija->nombreMateria ?? $hija->descripcion ?? null,
+                        'instructores' => $instructoresPorMateria->get($hija->id, collect())->toArray(),
                     ];
-                });
+                })->toArray();
+            }
 
+            return [
+                'id' => $rap->id,
+                'materia' => $materiaData,
+                'idMateriaPadre' => $materia->idMateriaPadre,
+                'instructores' => $instructoresPorMateria->get($materia->id, collect())->toArray(),
+            ];
+        };
+
+        $fasesFormateadas = $proyecto->fases->map(function ($fase) use ($formatearRap) {
+            $actividadesFormateadas = $fase->actividades->map(function ($actividad) use ($formatearRap) {
                 return [
                     'id' => $actividad->id,
                     'descripcionActividad' => $actividad->descripcionActividad,
-                    'faseProyectoRap' => $rapsActividad,
+                    'faseProyectoRap' => $actividad->faseProyectoRaps->map($formatearRap),
                 ];
             });
 
             $rapsSinActividad = $fase->faseProyectoRaps
                 ->whereNull('idActividadProyecto')
-                ->map(function ($rap) {
-                    $materia = $rap->materia;
-                    $materiaData = [
-                        'id' => $materia->id,
-                        'nombre' => $materia->nombre ?? $materia->descripcion ?? null,
-                    ];
-
-                    // Agregar hijas si existen
-                    if ($materia->hijas->isNotEmpty()) {
-                        $materiaData['hijas'] = $materia->hijas->map(function ($hija) {
-                            return [
-                                'id' => $hija->id,
-                                'nombre' => $hija->nombre ?? $hija->descripcion ?? null,
-                            ];
-                        })->toArray();
-                    }
-
-                    return [
-                        'id' => $rap->id,
-                        'materia' => $materiaData,
-                        'idMateriaPadre' => $materia->idMateriaPadre,
-                    ];
-                })->values();
+                ->map($formatearRap)
+                ->values();
 
             return [
                 'id' => $fase->id,

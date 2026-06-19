@@ -10,7 +10,7 @@ class ProyectoFormativoController extends Controller
 {
     public function index(Request $request)
     {
-        $query = ProyectoFormativo::with('programa');
+        $query = ProyectoFormativo::with('programa', 'fases.actividades.faseProyectoRaps.materia');
 
         if ($request->has('idPrograma')) {
             $query->where('idPrograma', $request->idPrograma);
@@ -23,10 +23,10 @@ class ProyectoFormativoController extends Controller
     {
         $validated = $request->validate([
             'nombreProyecto' => 'required|string|max:255',
-            'version'        => 'required|string|max:255',
-            'estado'         => 'in:ACTIVO,INACTIVO',
-            'idPrograma'     => 'required|exists:programa,id',
-            'documento'      => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+            'version' => 'required|string|max:255',
+            'estado' => 'in:ACTIVO,INACTIVO',
+            'idPrograma' => 'required|exists:programa,id',
+            'documento' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
         ]);
 
         if ($request->hasFile('documento')) {
@@ -50,10 +50,10 @@ class ProyectoFormativoController extends Controller
 
         $validated = $request->validate([
             'nombreProyecto' => 'sometimes|string|max:255',
-            'version'        => 'sometimes|string|max:255',
-            'estado'         => 'sometimes|in:ACTIVO,INACTIVO',
-            'idPrograma'     => 'sometimes|exists:programa,id',
-            'documento'      => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+            'version' => 'sometimes|string|max:255',
+            'estado' => 'sometimes|in:ACTIVO,INACTIVO',
+            'idPrograma' => 'sometimes|exists:programa,id',
+            'documento' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
         ]);
 
         if ($request->hasFile('documento')) {
