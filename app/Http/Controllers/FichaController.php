@@ -2952,6 +2952,7 @@ class FichaController extends Controller
         $ficha = Ficha::with([
             'proyectoFormativo.fases.actividades.faseProyectoRaps.materia.hijas',
             'proyectoFormativo.fases.faseProyectoRaps.materia.hijas',
+            'aperturarPrograma'
         ])->findOrFail($fichaId);
 
         if (!$ficha->idProyectoFormativo) {
@@ -2961,21 +2962,43 @@ class FichaController extends Controller
         }
 
         $proyecto = $ficha->proyectoFormativo;
+        $idPrograma = $ficha->aperturarPrograma->idPrograma ?? null;
+        $porcentajeEjecucion = $ficha->porcentajeEjecucion ?? 100;
 
-        // Traemos los horarios de esta ficha con el instructor asignado por materia
+        // Matriculas para estados
+        $matriculasFicha = \App\Models\MatriculaAcademica::where('idFicha', $fichaId)
+            ->select('idMateria', 'estado')
+            ->get()
+            ->groupBy('idMateria');
+
+        // Horarios para sesiones, instructores, fechas, etc.
         $horarios = HorarioMateria::where('idFicha', $fichaId)
-            ->whereNotNull('idContrato')
             ->with([
                 'gradoMateria.materia',
+                'gradoMateria.gradoPrograma.grado',
                 'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email',
+            ])
+            ->withCount([
+                'sesionMaterias as sesiones_realizadas_count' => function ($q) {
+                    $q->whereNotNull('fechaSesion');
+                }
             ])
             ->get();
 
-        // Mapa idMateria => instructor(es) (puede haber más de un instructor por materia a lo largo del tiempo)
-        $instructoresPorMateria = $horarios
-            ->groupBy(fn($h) => $h->gradoMateria->idMateria)
+        // Para las horasPrograma
+        $horasPorMateria = [];
+        if ($idPrograma) {
+            $horasPorMateria = \Illuminate\Support\Facades\DB::table('agregarMateriaPrograma')
+                ->where('idPrograma', $idPrograma)
+                ->pluck('horas', 'idMateria')
+                ->toArray();
+        }
+
+        // Mapa idMateria => datos agregados
+        $datosPorMateria = $horarios
+            ->groupBy(fn($h) => $h->gradoMateria->idMateria ?? 0)
             ->map(function ($grupo) {
-                return $grupo
+                $instructores = $grupo
                     ->pluck('contrato.persona')
                     ->filter()
                     ->unique('id')
@@ -2988,22 +3011,79 @@ class FichaController extends Controller
                             'rutaFoto' => $persona->rutaFoto,
                         ];
                     });
+
+                $trimestres = $grupo
+                    ->pluck('gradoMateria.gradoPrograma.grado.numeroGrado')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->implode(', ');
+
+                $fechaInicio = $grupo->pluck('fechaInicial')->filter()->min();
+                $fechaFin = $grupo->pluck('fechaFinal')->filter()->max();
+                $numeroSesiones = $grupo->sum('sesiones_realizadas_count');
+
+                $horasActuales = 0;
+                foreach ($grupo as $horario) {
+                    if ($horario->horaInicial && $horario->horaFinal) {
+                        $hI = \Carbon\Carbon::parse($horario->horaInicial);
+                        $hF = \Carbon\Carbon::parse($horario->horaFinal);
+                        $duracionSesion = $hF->diffInMinutes($hI, true) / 60;
+                        $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
+                        $horasActuales += $sesionesDadas * $duracionSesion;
+                    }
+                }
+
+                return [
+                    'instructores' => $instructores,
+                    'trimestre' => $trimestres,
+                    'fechaInicio' => $fechaInicio ? \Carbon\Carbon::parse($fechaInicio)->format('Y-m-d') : null,
+                    'fechaFin' => $fechaFin ? \Carbon\Carbon::parse($fechaFin)->format('Y-m-d') : null,
+                    'numeroSesiones' => $numeroSesiones,
+                    'horasActuales' => round($horasActuales, 2),
+                ];
             });
 
-        $formatearRap = function ($rap) use ($instructoresPorMateria) {
+        $formatearRap = function ($rap) use ($datosPorMateria, $matriculasFicha, $porcentajeEjecucion, $horasPorMateria) {
             $materia = $rap->materia;
-            $materiaData = [
-                'id' => $materia->id,
-                'nombre' => $materia->nombreMateria ?? $materia->descripcion ?? null,
-            ];
+
+            $obtenerDatosMateria = function ($mat) use ($datosPorMateria, $matriculasFicha, $porcentajeEjecucion, $horasPorMateria) {
+                $datos = $datosPorMateria->get($mat->id, [
+                    'instructores' => collect(),
+                    'trimestre' => '',
+                    'fechaInicio' => null,
+                    'fechaFin' => null,
+                    'numeroSesiones' => 0,
+                    'horasActuales' => 0
+                ]);
+
+                $horasPrograma = $horasPorMateria[$mat->id] ?? ($mat->horas ?? 0);
+                $horasRequeridas = $horasPrograma * ($porcentajeEjecucion / 100);
+
+                $finalizadoPorMatricula = $matriculasFicha->get($mat->id, collect())
+                    ->filter(fn($m) => in_array(strtoupper($m->estado), ['POR EVALUAR', 'APROBADO']))->count() >= 5;
+                $finalizadoPorHoras = $horasRequeridas > 0 && $datos['horasActuales'] >= $horasRequeridas;
+                $estaFinalizado = $finalizadoPorMatricula || $finalizadoPorHoras;
+
+                return [
+                    'id' => $mat->id,
+                    'nombre' => $mat->nombreMateria ?? $mat->descripcion ?? null,
+                    'instructores' => is_array($datos['instructores']) ? $datos['instructores'] : $datos['instructores']->toArray(),
+                    'trimestre' => $datos['trimestre'],
+                    'fechaInicio' => $datos['fechaInicio'],
+                    'fechaFin' => $datos['fechaFin'],
+                    'numeroSesiones' => $datos['numeroSesiones'],
+                    'horasActuales' => $datos['horasActuales'],
+                    'horas' => $horasPrograma,
+                    'estado' => $estaFinalizado ? 'APROBADO' : 'POR EVALUAR'
+                ];
+            };
+
+            $materiaData = $obtenerDatosMateria($materia);
 
             if ($materia->hijas->isNotEmpty()) {
-                $materiaData['hijas'] = $materia->hijas->map(function ($hija) use ($instructoresPorMateria) {
-                    return [
-                        'id' => $hija->id,
-                        'nombre' => $hija->nombreMateria ?? $hija->descripcion ?? null,
-                        'instructores' => $instructoresPorMateria->get($hija->id, collect())->toArray(),
-                    ];
+                $materiaData['hijas'] = $materia->hijas->map(function ($hija) use ($obtenerDatosMateria) {
+                    return $obtenerDatosMateria($hija);
                 })->toArray();
             }
 
@@ -3011,7 +3091,14 @@ class FichaController extends Controller
                 'id' => $rap->id,
                 'materia' => $materiaData,
                 'idMateriaPadre' => $materia->idMateriaPadre,
-                'instructores' => $instructoresPorMateria->get($materia->id, collect())->toArray(),
+                'instructores' => $materiaData['instructores'],
+                'trimestre' => $materiaData['trimestre'],
+                'fechaInicio' => $materiaData['fechaInicio'],
+                'fechaFin' => $materiaData['fechaFin'],
+                'numeroSesiones' => $materiaData['numeroSesiones'],
+                'horasActuales' => $materiaData['horasActuales'],
+                'horas' => $materiaData['horas'],
+                'estado' => $materiaData['estado'],
             ];
         };
 
