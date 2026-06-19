@@ -3058,12 +3058,10 @@ class FichaController extends Controller
                 ]);
 
                 $horasPrograma = $horasPorMateria[$mat->id] ?? ($mat->horas ?? 0);
-                $horasRequeridas = $horasPrograma * ($porcentajeEjecucion / 100);
 
                 $finalizadoPorMatricula = $matriculasFicha->get($mat->id, collect())
                     ->filter(fn($m) => in_array(strtoupper($m->estado), ['POR EVALUAR', 'APROBADO']))->count() >= 5;
-                $finalizadoPorHoras = $horasRequeridas > 0 && $datos['horasActuales'] >= $horasRequeridas;
-                $estaFinalizado = $finalizadoPorMatricula || $finalizadoPorHoras;
+                $estaFinalizado = $finalizadoPorMatricula;
 
                 return [
                     'id' => $mat->id,
