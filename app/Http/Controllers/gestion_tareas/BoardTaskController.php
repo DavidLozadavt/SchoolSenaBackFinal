@@ -367,18 +367,20 @@ class BoardTaskController extends Controller
 
 
 
-    public function getPersonsToAssign($id)
+ public function getPersonsToAssign($id)
     {
 
-        $assignedUserIds = AsignacionBoardUser::where('idBoard', $id)
+    $assignedUserIds = AsignacionBoardUser::where('idBoard', $id)
             ->pluck('idUser');
 
         $users = User::whereNotIn('id', $assignedUserIds)
+            ->whereHas('persona')
             ->with('persona')
             ->get();
 
         return response()->json($users);
     }
+
 
 
 
