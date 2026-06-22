@@ -3059,9 +3059,11 @@ class FichaController extends Controller
 
                 $horasPrograma = $horasPorMateria[$mat->id] ?? ($mat->horas ?? 0);
 
-                $finalizadoPorMatricula = $matriculasFicha->get($mat->id, collect())
-                    ->filter(fn($m) => in_array(strtoupper($m->estado), ['POR EVALUAR', 'APROBADO']))->count() >= 5;
-                $estaFinalizado = $finalizadoPorMatricula;
+                $aprobadoCount = $matriculasFicha->get($mat->id, collect())
+                    ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
+                    ->count();
+
+                $estaFinalizado = $aprobadoCount >= 5;
 
                 return [
                     'id' => $mat->id,
