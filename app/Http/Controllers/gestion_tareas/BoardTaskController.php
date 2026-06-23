@@ -296,7 +296,7 @@ class BoardTaskController extends Controller
                 $nombreBoard = $board->nombreBoard;
 
 
-                SendAssignmentBoardNotification::dispatch($email, $userName, $nombreBoard);
+                // SendAssignmentBoardNotification::dispatch($email, $userName, $nombreBoard);
 
                 $assignments[] = $boards;
             }
