@@ -712,7 +712,6 @@ class ActaController extends Controller
         try {
             $acta = Acta::with(['ciudad', 'ficha', 'contrato.persona', 'agenda', 'objetivos', 'asistencias.contrato.persona', 'asistencias.contrato.centroFormacion', 'conclusiones', 'compromisos', 'anexos'])->findOrFail($id);
 
-            // Calcular instructores con sus materias usando la fecha del acta como periodo
             $instructores = collect();
             $horarios = collect();
 
@@ -792,43 +791,38 @@ class ActaController extends Controller
                     ->values();
             }
 
-            // Paleta de colores para instructores
             $colores = [
-                '#FFD700', // amarillo
-                '#FFA500', // naranja
-                '#4CAF50', // verde
-                '#2196F3', // azul
-                '#E91E63', // rosa/rojo
-                '#9C27B0', // morado
-                '#00BCD4', // cyan
-                '#FF5722', // naranja oscuro
-                '#795548', // café
-                '#607D8B', // gris azulado
+                '#FFD700',
+                '#FFA500',
+                '#4CAF50',
+                '#2196F3',
+                '#E91E63',
+                '#9C27B0',
+                '#00BCD4',
+                '#FF5722',
+                '#795548',
+                '#607D8B',
             ];
 
-            // Asignar color a cada instructor
             $instructoresConColor = $instructores->values()->map(function ($instructor, $index) use ($colores) {
                 $instructor['color'] = $colores[$index % count($colores)];
                 return $instructor;
             });
 
-            // Construir mapa de días del mes → colores de instructores
             $inicio = \Carbon\Carbon::parse($acta->fecha)->startOfMonth();
             $fin = \Carbon\Carbon::parse($acta->fecha)->endOfMonth();
-            $diasDelMes = $inicio->toPeriod($fin); // CarbonPeriod
+            $diasDelMes = $inicio->toPeriod($fin);
 
-            // Para cada día calcular qué instructores tienen clase
             $calendario = [];
             foreach ($diasDelMes as $dia) {
                 $calendario[$dia->day] = [
                     'colores' => [],
                     'esFinde' => $dia->isWeekend(),
-                    'diaSemana' => $dia->dayOfWeek, // 0=dom, 1=lun...
+                    'diaSemana' => $dia->dayOfWeek,
                 ];
             }
 
             foreach ($horarios->groupBy('idContrato') as $idContrato => $horariosInstructor) {
-                // Buscar el color asignado a este instructor
                 $instructorConColor = $instructoresConColor->firstWhere('idContrato', $idContrato);
                 if (!$instructorConColor)
                     continue;
@@ -839,7 +833,7 @@ class ActaController extends Controller
                     $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($fin);
 
                     $idDiaInt = (int) $h->idDia;
-                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt; // 7=domingo→0
+                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
 
                     $cursor = $desde->copy();
                     while ($cursor->lte($hasta)) {
@@ -854,12 +848,11 @@ class ActaController extends Controller
                 }
             }
 
-            // Consulta de novedades (estudiantes y sus estados en la ficha)
             $novedades = collect();
             if ($acta->idFicha) {
                 $novedades = \App\Models\MatriculaAcademica::with(['matricula.person'])
                     ->where('idFicha', $acta->idFicha)
-                    ->whereNull('idGradoMateria') // registro general de la ficha, no por materia
+                    ->whereNull('idGradoMateria')
                     ->get()
                     ->map(function ($ma) {
                         $persona = $ma->matricula?->person;
@@ -874,14 +867,58 @@ class ActaController extends Controller
                             'enFormacion' => $ma->matricula->estado === 'EN FORMACION',
                         ];
                     })
-                    ->sortBy('enFormacion') // Priorizar estados que NO sean 'EN FORMACION'
-                    ->unique('identificacion') // Agrupar/Unificar por alumno para evitar repetidos
+                    ->sortBy('enFormacion')
+                    ->unique('identificacion')
                     ->sortBy('nombre')
                     ->values();
             }
 
             $enFormacion = $novedades->where('enFormacion', true)->values();
             $conNovedad = $novedades->where('enFormacion', false)->values();
+
+            // ─── DEBUG ───────────────────────────────────────────────
+            if (request()->boolean('debug')) {
+                return response()->json([
+                    'acta' => [
+                        'id' => $acta->id,
+                        'fecha' => $acta->fecha,
+                        'idFicha' => $acta->idFicha,
+                        'ciudad' => $acta->ciudad,
+                        'ficha' => $acta->ficha,
+                        'contrato' => $acta->contrato,
+                        'agenda' => $acta->agenda,
+                        'objetivos' => $acta->objetivos,
+                        'asistencias' => $acta->asistencias,
+                        'conclusiones' => $acta->conclusiones,
+                        'compromisos' => $acta->compromisos,
+                        'anexos' => $acta->anexos,
+                    ],
+                    'instructoresConColor' => $instructoresConColor,
+                    'calendario' => $calendario,
+                    'enFormacion' => $enFormacion,
+                    'conNovedad' => $conNovedad,
+                    'meta' => [
+                        'totalInstructores' => $instructoresConColor->count(),
+                        'totalEnFormacion' => $enFormacion->count(),
+                        'totalConNovedad' => $conNovedad->count(),
+                        'diasEnCalendario' => count($calendario),
+                    ],
+                    'horarios_raw' => $horarios->map(function ($h) {
+                        return [
+                            'idContrato' => $h->idContrato,
+                            'idGradoMateria' => $h->idGradoMateria,
+                            'idDia' => $h->idDia,
+                            'fechaInicial' => $h->fechaInicial,
+                            'fechaFinal' => $h->fechaFinal,
+                            'horaInicial' => $h->horaInicial,
+                            'horaFinal' => $h->horaFinal,
+                            'estado' => $h->estado,
+                            'instructor' => $h->contrato?->persona?->nombre1 . ' ' . $h->contrato?->persona?->apellido1,
+                        ];
+                    }),
+                ]);
+            }
+            // ─────────────────────────────────────────────────────────
 
             $pdf = Pdf::loadView('pdf.actasInstructores', compact('acta', 'instructoresConColor', 'instructores', 'calendario', 'enFormacion', 'conNovedad'))
                 ->setPaper('letter')
@@ -890,6 +927,7 @@ class ActaController extends Controller
                 ->setOption('isFontSubsettingEnabled', true);
 
             return $pdf->stream('actasInstructor.pdf');
+
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json(['message' => 'Acta no encontrada'], 404);
         } catch (\Exception $e) {
