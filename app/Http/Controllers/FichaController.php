@@ -3065,6 +3065,18 @@ class FichaController extends Controller
 
                 $estaFinalizado = $aprobadoCount >= 5;
 
+                // Si tiene hijas, el padre se aprueba solo cuando TODAS las hijas están aprobadas
+                if ($mat->hijas->isNotEmpty()) {
+                    $todasHijasAprobadas = $mat->hijas->every(function ($hija) use ($matriculasFicha) {
+                        $aprobadoHija = $matriculasFicha->get($hija->id, collect())
+                            ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
+                            ->count();
+                        return $aprobadoHija >= 5;
+                    });
+
+                    $estaFinalizado = $todasHijasAprobadas;
+                }
+
                 return [
                     'id' => $mat->id,
                     'nombre' => $mat->nombreMateria ?? $mat->descripcion ?? null,
