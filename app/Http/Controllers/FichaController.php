@@ -6,6 +6,7 @@ use App\Models\Ficha;
 use App\Models\AperturarPrograma;
 use App\Models\Company;
 use App\Models\Contract;
+use App\Models\HorarioMateria;
 use App\Models\Programa;
 use App\Models\Sede;
 use App\Models\Status;
@@ -2949,8 +2950,9 @@ class FichaController extends Controller
     public function getProyectoByFicha(int $fichaId): JsonResponse
     {
         $ficha = Ficha::with([
-            'proyectoFormativo.fases.actividades.faseProyectoRaps.materia.hijas',
-            'proyectoFormativo.fases.faseProyectoRaps.materia.hijas',
+            'proyectoFormativo.fases.actividades.faseProyectoRaps.materia',
+            'proyectoFormativo.fases.faseProyectoRaps.materia',
+            'aperturarPrograma'
         ])->findOrFail($fichaId);
 
         if (!$ficha->idProyectoFormativo) {
@@ -2960,65 +2962,187 @@ class FichaController extends Controller
         }
 
         $proyecto = $ficha->proyectoFormativo;
+        $idPrograma = $ficha->aperturarPrograma->idPrograma ?? null;
+        $porcentajeEjecucion = $ficha->porcentajeEjecucion ?? 100;
 
-        $fasesFormateadas = $proyecto->fases->map(function ($fase) {
-            $actividadesFormateadas = $fase->actividades->map(function ($actividad) {
-                $rapsActividad = $actividad->faseProyectoRaps->map(function ($rap) {
-                    $materia = $rap->materia;
-                    $materiaData = [
-                        'id' => $materia->id,
-                        'nombre' => $materia->nombre ?? $materia->descripcion ?? null,
-                    ];
+        // Matriculas para estados
+        $matriculasFicha = \App\Models\MatriculaAcademica::where('idFicha', $fichaId)
+            ->select('idMateria', 'estado')
+            ->get()
+            ->groupBy('idMateria');
 
-                    // Agregar hijas si existen
-                    if ($materia->hijas->isNotEmpty()) {
-                        $materiaData['hijas'] = $materia->hijas->map(function ($hija) {
-                            return [
-                                'id' => $hija->id,
-                                'nombre' => $hija->nombre ?? $hija->descripcion ?? null,
-                            ];
-                        })->toArray();
+        // Horarios para sesiones, instructores, fechas, etc.
+        $horarios = HorarioMateria::where('idFicha', $fichaId)
+            ->with([
+                'gradoMateria.materia',
+                'gradoMateria.gradoPrograma.grado',
+                'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email',
+            ])
+            ->withCount([
+                'sesionMaterias as sesiones_realizadas_count' => function ($q) {
+                    $q->whereNotNull('fechaSesion');
+                }
+            ])
+            ->get();
+
+        // Para las horasPrograma
+        $horasPorMateria = [];
+        if ($idPrograma) {
+            $horasPorMateria = \Illuminate\Support\Facades\DB::table('agregarMateriaPrograma')
+                ->where('idPrograma', $idPrograma)
+                ->pluck('horas', 'idMateria')
+                ->toArray();
+        }
+
+        // IDs de materias permitidas en este programa
+        $materiasDelPrograma = $idPrograma
+            ? \Illuminate\Support\Facades\DB::table('agregarMateriaPrograma')
+                ->where('idPrograma', $idPrograma)
+                ->pluck('idMateria')
+                ->toArray()
+            : [];
+
+        // Mapa idMateria => datos agregados
+        $datosPorMateria = $horarios
+            ->groupBy(fn($h) => $h->gradoMateria->idMateria ?? 0)
+            ->map(function ($grupo) {
+                $instructores = $grupo
+                    ->pluck('contrato.persona')
+                    ->filter()
+                    ->unique('id')
+                    ->values()
+                    ->map(function ($persona) {
+                        return [
+                            'id' => $persona->id,
+                            'nombre' => trim("{$persona->nombre1} {$persona->nombre2} {$persona->apellido1} {$persona->apellido2}"),
+                            'email' => $persona->email,
+                            'rutaFoto' => $persona->rutaFoto,
+                        ];
+                    });
+
+                $trimestres = $grupo
+                    ->pluck('gradoMateria.gradoPrograma.grado.numeroGrado')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->implode(', ');
+
+                $fechaInicio = $grupo->pluck('fechaInicial')->filter()->min();
+                $fechaFin = $grupo->pluck('fechaFinal')->filter()->max();
+                $numeroSesiones = $grupo->sum('sesiones_realizadas_count');
+
+                $horasActuales = 0;
+                foreach ($grupo as $horario) {
+                    if ($horario->horaInicial && $horario->horaFinal) {
+                        $hI = \Carbon\Carbon::parse($horario->horaInicial);
+                        $hF = \Carbon\Carbon::parse($horario->horaFinal);
+                        $duracionSesion = $hF->diffInMinutes($hI, true) / 60;
+                        $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
+                        $horasActuales += $sesionesDadas * $duracionSesion;
                     }
+                }
 
-                    return [
-                        'id' => $rap->id,
-                        'materia' => $materiaData,
-                        'idMateriaPadre' => $materia->idMateriaPadre,
-                    ];
-                });
+                return [
+                    'instructores' => $instructores,
+                    'trimestre' => $trimestres,
+                    'fechaInicio' => $fechaInicio ? \Carbon\Carbon::parse($fechaInicio)->format('Y-m-d') : null,
+                    'fechaFin' => $fechaFin ? \Carbon\Carbon::parse($fechaFin)->format('Y-m-d') : null,
+                    'numeroSesiones' => $numeroSesiones,
+                    'horasActuales' => round($horasActuales, 2),
+                ];
+            });
 
+        $formatearRap = function ($rap) use ($datosPorMateria, $matriculasFicha, $porcentajeEjecucion, $horasPorMateria, $materiasDelPrograma  // ✅ Agregado aquí
+        ) {
+            $materia = $rap->materia;
+
+            $obtenerDatosMateria = function ($mat) use (&$obtenerDatosMateria,  // ✅ Referencia para recursión
+                $datosPorMateria, $matriculasFicha, $horasPorMateria, $materiasDelPrograma) {
+                $datos = $datosPorMateria->get($mat->id, [
+                    'instructores' => collect(),
+                    'trimestre' => '',
+                    'fechaInicio' => null,
+                    'fechaFin' => null,
+                    'numeroSesiones' => 0,
+                    'horasActuales' => 0
+                ]);
+
+                $horasPrograma = $horasPorMateria[$mat->id] ?? ($mat->horas ?? 0);
+
+                // Filtrar hijas solo las del programa
+                $hijasDelPrograma = $mat->hijas->filter(
+                    fn($hija) => in_array($hija->id, $materiasDelPrograma)
+                );
+
+                $aprobadoCount = $matriculasFicha->get($mat->id, collect())
+                    ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
+                    ->count();
+
+                $estaFinalizado = $aprobadoCount >= 5;
+
+                if ($hijasDelPrograma->isNotEmpty()) {
+                    $estaFinalizado = $hijasDelPrograma->every(function ($hija) use ($matriculasFicha) {
+                        return $matriculasFicha->get($hija->id, collect())
+                            ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
+                            ->count() >= 5;
+                    });
+                }
+
+                $materiaData = [
+                    'id' => $mat->id,
+                    'nombre' => $mat->nombreMateria ?? $mat->descripcion ?? null,
+                    'instructores' => is_array($datos['instructores']) ? $datos['instructores'] : $datos['instructores']->toArray(),
+                    'trimestre' => $datos['trimestre'],
+                    'fechaInicio' => $datos['fechaInicio'],
+                    'fechaFin' => $datos['fechaFin'],
+                    'numeroSesiones' => $datos['numeroSesiones'],
+                    'horasActuales' => $datos['horasActuales'],
+                    'horas' => $horasPrograma,
+                    'estado' => $estaFinalizado ? 'APROBADO' : 'POR EVALUAR',
+                ];
+
+                // ✅ Hijas filtradas — sin bloque duplicado más abajo
+                if ($hijasDelPrograma->isNotEmpty()) {
+                    $materiaData['hijas'] = $hijasDelPrograma
+                        ->map(fn($hija) => $obtenerDatosMateria($hija))
+                        ->values()
+                        ->toArray();
+                }
+
+                return $materiaData;
+            };
+
+            $materiaData = $obtenerDatosMateria($materia);
+            // ✅ Eliminado el bloque duplicado que sobreescribía hijas sin filtrar
+
+            return [
+                'id' => $rap->id,
+                'materia' => $materiaData,
+                'idMateriaPadre' => $materia->idMateriaPadre,
+                'instructores' => $materiaData['instructores'],
+                'trimestre' => $materiaData['trimestre'],
+                'fechaInicio' => $materiaData['fechaInicio'],
+                'fechaFin' => $materiaData['fechaFin'],
+                'numeroSesiones' => $materiaData['numeroSesiones'],
+                'horasActuales' => $materiaData['horasActuales'],
+                'horas' => $materiaData['horas'],
+                'estado' => $materiaData['estado'],
+            ];
+        };
+
+        $fasesFormateadas = $proyecto->fases->map(function ($fase) use ($formatearRap) {
+            $actividadesFormateadas = $fase->actividades->map(function ($actividad) use ($formatearRap) {
                 return [
                     'id' => $actividad->id,
                     'descripcionActividad' => $actividad->descripcionActividad,
-                    'faseProyectoRap' => $rapsActividad,
+                    'faseProyectoRap' => $actividad->faseProyectoRaps->map($formatearRap),
                 ];
             });
 
             $rapsSinActividad = $fase->faseProyectoRaps
                 ->whereNull('idActividadProyecto')
-                ->map(function ($rap) {
-                    $materia = $rap->materia;
-                    $materiaData = [
-                        'id' => $materia->id,
-                        'nombre' => $materia->nombre ?? $materia->descripcion ?? null,
-                    ];
-
-                    // Agregar hijas si existen
-                    if ($materia->hijas->isNotEmpty()) {
-                        $materiaData['hijas'] = $materia->hijas->map(function ($hija) {
-                            return [
-                                'id' => $hija->id,
-                                'nombre' => $hija->nombre ?? $hija->descripcion ?? null,
-                            ];
-                        })->toArray();
-                    }
-
-                    return [
-                        'id' => $rap->id,
-                        'materia' => $materiaData,
-                        'idMateriaPadre' => $materia->idMateriaPadre,
-                    ];
-                })->values();
+                ->map($formatearRap)
+                ->values();
 
             return [
                 'id' => $fase->id,
