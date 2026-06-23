@@ -218,6 +218,11 @@
                         $celda = 0;
                         $totalCeldas = $offsetInicio + $totalDias;
                         $filas = ceil($totalCeldas / 7);
+
+                        $calendarioIndexado = [];
+                        foreach ($calendario as $k => $v) {
+                            $calendarioIndexado[(int) $k] = $v;
+                        }
                     @endphp
 
                     @for ($fila = 0; $fila < $filas; $fila++)
@@ -227,7 +232,7 @@
                                     $numeroCelda = $fila * 7 + $col;
                                     $dia = $numeroCelda - $offsetInicio + 1;
                                     $esValido = $dia >= 1 && $dia <= $totalDias;
-                                    $coloresDia = $esValido ? $calendario[$dia]['colores'] ?? [] : [];
+                                    $coloresDia = $esValido ? ($calendarioIndexado[$dia]['colores'] ?? []) : [];
                                     $hayClase = count($coloresDia) > 0;
                                     // Si hay más de un color, fondo degradado; si hay uno, ese color; si no hay, blanco
                                     if ($hayClase && count($coloresDia) === 1) {
@@ -374,13 +379,13 @@
                         <ul style="margin: 2px 0 2px 15px; padding-left: 15px;">
                     @endif
 
-                    <li class="left">
-                        {{ $conclusion->conclusion }}
-                    </li>
+                        <li class="left">
+                            {{ $conclusion->conclusion }}
+                        </li>
 
-                    @if ($loop->last)
-                        </ul>
-                    @endif
+                        @if ($loop->last)
+                            </ul>
+                        @endif
                 @empty
                     <p class="left" style="margin: 2px 0 2px 15px;">
                         Sin conclusiones registradas
@@ -527,9 +532,9 @@
         @endif
     @endforeach
 
-        <div class="spacer"></div>
+    <div class="spacer"></div>
 
-        <script type="text/php">
+    <script type="text/php">
     if (isset($pdf)) {
         $font        = $fontMetrics->getFont("Arial", "normal");
         $anchoPagina = $pdf->get_width();

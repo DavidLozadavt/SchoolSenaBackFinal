@@ -73,6 +73,7 @@ class FaseProyectoRapController extends Controller
             ->where('idPrograma', $idPrograma)
             ->get()
             ->pluck('materia')
+            ->filter(fn($m) => is_null($m->idMateriaPadre)) // solo las padre
             ->map(function ($m) {
                 return [
                     'id' => $m->id,
@@ -80,7 +81,8 @@ class FaseProyectoRapController extends Controller
                     'descripcion' => $m->descripcion,
                     'codigo' => $m->codigo,
                 ];
-            });
+            })
+            ->values(); // re-indexar el array
 
         return response()->json($materias);
     }
