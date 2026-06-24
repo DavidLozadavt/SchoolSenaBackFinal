@@ -219,10 +219,7 @@
                         $totalCeldas = $offsetInicio + $totalDias;
                         $filas = ceil($totalCeldas / 7);
 
-                        $calendarioIndexado = [];
-                        foreach ($calendario as $k => $v) {
-                            $calendarioIndexado[(int) $k] = $v;
-                        }
+                        $calendarioIndexado = $calendario;
                     @endphp
 
                     @for ($fila = 0; $fila < $filas; $fila++)
@@ -232,7 +229,7 @@
                                     $numeroCelda = $fila * 7 + $col;
                                     $dia = $numeroCelda - $offsetInicio + 1;
                                     $esValido = $dia >= 1 && $dia <= $totalDias;
-                                    $coloresDia = $esValido ? ($calendarioIndexado[$dia]['colores'] ?? []) : [];
+                                    $coloresDia = $esValido ? ($calendarioIndexado[(string) $dia]['colores'] ?? []) : [];
                                     $hayClase = count($coloresDia) > 0;
                                     // Si hay más de un color, fondo degradado; si hay uno, ese color; si no hay, blanco
                                     if ($hayClase && count($coloresDia) === 1) {

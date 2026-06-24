@@ -59,6 +59,8 @@ class ActaController extends Controller
             'idFicha' => 'required|exists:ficha,id',
             'idContrato' => 'required|exists:contrato,id',
             'documento' => 'nullable|string',
+            'fechaInicialFormacion' => 'sometimes|required|date',
+            'fechaFinalFormacion' => 'sometimes|required|date',
             // Relaciones
             'agenda' => 'nullable|array',
             'agenda.*.punto' => 'required|string',
@@ -184,6 +186,8 @@ class ActaController extends Controller
             'idFicha' => 'sometimes|required|exists:ficha,id',
             'idContrato' => 'sometimes|required|exists:contrato,id',
             'documento' => 'nullable|string',
+            'fechaInicialFormacion' => 'sometimes|required|date',
+            'fechaFinalFormacion' => 'sometimes|required|date',
             // Relaciones
             'agenda' => 'nullable|array',
             'agenda.*.punto' => 'required|string',
@@ -919,9 +923,20 @@ class ActaController extends Controller
                 ]);
             }
             // ─────────────────────────────────────────────────────────
+// DESPUÉS — normaliza claves antes de pasar a la vista
+            $calendarioNormalizado = [];
+            foreach ($calendario as $k => $v) {
+                $calendarioNormalizado[(string) (int) $k] = $v;
+            }
 
-            $pdf = Pdf::loadView('pdf.actasInstructores', compact('acta', 'instructoresConColor', 'instructores', 'calendario', 'enFormacion', 'conNovedad'))
-                ->setPaper('letter')
+            $pdf = Pdf::loadView('pdf.actasInstructores', [
+                'acta' => $acta,
+                'instructoresConColor' => $instructoresConColor,
+                'instructores' => $instructores,
+                'calendario' => $calendarioNormalizado,
+                'enFormacion' => $enFormacion,
+                'conNovedad' => $conNovedad,
+            ])->setPaper('letter')
                 ->setOption('isPhpEnabled', true)
                 ->setOption('isHtml5ParserEnabled', true)
                 ->setOption('isFontSubsettingEnabled', true);
