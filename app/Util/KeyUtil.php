@@ -29,7 +29,21 @@ class KeyUtil
     {
         $token = JWTAuth::getToken();
         $payload = JWTAuth::getPayload($token)->toArray();
-        return $payload['permissions']->keys();
+        $permissions = $payload['permissions'] ?? [];
+
+        if (is_array($permissions)) {
+            return collect($permissions);
+        }
+
+        if ($permissions instanceof \Illuminate\Support\Collection) {
+            return $permissions->values();
+        }
+
+        if (is_object($permissions) && method_exists($permissions, 'keys')) {
+            return collect($permissions->keys());
+        }
+
+        return collect($permissions);
     }
 
     public static function user()

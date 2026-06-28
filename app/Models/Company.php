@@ -77,4 +77,9 @@ class Company extends Model
     {
         return $this->hasMany(Ficha::class, 'idRegional');
     }
+
+    public function centrosFormacion(): HasMany
+    {
+        return $this->hasMany(CentrosFormacion::class, 'idEmpresa');
+    }
 }

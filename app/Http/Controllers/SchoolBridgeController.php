@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Person;
 use App\Models\User;
 use App\Models\ActivationCompanyUser;
+use App\Services\EduExceLicenciaService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -23,11 +24,8 @@ class SchoolBridgeController extends Controller
     public function inscribirInstitucion(Request $request): JsonResponse
     {
         // 1. Validar el token de seguridad
-        $receivedToken = $request->header('X-Bridge-Token');
-        $expectedToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
-
-        if (empty($receivedToken) || $receivedToken !== $expectedToken) {
-            return response()->json(['error' => 'No autorizado. Token de seguridad inválido o ausente.'], 401);
+        if ($deny = $this->assertBridgeToken($request)) {
+            return $deny;
         }
 
         // 2. Validar el payload recibido
@@ -172,5 +170,64 @@ class SchoolBridgeController extends Controller
             ]);
             return response()->json(['error' => 'Ocurrió un error en el servidor de School Sena: ' . $e->getMessage()], 500);
         }
+    }
+
+    public function activarLicenciaEduexce(int $idInstitucion, Request $request, EduExceLicenciaService $licenciaService): JsonResponse
+    {
+        if ($deny = $this->assertBridgeToken($request)) {
+            return $deny;
+        }
+
+        try {
+            $result = $licenciaService->activarLicenciaEduexce($idInstitucion);
+            $school = $result['school'] ?? [];
+            $email = $school['email_admin'] ?? null;
+            $mensaje = 'Licencia ICFES activada para la institución.';
+            if ($email) {
+                $mensaje .= " Acceso al panel School creado para {$email}.";
+            }
+
+            return response()->json([
+                'message' => $mensaje,
+                'licencia_activa' => true,
+                'school' => $school,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Bridge activar licencia EduExce', ['id' => $idInstitucion, 'error' => $e->getMessage()]);
+
+            return response()->json(['error' => $e->getMessage()], 502);
+        }
+    }
+
+    public function desactivarLicenciaEduexce(int $idInstitucion, Request $request, EduExceLicenciaService $licenciaService): JsonResponse
+    {
+        if ($deny = $this->assertBridgeToken($request)) {
+            return $deny;
+        }
+
+        try {
+            $licenciaService->desactivarLicenciaEduexce($idInstitucion);
+
+            return response()->json([
+                'message' => 'Licencia ICFES desactivada para la institución.',
+                'licencia_activa' => false,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Bridge desactivar licencia EduExce', ['id' => $idInstitucion, 'error' => $e->getMessage()]);
+
+            return response()->json(['error' => $e->getMessage()], 502);
+        }
+    }
+
+    private function assertBridgeToken(Request $request): ?JsonResponse
+    {
+        $receivedToken = $request->header('X-Bridge-Token');
+        $expectedToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
+
+        if (empty($receivedToken) || $receivedToken !== $expectedToken) {
+            return response()->json(['error' => 'No autorizado. Token de seguridad inválido o ausente.'], 401);
+        }
+
+        return null;
     }
 }

@@ -38,4 +38,16 @@ class PermissionConst
 
     /** Aula Virtual - Aprendiz */
     const AULA_VIRTUAL_APRENDIZ = 'AULA_VIRTUAL_APRENDIZ';
+
+    /** Módulo ICFES / EduExce — operación en institución EduExce nativa */
+    const MODULO_ICFES = 'MODULO_ICFES';
+
+    /** Licencias ICFES — Virtual Technology (activar/desactivar por institución) */
+    const LICENCIA_ICFES = 'LICENCIA_ICFES';
+
+    /** @deprecated Use MODULO_ICFES o LICENCIA_ICFES */
+    const GESTION_ICFES = 'GESTION_ICFES';
+
+    /** Rol School para administradores de instituciones nativas EduExce (solo módulo ICFES). */
+    const ROL_ADMIN_INSTITUCION_EDUEXCE = 'ADMIN INSTITUCION EDUEXCE';
 }

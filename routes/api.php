@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\SchoolBridgeController;
+use App\Http\Controllers\EduExceIntegrationController;
+use App\Http\Controllers\EduExceLicenciaController;
 use App\Http\Controllers\EventoController;
 use App\Http\Controllers\GestionEventoHermanoController;
 use App\Http\Controllers\GestionEventoItemController;
@@ -181,6 +183,22 @@ Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
 // Integración con ERP
 Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
+Route::post('integration/eduexce-licencia/{idInstitucion}/activar', [SchoolBridgeController::class, 'activarLicenciaEduexce'])->whereNumber('idInstitucion');
+Route::post('integration/eduexce-licencia/{idInstitucion}/desactivar', [SchoolBridgeController::class, 'desactivarLicenciaEduexce'])->whereNumber('idInstitucion');
+
+// Integración EduExce (ICFES) — instituciones nativas
+Route::middleware('auth:api')->prefix('eduexce')->group(function () {
+    Route::get('configuracion', [EduExceIntegrationController::class, 'configuracion']);
+    Route::get('panel-sso', [EduExceIntegrationController::class, 'panelSso']);
+    Route::get('estado-conexion', [EduExceIntegrationController::class, 'estadoConexion']);
+    Route::get('estadisticas', [EduExceIntegrationController::class, 'estadisticas']);
+});
+
+Route::middleware('auth:api')->prefix('eduexce/licencias')->group(function () {
+    Route::get('/', [EduExceLicenciaController::class, 'index']);
+    Route::post('eduexce/{idInstitucion}/activar', [EduExceLicenciaController::class, 'activarEduexce'])->whereNumber('idInstitucion');
+    Route::post('eduexce/{idInstitucion}/desactivar', [EduExceLicenciaController::class, 'desactivarEduexce'])->whereNumber('idInstitucion');
+});
 
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
@@ -220,7 +238,7 @@ Route::post('company_update', [CompanyController::class, 'update']);
 //permisos
 Route::get('permisos', [AsignacionRolPermiso::class, 'index']);
 Route::get('permisos_rol', [AsignacionRolPermiso::class, 'permissionsByRole']);
-Route::put('asignar_rol_permiso', [AsignacionRolPermiso::class, 'assignFunctionality']);
+Route::match(['put', 'post'], 'asignar_rol_permiso', [AsignacionRolPermiso::class, 'assignFunctionality']);
 
 Route::middleware('auth:api')->group(function () {
     // Endpoint to create a permission (used by frontend)

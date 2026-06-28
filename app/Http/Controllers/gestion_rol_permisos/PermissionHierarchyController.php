@@ -86,6 +86,7 @@ class PermissionHierarchyController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
+            'name' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'descripcion' => ['nullable', 'string'],
             'idPermissionPadre' => ['nullable', 'integer', 'exists:permissions,id'],
@@ -96,14 +97,23 @@ class PermissionHierarchyController extends Controller
         $permission = Permission::findOrFail($id);
 
         $newDescription = $data['description'] ?? $data['descripcion'] ?? null;
+        $hasName = array_key_exists('name', $data) && trim((string) $data['name']) !== '';
+        $hasDescription = $newDescription !== null;
+        $hasIcon = array_key_exists('icon', $data);
+        $hasPath = array_key_exists('path', $data);
+        $hasParent = array_key_exists('idPermissionPadre', $data);
 
-        if ($newDescription === null && !isset($data['icon']) && !isset($data['path'])) {
+        if (!$hasName && !$hasDescription && !$hasIcon && !$hasPath && !$hasParent) {
             return response()->json([
                 'message' => 'No hay campos para actualizar.'
             ], 400);
         }
 
-        if ($newDescription !== null) {
+        if ($hasName) {
+            $permission->name = strtoupper(preg_replace('/\s+/', '_', trim($data['name'])));
+        }
+
+        if ($hasDescription) {
             $permission->description = $newDescription;
         }
 

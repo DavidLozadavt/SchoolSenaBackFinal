@@ -3,53 +3,52 @@
 namespace App\Http\Controllers\gestion_rol_permisos;
 
 use App\Http\Controllers\Controller;
+use App\Models\Permission;
+use App\Models\Rol;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 
 class AsignacionRolPermiso extends Controller
 {
-
-
-    public function index()
+    public function index(): JsonResponse
     {
-        $permisos = Permission::All();
-
-        return response()->json($permisos);
+        return response()->json(Permission::query()->orderBy('name')->get());
     }
 
-    public function permissionsByRole(Request  $request)
+    public function permissionsByRole(Request $request): JsonResponse
     {
+        $request->validate([
+            'rol' => 'required|integer|exists:roles,id',
+        ]);
 
-        $rol = $request->input('rol');
+        $role = Rol::findOrFail($request->input('rol'));
 
-        $role = Role::findOrFail($rol);
-        $groupsWithRoles = $role->getPermissionNames();
-
-
-        return response()->json($groupsWithRoles);
+        return response()->json($role->getPermissionNames()->values()->all());
     }
 
-
-    public function assignFunctionality(Request $request)
+    public function assignFunctionality(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'idRol' => 'required|integer|exists:roles,id',
+            'funciones' => 'nullable|array',
+            'funciones.*' => 'integer|exists:permissions,id',
+        ]);
 
-        // $user= User::find(auth()->user()->id);
-        // $user->assignRole("ADMINISTRADOR_VT");
-        // $user=Rol::all();
+        $role = Rol::findOrFail($validated['idRol']);
+        $permissionIds = $validated['funciones'] ?? [];
 
-        $roles = Role::find($request->idRol);
-        // dd($roles);
-        DB::table('role_has_permissions')
-            ->where('role_id', $request->idRol)
-            ->delete();
+        $permissions = Permission::whereIn('id', $permissionIds)->get();
+        $role->syncPermissions($permissions);
 
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
 
-        $roles->syncPermissions($request->input('funciones', []));
-        // $permisos= auth()->user();
-        // dd($request->all());
-
-        return $roles;
+        return response()->json([
+            'message' => 'Permisos asignados correctamente',
+            'role_id' => $role->id,
+            'role_name' => $role->name,
+            'permissions_count' => $permissions->count(),
+            'permissions' => $permissions->pluck('name')->values()->all(),
+        ]);
     }
 }
