@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\PortafolioController;
+use App\Http\Controllers\PortafolioDocumentoController;
+use App\Http\Controllers\PortafolioFichaController;
 use App\Http\Controllers\SchoolBridgeController;
 use App\Http\Controllers\EventoController;
 use App\Http\Controllers\GestionEventoHermanoController;
@@ -1696,3 +1699,13 @@ Route::prefix('invitado')->group(function () {
     Route::delete('/{id}', [GestionEventoHermanoController::class, 'destroy']);
 });
 
+
+
+Route::middleware('auth:api')->group(function () {
+    Route::get('portafolios/instructor/{idContrato}', [PortafolioController::class, 'portafoliosInstructor']);
+    Route::get('portafolios/{id}/fichas', [PortafolioController::class, 'fichas']);
+    Route::get('portafolios/{id}/descargar-zip', [PortafolioController::class, 'downloadZip']);
+    Route::apiResource('portafolios', PortafolioController::class);
+    Route::apiResource('portafolio-fichas', PortafolioFichaController::class);
+    Route::apiResource('portafolio-documentos', PortafolioDocumentoController::class);
+});

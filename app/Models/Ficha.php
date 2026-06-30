@@ -91,4 +91,8 @@ class Ficha extends Model
     {
         return $this->belongsTo(ProyectoFormativo::class, 'idProyectoFormativo');
     }
+    public function portafolioFichas()
+    {
+        return $this->hasMany(PortafolioFicha::class, 'idFicha');
+    }
 }
