@@ -10,6 +10,7 @@ use App\Models\Person;
 use App\Models\Status;
 use App\Models\User;
 use App\Util\KeyUtil;
+use App\Util\PersonNameUtil;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -392,6 +393,26 @@ class UserController extends Controller
             ], 404);
         }
 
+        $nameFields = [
+            'nombre1' => ['required' => true, 'label' => 'El primer nombre'],
+            'nombre2' => ['required' => false, 'label' => 'El segundo nombre'],
+            'apellido1' => ['required' => true, 'label' => 'El primer apellido'],
+            'apellido2' => ['required' => false, 'label' => 'El segundo apellido'],
+        ];
+
+        $normalizedNames = [];
+        foreach ($nameFields as $field => $meta) {
+            if (!$request->has($field)) {
+                continue;
+            }
+            $normalized = PersonNameUtil::normalize($request->input($field));
+            $error = PersonNameUtil::validate($normalized, $meta['required'], $meta['label']);
+            if ($error !== null) {
+                return response()->json(['message' => $error], 422);
+            }
+            $normalizedNames[$field] = $normalized;
+        }
+
         try {
             $persona->rutaFoto = $this->storeLogoPersona($request, $persona->rutaFoto);
             // Firma digital es opcional; la migración puede no estar aplicada en todas las BDs.
@@ -407,6 +428,19 @@ class UserController extends Controller
             $persona->rh = $request->input('rh');
             $persona->sexo = $request->input('sexo');
             $persona->idTipoIdentificacion = $this->nullableIntFromRequest($request->input('idtipoIdentificacion'));
+
+            if (array_key_exists('nombre1', $normalizedNames)) {
+                $persona->nombre1 = $normalizedNames['nombre1'];
+            }
+            if (array_key_exists('nombre2', $normalizedNames)) {
+                $persona->nombre2 = $normalizedNames['nombre2'];
+            }
+            if (array_key_exists('apellido1', $normalizedNames)) {
+                $persona->apellido1 = $normalizedNames['apellido1'];
+            }
+            if (array_key_exists('apellido2', $normalizedNames)) {
+                $persona->apellido2 = $normalizedNames['apellido2'];
+            }
 
             $persona->save();
 
