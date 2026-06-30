@@ -44,7 +44,7 @@ class UserController extends Controller
     {
         $id = KeyUtil::idCompany();
         $search = $request->input('search', '');
-        $perPage = $request->input('per_page', 15);
+        $perPage = max(1, min(500, (int) $request->input('per_page', 15)));
         $stateId = $request->input('state_id', '');
         $roleId = $request->input('role_id', '');
         $sortOrder = $request->input('sort_order', '1');
@@ -72,8 +72,12 @@ class UserController extends Controller
                         ->orWhere('apellido1', 'like', "%{$search}%")
                         ->orWhere('nombre2', 'like', "%{$search}%")
                         ->orWhere('apellido2', 'like', "%{$search}%")
-                        ->orWhere('identificacion', 'like', "%{$search}%");
+                        ->orWhere('identificacion', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
                 })
+                    ->orWhereHas('user', function ($q2) use ($search) {
+                        $q2->where('email', 'like', "%{$search}%");
+                    })
                     ->orWhereHas('roles', function ($q2) use ($search) {
                         $q2->where('name', 'like', "%{$search}%");
                     });
