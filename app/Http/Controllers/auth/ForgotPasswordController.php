@@ -30,14 +30,67 @@ class ForgotPasswordController extends Controller
         }
     }
 
+    /**
+     * Propaga el nuevo hash de contraseña a nexiservice y RentUs cuando el
+     * usuario la cambia en School. Fire-and-forget: si un destino falla, no
+     * rompe el cambio de contraseña local.
+     */
+    private function syncPasswordToSiblings(string $email, string $hash): void
+    {
+        $bridgeToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
+        $targets = [
+            env('NEXI_API_URL', 'http://localhost:8001') . '/api/integration/sync-password',
+            env('RENTUS_API_URL', 'http://localhost:8004') . '/api/integration/sync-password',
+        ];
+
+        foreach ($targets as $url) {
+            try {
+                (new \GuzzleHttp\Client())->post($url, [
+                    'headers' => ['X-Bridge-Token' => $bridgeToken, 'Accept' => 'application/json'],
+                    'json' => ['email' => $email, 'contrasena_hash' => $hash],
+                    'timeout' => 5,
+                ]);
+            } catch (\Exception $e) {
+                \Log::error("Error sincronizando contraseña hacia {$url}: " . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Recibe la sincronización de contraseña cuando el usuario la cambia en
+     * nexiservice o RentUs. No dispara nada de vuelta (evita ping-pong).
+     */
+    public function syncPassword(Request $request)
+    {
+        $receivedToken = $request->header('X-Bridge-Token');
+        $expectedToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
+
+        if (empty($receivedToken) || $receivedToken !== $expectedToken) {
+            return response()->json(['error' => 'No autorizado.'], 401);
+        }
+
+        $request->validate([
+            'email' => 'required|email',
+            'contrasena_hash' => 'required|string',
+        ]);
+
+        $updated = DB::table('usuario')
+            ->where('email', $request->email)
+            ->update(['contrasena' => $request->contrasena_hash]);
+
+        return response()->json(['matched' => (bool) $updated]);
+    }
+
     public function sendOtp(Request $request)
     {
         try {
+            $lockedEmail = $this->authenticatedEmail();
+
             $request->validate([
-                'email' => 'required|email'
+                'email' => $lockedEmail ? 'nullable|email' : 'required|email'
             ]);
 
-            $email = $this->authenticatedEmail() ?? $request->email;
+            $email = $lockedEmail ?? $request->email;
 
             \Log::info('Enviando OTP a:', ['email' => $email]);
 
@@ -101,13 +154,15 @@ class ForgotPasswordController extends Controller
     {
         try {
             \Log::info('=== VERIFICANDO OTP ===');
-            
+
+            $lockedEmail = $this->authenticatedEmail();
+
             $request->validate([
-                'email' => 'required|email',
+                'email' => $lockedEmail ? 'nullable|email' : 'required|email',
                 'otp' => 'required|string|size:6'
             ]);
 
-            $email = $this->authenticatedEmail() ?? $request->email;
+            $email = $lockedEmail ?? $request->email;
             $otp = $request->otp;
 
             \Log::info('Datos recibidos:', ['email' => $email, 'otp' => $otp]);
@@ -259,6 +314,8 @@ class ForgotPasswordController extends Controller
         $user->save();
 
         \Log::info('Contraseña actualizada para usuario ID:', ['user_id' => $user->id]);
+
+        $this->syncPasswordToSiblings($user->email, $user->contrasena);
 
         try {
             // Ya tenemos el objeto $user, podemos usarlo directamente
