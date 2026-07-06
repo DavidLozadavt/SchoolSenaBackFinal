@@ -229,9 +229,14 @@ class Contract extends Model
     {
         return $this->hasMany(Acta::class, 'idContrato');
     }
-    
-    public function asignacionCategoriaFormacionContrato() : HasMany
+
+    public function asignacionCategoriaFormacionContrato(): HasMany
     {
         return $this->hasMany(AsignacionCategoriaFormacionContrato::class, 'idContrato', 'id');
+    }
+
+    public function portafolios()
+    {
+        return $this->hasMany(Portafolio::class, 'idContrato');
     }
 }

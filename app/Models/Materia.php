@@ -6,6 +6,7 @@ use App\Traits\FilterCompany;
 use App\Traits\SaveFile;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Materia extends Model
 {
@@ -84,5 +85,13 @@ class Materia extends Model
     public function hijas()
     {
         return $this->hasMany(Materia::class, 'idMateriaPadre');
+    }
+    public function faseProyectoRaps(): HasMany
+    {
+        return $this->hasMany(FaseProyectoRap::class, 'idMateria');
+    }
+    public function faseProyectoMaterias(): HasMany
+    {
+        return $this->hasMany(FaseProyectoMateria::class, 'idMateria');
     }
 }
