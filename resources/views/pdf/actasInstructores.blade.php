@@ -191,77 +191,75 @@
             <td colspan="3">
                 <p style="font-weight:bold; text-align:center; margin:4px 0;">DESARROLLO DE LA REUNIÓN</p>
 
-                {{-- Calendario --}}
-                <table style="margin: 6px auto; border-collapse: collapse; font-size:9px;">
-                    <tr>
-                        <td colspan="7" style="text-align:center; font-weight:bold; padding:3px;">
-                            Días de formación - {{ \Carbon\Carbon::parse($acta->fecha)->translatedFormat('F') }}
-                        </td>
-                    </tr>
-                    <tr>
-                        @foreach (['L', 'M', 'M', 'J', 'V', 'S', 'D'] as $cabecera)
-                            <td
-                                style="width:22px; height:18px; text-align:center; font-weight:bold; border:1px solid #ccc; background:#f0f0f0;">
-                                {{ $cabecera }}
-                            </td>
-                        @endforeach
-                    </tr>
-
+                {{-- Calendarios por mes --}}
+                @foreach ($calendario as $mesKey => $diasMes)
                     @php
-                        $inicioMes = \Carbon\Carbon::parse($acta->fecha)->startOfMonth();
-                        $finMes = \Carbon\Carbon::parse($acta->fecha)->endOfMonth();
-                        // dayOfWeek: 0=dom,1=lun...6=sab → queremos empezar en lunes
-                        // Desplazamiento: lunes=1 → offset 0, martes=2→1 ... domingo=0→6
-                        $primerDia = $inicioMes->copy();
-                        $offsetInicio = $primerDia->dayOfWeek === 0 ? 6 : $primerDia->dayOfWeek - 1;
-                        $totalDias = $finMes->day;
-                        $celda = 0;
-                        $totalCeldas = $offsetInicio + $totalDias;
-                        $filas = ceil($totalCeldas / 7);
-
-                        $calendarioIndexado = $calendario;
+                        $fechaMes = \Carbon\Carbon::createFromFormat('Y-m', $mesKey);
+                        $nombreMes = $fechaMes->translatedFormat('F Y');
                     @endphp
-
-                    @for ($fila = 0; $fila < $filas; $fila++)
+                    <table style="margin: 6px auto; border-collapse: collapse; font-size:9px;">
                         <tr>
-                            @for ($col = 0; $col < 7; $col++)
-                                @php
-                                    $numeroCelda = $fila * 7 + $col;
-                                    $dia = $numeroCelda - $offsetInicio + 1;
-                                    $esValido = $dia >= 1 && $dia <= $totalDias;
-                                    $coloresDia = $esValido ? ($calendarioIndexado[(string) $dia]['colores'] ?? []) : [];
-                                    $hayClase = count($coloresDia) > 0;
-                                    // Si hay más de un color, fondo degradado; si hay uno, ese color; si no hay, blanco
-                                    if ($hayClase && count($coloresDia) === 1) {
-                                        $bgStyle = 'background-color:' . $coloresDia[0] . ';';
-                                        $textColor = 'color:#fff;';
-                                    } elseif ($hayClase) {
-                                        // Dividir celda con múltiples colores usando background linear-gradient
-                                        $step = round(100 / count($coloresDia));
-                                        $gradientParts = [];
-                                        foreach ($coloresDia as $i => $c) {
-                                            $from = $i * $step;
-                                            $to = ($i + 1) * $step;
-                                            $gradientParts[] = "$c {$from}% {$to}%";
-                                        }
-                                        $bgStyle =
-                                            'background: linear-gradient(90deg, ' .
-                                            implode(', ', $gradientParts) .
-                                            ');';
-                                        $textColor = 'color:#fff;';
-                                    } else {
-                                        $bgStyle = 'background-color:#fff;';
-                                        $textColor = 'color:#000;';
-                                    }
-                                @endphp
-                                <td
-                                    style="width:22px; height:20px; text-align:center; border:1px solid #ccc; font-weight:bold; {{ $bgStyle }} {{ $textColor }}">
-                                    {{ $esValido ? $dia : '' }}
-                                </td>
-                            @endfor
+                            <td colspan="7" style="text-align:center; font-weight:bold; padding:3px;">
+                                Días de formación - {{ ucfirst($nombreMes) }}
+                            </td>
                         </tr>
-                    @endfor
-                </table>
+                        <tr>
+                            @foreach (['L', 'M', 'M', 'J', 'V', 'S', 'D'] as $cabecera)
+                                <td
+                                    style="width:22px; height:18px; text-align:center; font-weight:bold; border:1px solid #ccc; background:#f0f0f0;">
+                                    {{ $cabecera }}
+                                </td>
+                            @endforeach
+                        </tr>
+
+                        @php
+                            $inicioMes = $fechaMes->copy()->startOfMonth();
+                            $finMes = $fechaMes->copy()->endOfMonth();
+                            $primerDia = $inicioMes->copy();
+                            $offsetInicio = $primerDia->dayOfWeek === 0 ? 6 : $primerDia->dayOfWeek - 1;
+                            $totalDias = $finMes->day;
+                            $totalCeldas = $offsetInicio + $totalDias;
+                            $filas = ceil($totalCeldas / 7);
+                            $calendarioIndexado = $diasMes;
+                        @endphp
+
+                        @for ($fila = 0; $fila < $filas; $fila++)
+                            <tr>
+                                @for ($col = 0; $col < 7; $col++)
+                                    @php
+                                        $numeroCelda = $fila * 7 + $col;
+                                        $dia = $numeroCelda - $offsetInicio + 1;
+                                        $esValido = $dia >= 1 && $dia <= $totalDias;
+                                        $coloresDia = $esValido ? ($calendarioIndexado[(string) $dia]['colores'] ?? []) : [];
+                                        $hayClase = count($coloresDia) > 0;
+                                        
+                                        if ($hayClase && count($coloresDia) === 1) {
+                                            $bgStyle = 'background-color:' . $coloresDia[0] . ';';
+                                            $textColor = 'color:#fff;';
+                                        } elseif ($hayClase) {
+                                            $step = round(100 / count($coloresDia));
+                                            $gradientParts = [];
+                                            foreach ($coloresDia as $i => $c) {
+                                                $from = $i * $step;
+                                                $to = ($i + 1) * $step;
+                                                $gradientParts[] = "$c {$from}% {$to}%";
+                                            }
+                                            $bgStyle = 'background: linear-gradient(90deg, ' . implode(', ', $gradientParts) . ');';
+                                            $textColor = 'color:#fff;';
+                                        } else {
+                                            $bgStyle = 'background-color:#fff;';
+                                            $textColor = 'color:#000;';
+                                        }
+                                    @endphp
+                                    <td
+                                        style="width:22px; height:20px; text-align:center; border:1px solid #ccc; font-weight:bold; {{ $bgStyle }} {{ $textColor }}">
+                                        {{ $esValido ? $dia : '' }}
+                                    </td>
+                                @endfor
+                            </tr>
+                        @endfor
+                    </table>
+                @endforeach
 
                 {{-- Leyenda de instructores con color --}}
                 <table style="margin: 6px auto; border-collapse: collapse; font-size:9px;">
@@ -284,8 +282,7 @@
         <tr>
             <td colspan="3">
                 <p style="margin: 0 0 6px 0;">
-                    Los resultados que se orientarán en el mes de
-                    <strong>{{ \Carbon\Carbon::parse($acta->fecha)->translatedFormat('F') }}</strong> son:
+                    Los resultados que se orientarán en el periodo correspondiente son:
                 </p>
 
                 <table class="tabla-actividades" style="width:100%; font-size:10px;">

@@ -158,6 +158,7 @@ use App\Http\Controllers\CompromisosController;
 use App\Http\Controllers\ActaController;
 use App\Http\Controllers\FaseProyectoController;
 use App\Http\Controllers\FaseProyectoRapController;
+use App\Http\Controllers\FaseProyectoMateriaController;
 use App\Http\Controllers\gestion_horarios\AsignacionSesionController;
 use App\Http\Controllers\gestion_notificacion\NotificacionesSistemaController;
 use App\Http\Controllers\gestion_pensum\InasistenciaController;
@@ -1566,6 +1567,12 @@ Route::middleware('auth:api')->group(function () {
     Route::get('fase-proyecto-rap', [FaseProyectoRapController::class, 'index']);
     Route::post('fase-proyecto-rap', [FaseProyectoRapController::class, 'store']);
     Route::delete('fase-proyecto-rap/{id}', [FaseProyectoRapController::class, 'destroy']);
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::get('fase-proyecto-materia/materias', [FaseProyectoMateriaController::class, 'getMaterias']);
+    Route::post('fase-proyecto-materia', [FaseProyectoMateriaController::class, 'store']);
+    Route::delete('fase-proyecto-materia/{id}', [FaseProyectoMateriaController::class, 'destroy']);
 });
 
 Route::middleware('auth:api')->group(function () {

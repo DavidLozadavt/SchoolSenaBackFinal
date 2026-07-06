@@ -158,6 +158,9 @@ class PortafolioController extends Controller
             "4. horario de la Ficha",
             "5. Actas de Equipo Ejecutor",
             "6. Guías de aprendizaje",
+            "7. Instrumentos de evaluación",
+            "8. Materia de Formacion",
+            "9. Juicios evaluativos"
         ];
 
         $persona = $horarios->first()?->contrato?->persona;
@@ -179,10 +182,10 @@ class PortafolioController extends Controller
                 $urlPlaneacion = '';
                 try {
                     $urlPlaneacion = $excelService->generarExcelPlaneacion(
-                        $ficha['idFicha'], 
-                        $ficha['codigoFicha'], 
-                        $instructorLider, 
-                        $ficha['jornada'] ?? '', 
+                        $ficha['idFicha'],
+                        $ficha['codigoFicha'],
+                        $instructorLider,
+                        $ficha['jornada'] ?? '',
                         $ficha['programaFormacion'] ?? ''
                     );
                 } catch (\Exception $e) {
