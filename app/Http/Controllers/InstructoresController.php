@@ -583,6 +583,7 @@ class InstructoresController extends Controller
 
         return response()->json($instructors);
     }
+
     public function getFichasByContrato(Request $request)
     {
         $validated = $request->validate([
@@ -590,52 +591,174 @@ class InstructoresController extends Controller
             'periodo' => 'nullable|date_format:Y-m',
         ]);
 
-        $query = \App\Models\HorarioMateria::with([
+    $idContrato = $validated['idContrato'];
+
+    // Rango de calculo: el periodo solicitado o el mes actual
+    if (!empty($validated['periodo'])) {
+        $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
+        $rangoFin = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
+    } else {
+        $rangoInicio = \Carbon\Carbon::now()->startOfMonth();
+        $rangoFin = \Carbon\Carbon::now()->endOfMonth();
+    }
+
+    $overlapHorario = function ($q) use ($rangoInicio, $rangoFin) {
+        $q->whereBetween('fechaInicial', [$rangoInicio, $rangoFin])
+            ->orWhereBetween('fechaFinal', [$rangoInicio, $rangoFin])
+            ->orWhere(function ($q2) use ($rangoInicio, $rangoFin) {
+                $q2->where('fechaInicial', '<=', $rangoInicio)
+                    ->where('fechaFinal', '>=', $rangoFin);
+            });
+    };
+
+    // 1) Horarios donde el contrato es titular directo
+    $horariosDirectos = \App\Models\HorarioMateria::with([
             'ficha.asignacion.programa',
             'gradoMateria.materia.padre',
-            'detallesRmi'
         ])
-            ->where('idContrato', $validated['idContrato'])
-            ->where('estado', '!=', 'PENDIENTE');
+        ->where('idContrato', $idContrato)
+        ->where('estado', '!=', 'PENDIENTE')
+        ->where($overlapHorario)
+        ->get();
 
-        if (!empty($validated['periodo'])) {
-            $inicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-            $fin = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-            $query->where(function ($q) use ($inicio, $fin) {
-                $q->whereBetween('fechaInicial', [$inicio, $fin])
-                    ->orWhereBetween('fechaFinal', [$inicio, $fin])
-                    ->orWhere(function ($q2) use ($inicio, $fin) {
-                        $q2->where('fechaInicial', '<=', $inicio)
-                            ->where('fechaFinal', '>=', $fin);
-                    });
+    // 2) Asignaciones (COMPARTIDO / REEMPLAZO) donde este contrato participa como asignado
+    $overlapAsignacion = function ($q) use ($rangoInicio, $rangoFin) {
+        $q->whereBetween('fechaInicio', [$rangoInicio, $rangoFin])
+            ->orWhereBetween('fechaFin', [$rangoInicio, $rangoFin])
+            ->orWhere(function ($q2) use ($rangoInicio, $rangoFin) {
+                $q2->where('fechaInicio', '<=', $rangoInicio)
+                    ->where('fechaFin', '>=', $rangoFin);
             });
+    };
+
+    $asignaciones = \App\Models\AsignacionSesion::whereIn('tipoAsignacion', ['HORARIO COMPARTIDO', 'REEMPLAZO'])
+        ->where('idContrato', $idContrato)
+        ->where($overlapAsignacion)
+        ->get();
+
+    $idsHorariosAsignados = $asignaciones->pluck('idHorarioMateria')->unique()->values();
+
+    $horariosDeAsignaciones = \App\Models\HorarioMateria::with([
+            'ficha.asignacion.programa',
+            'gradoMateria.materia.padre',
+            'contrato.persona', // para saber a quien se le esta reemplazando
+        ])
+        ->whereIn('id', $idsHorariosAsignados)
+        ->where('estado', '!=', 'PENDIENTE')
+        ->get()
+        ->keyBy('id');
+
+    // 3) Si este contrato es titular de algun horario que en este periodo fue REEMPLAZADO
+    //    por otra persona, se descuenta ese rango de fechas de su conteo (para no duplicar horas).
+    $idsHorariosDirectos = $horariosDirectos->pluck('id');
+    $reemplazosSobreMisHorarios = \App\Models\AsignacionSesion::where('tipoAsignacion', 'REEMPLAZO')
+        ->whereIn('idHorarioMateria', $idsHorariosDirectos)
+        ->where('idContrato', '!=', $idContrato)
+        ->where($overlapAsignacion)
+        ->get()
+        ->groupBy('idHorarioMateria');
+
+    // Construimos una coleccion unificada de "registros":
+    // [horario, origen(DIRECTO|COMPARTIDO|REEMPLAZO), desde, hasta, contratoOriginal]
+    $registros = collect();
+
+    foreach ($horariosDirectos as $h) {
+        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
+        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
+
+        // Recortamos el rango si parte (o todo) de este horario fue cubierto por un reemplazo de otra persona
+        $reemplazos = $reemplazosSobreMisHorarios->get($h->id, collect());
+
+        if ($reemplazos->isEmpty()) {
+            if ($desde->lte($hasta)) {
+                $registros->push([
+                    'horario' => $h,
+                    'origen' => 'DIRECTO',
+                    'desde' => $desde,
+                    'hasta' => $hasta,
+                    'contratoOriginal' => null,
+                ]);
+            }
+        } else {
+            // Partimos el rango del titular en los huecos que quedan libres de reemplazo
+            $segmentos = [[$desde->copy(), $hasta->copy()]];
+            foreach ($reemplazos as $r) {
+                $rDesde = \Carbon\Carbon::parse($r->fechaInicio);
+                $rHasta = \Carbon\Carbon::parse($r->fechaFin);
+                $nuevosSegmentos = [];
+                foreach ($segmentos as [$segDesde, $segHasta]) {
+                    if ($rHasta->lt($segDesde) || $rDesde->gt($segHasta)) {
+                        // no se solapan
+                        $nuevosSegmentos[] = [$segDesde, $segHasta];
+                        continue;
+                    }
+                    if ($rDesde->gt($segDesde)) {
+                        $nuevosSegmentos[] = [$segDesde->copy(), $rDesde->copy()->subDay()];
+                    }
+                    if ($rHasta->lt($segHasta)) {
+                        $nuevosSegmentos[] = [$rHasta->copy()->addDay(), $segHasta->copy()];
+                    }
+                }
+                $segmentos = $nuevosSegmentos;
+            }
+
+            foreach ($segmentos as [$segDesde, $segHasta]) {
+                if ($segDesde->lte($segHasta)) {
+                    $registros->push([
+                        'horario' => $h,
+                        'origen' => 'DIRECTO',
+                        'desde' => $segDesde,
+                        'hasta' => $segHasta,
+                        'contratoOriginal' => null,
+                    ]);
+                }
+            }
+        }
+    }
+
+    foreach ($asignaciones as $a) {
+        $h = $horariosDeAsignaciones->get($a->idHorarioMateria);
+        if (!$h) {
+            continue;
         }
 
+        $desde = \Carbon\Carbon::parse($a->fechaInicio)->max($rangoInicio)->max(\Carbon\Carbon::parse($h->fechaInicial));
+        $hasta = \Carbon\Carbon::parse($a->fechaFin)->min($rangoFin)->min(\Carbon\Carbon::parse($h->fechaFinal));
 
-        $horarios = $query->get();
+        if ($desde->gt($hasta)) {
+            continue;
+        }
 
-        $fichas = $horarios->groupBy('idFicha')->map(function ($horariosGrupo) use ($validated) {
-            $ficha = $horariosGrupo->first()->ficha;
+        $contratoOriginalNombre = null;
+        if ($a->tipoAsignacion === 'REEMPLAZO' && $h->contrato && $h->contrato->persona) {
+            $p = $h->contrato->persona;
+            $contratoOriginalNombre = trim($p->nombre1 . ' ' . $p->apellido1);
+        }
+
+        $registros->push([
+            'horario' => $h,
+            'origen' => $a->tipoAsignacion === 'REEMPLAZO' ? 'REEMPLAZO' : 'COMPARTIDO',
+            'desde' => $desde,
+            'hasta' => $hasta,
+            'contratoOriginal' => $contratoOriginalNombre,
+        ]);
+    }
+
+    $fichas = $registros
+        ->groupBy(fn ($r) => $r['horario']->ficha?->id)
+        ->map(function ($registrosGrupo) {
+            $ficha = $registrosGrupo->first()['horario']->ficha;
             $programa = $ficha?->asignacion?->programa;
 
-            // Paso 1: mapear cada horario con todos sus datos y su idGradoMateria
-            $horariosConDatos = $horariosGrupo->map(function ($h) use ($validated) {
+            $horariosConDatos = $registrosGrupo->map(function ($r) {
+                $h = $r['horario'];
                 $rap = $h->gradoMateria?->materia;
                 $competencia = $rap?->padre;
                 $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
 
-                // Determinar el rango a calcular
-                if (!empty($validated['periodo'])) {
-                    $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-                    $rangoFin = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
-                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
-                } else {
-                    $desde = \Carbon\Carbon::parse($h->fechaInicial)->max(\Carbon\Carbon::now()->startOfMonth());
-                    $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min(\Carbon\Carbon::now()->endOfMonth());
-                }
+                $desde = $r['desde'];
+                $hasta = $r['hasta'];
 
-                // idDia: 1=Lunes...6=Sabado, 7=Domingo → Carbon: 0=Domingo, 1=Lunes...6=Sabado
                 $idDiaInt = (int) $h->idDia;
                 $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
                 $cantidadSesiones = 0;
@@ -661,30 +784,11 @@ class InstructoresController extends Controller
                     'cantidadSesiones' => $cantidadSesiones,
                     'duracionHoras' => round($duracionSesion * $cantidadSesiones, 2),
                     'idDia' => $h->idDia,
-                    'esCompartida' => \App\Models\AsignacionSesion::where('idHorarioMateria', $h->id)
-                        ->where('tipoAsignacion', 'HORARIO COMPARTIDO')
-                        ->exists(),
-                    'compartidoCon' => \App\Models\HorarioMateria::with('contrato.persona')
-                        ->where('idFicha', $h->idFicha)
-                        ->where('idGradoMateria', $h->idGradoMateria)
-                        ->whereNotNull('idContrato')
-                        ->where('idContrato', '!=', $h->idContrato)
-                        ->get()
-                        ->map(function ($otro) {
-                            if ($otro->contrato && $otro->contrato->persona) {
-                                $p = $otro->contrato->persona;
-                                return trim($p->nombre1 . ' ' . $p->apellido1);
-                            }
-                            return null;
-                        })
-                        ->filter()
-                        ->unique()
-                        ->values()
-                        ->toArray()
+                    'origenAsignacion' => $r['origen'], // DIRECTO | COMPARTIDO | REEMPLAZO
+                    'reemplazaA' => $r['contratoOriginal'],
                 ];
             });
 
-            // Paso 2: agrupar por idGradoMateria
             $resultados = $horariosConDatos
                 ->groupBy('idGradoMateria')
                 ->map(function ($horariosGM) {
@@ -692,14 +796,13 @@ class InstructoresController extends Controller
                     $detallesRmi = DetalleRmi::whereHas('horarioMateria', function ($query) use ($primero) {
                         $query->where('idGradoMateria', $primero['idGradoMateria']);
                     })->get();
+
                     return [
                         'idGradoMateria' => $primero['idGradoMateria'],
                         'competencia' => $primero['competencia'],
                         'resultadoAprendizaje' => $primero['resultadoAprendizaje'],
                         'estadoAsociacion' => $detallesRmi->first()?->estadoAsociacion,
-                        'esCompartida' => $primero['esCompartida'] ?? false,
-                        'compartidoCon' => $primero['compartidoCon'] ?? [],
-                        'horarios' => $horariosGM->map(function ($item) use ($detallesRmi) {
+                        'horarios' => $horariosGM->map(function ($item) {
                             return [
                                 'idHorario' => $item['idHorario'],
                                 'horaInicial' => $item['horaInicial'],
@@ -709,7 +812,9 @@ class InstructoresController extends Controller
                                 'duracionSesion' => $item['duracionSesion'],
                                 'cantidadSesiones' => $item['cantidadSesiones'],
                                 'duracionHoras' => $item['duracionHoras'],
-                                'idDia' => $item['idDia']
+                                'idDia' => $item['idDia'],
+                                'origenAsignacion' => $item['origenAsignacion'],
+                                'reemplazaA' => $item['reemplazaA'],
                             ];
                         })->values(),
                     ];
