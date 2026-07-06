@@ -753,7 +753,7 @@
         $font       = $fontMetrics->getFont("Arial", "normal");
         $anchoPagina = $pdf->get_width();  // 612 para letter
 
-        $textoFooter = "GCCON-F-087 V1";
+        $textoFooter = "GCCON-F-087 V2";
         $anchoTexto  = $fontMetrics->getTextWidth($textoFooter, $font, 8);
         $xCentrado   = ($anchoPagina - $anchoTexto) / 2;
 

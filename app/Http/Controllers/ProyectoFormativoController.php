@@ -10,7 +10,7 @@ class ProyectoFormativoController extends Controller
 {
     public function index(Request $request)
     {
-        $query = ProyectoFormativo::with('programa', 'fases.actividades.faseProyectoRaps.materia');
+        $query = ProyectoFormativo::with('programa', 'fases.actividades.faseProyectoRaps.materia', 'fases.actividades.faseProyectoRaps.faseProyectoMaterias.materia');
 
         if ($request->has('idPrograma')) {
             $query->where('idPrograma', $request->idPrograma);
