@@ -1988,7 +1988,7 @@ class AsistenciaController extends Controller
                         ? 'Inasistencia justificada'
                         : (
                             $estadoJust === 'PENDIENTE'
-                                ? 'Justificación pendiente'
+                                ? 'Justificaciï¿½n pendiente'
                                 : (
                                     $estadoPermiso === 'APROBADO'
                                         ? 'Permiso aprobado'
@@ -1997,7 +1997,7 @@ class AsistenciaController extends Controller
                                                 ? 'Permiso pendiente'
                                                 : (
                                                     $estadoJust === 'RECHAZADO' || $estadoPermiso === 'RECHAZADO'
-                                                        ? 'Ausente (justificación rechazada)'
+                                                        ? 'Ausente (justificaciï¿½n rechazada)'
                                                         : 'Ausente'
                                                 )
                                         )
