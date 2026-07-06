@@ -34,6 +34,18 @@ class MatriculaAcademicaController extends Controller
             $idFicha   = $data['idFicha'] ?? null;
             // Si el frontend envía el horario exacto, usarlo directamente
             $idHorarioMateriaFijo = isset($data['idHorarioMateria']) ? (int)$data['idHorarioMateria'] : null;
+
+            // Fuente de verdad: el RAP del horario (gm.idMateria), no el id enviado por navegación
+            // (puede ser idMateriaPadre/competencia y dejar la lista vacía en técnicos/tecnólogos).
+            if ($idHorarioMateriaFijo) {
+                $horarioParaMateria = \App\Models\HorarioMateria::with('gradoMateria')->find($idHorarioMateriaFijo);
+                if ($horarioParaMateria?->gradoMateria?->idMateria) {
+                    $idMateria = (int) $horarioParaMateria->gradoMateria->idMateria;
+                }
+                if (!$idFicha && $horarioParaMateria?->idFicha) {
+                    $idFicha = (int) $horarioParaMateria->idFicha;
+                }
+            }
  
             $matriculasAcademicas = MatriculaAcademica::with([
                 'matricula.person',
