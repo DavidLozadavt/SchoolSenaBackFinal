@@ -151,25 +151,34 @@ class PortafolioController extends Controller
         })->values();
 
         // ── 5. Persistir todo en una transacción ──────────────────────────────
-        $documentosBase = [
-            "1. Programa de formacion",
-            "2. Proyecto formativo",
-            "3. Planeacion pedagogica",
-            "4. horario de la Ficha",
-            "5. Actas de Equipo Ejecutor",
-            "6. Guías de aprendizaje",
-            "7. Instrumentos de evaluación",
-            "8. Materia de Formacion",
-            "9. Juicios evaluativos"
+        $slugsBase = [
+            'programa-formacion',
+            'proyecto-formativo',
+            'planeacion-pedagogica',
+            'horario-ficha',
+            'actas-equipo-ejecutor',
+            'guias-aprendizaje',
+            'instrumentos-evaluacion',
+            'materia-formacion',
+            'juicios-evaluativos',
         ];
+
+        $categoriasBase = \App\Models\PortafolioCategoria::whereIn('slug', $slugsBase)
+            ->orderBy('orden')
+            ->get(); // trae id, nombre, slug — lo necesitas para el insert
 
         $persona = $horarios->first()?->contrato?->persona;
         $instructorLider = $persona ? trim($persona->nombre1 . ' ' . $persona->apellido1) : '';
 
-        \DB::transaction(function () use ($request, $fichas, $documentosBase, $instructorLider, &$portafolio) {
+        \DB::transaction(function () use ($request, $fichas, $categoriasBase, $instructorLider, &$portafolio) {
             $portafolio = Portafolio::create($request->only('descripcion', 'idContrato'));
 
             $excelService = new \App\Services\PlaneacionExcelService();
+
+            // ── Se consulta UNA sola vez, fuera del foreach ─────────────────────
+            $categoriasConHijos = \App\Models\PortafolioCategoria::whereIn('slug', ['horario-ficha', 'actas-equipo-ejecutor'])
+                ->with('hijos')
+                ->get();
 
             foreach ($fichas as $ficha) {
                 $pf = \App\Models\PortafolioFicha::create([
@@ -192,26 +201,41 @@ class PortafolioController extends Controller
                     \Log::error('Error generando excel planeación: ' . $e->getMessage());
                 }
 
-                // Insert en lote en lugar de uno a uno
+                // Documentos base (9 categorías raíz)
                 \App\Models\PortafolioDocumento::insert(
-                    array_map(fn($doc) => [
+                    $categoriasBase->map(fn($cat) => [
                         'idPortafolioFichas' => $pf->id,
-                        'descripcion' => $doc,
-                        'urlDocumento' => match ($doc) {
-                            "1. Programa de formacion" => $ficha['programaUrlDocumento'] ?? '',
-                            "2. Proyecto formativo" => $ficha['fichaUrlDocumento'] ?? '',
-                            "3. Planeacion pedagogica" => $urlPlaneacion ?? '',
+                        'idCategoria' => $cat->id,
+                        'descripcion' => $cat->nombre,
+                        'urlDocumento' => match ($cat->slug) {
+                            'programa-formacion' => $ficha['programaUrlDocumento'] ?? '',
+                            'proyecto-formativo' => $ficha['fichaUrlDocumento'] ?? '',
+                            'planeacion-pedagogica' => $urlPlaneacion ?? '',
                             default => '',
                         },
-                    ], $documentosBase)
+                    ])->toArray()
                 );
+
+                // Documentos de subcategorías (trimestres)
+                $documentosHijos = $categoriasConHijos->flatMap(
+                    fn($padre) => $padre->hijos->map(fn($hijo) => [
+                        'idPortafolioFichas' => $pf->id,
+                        'idCategoria' => $hijo->id,
+                        'descripcion' => $hijo->nombre,
+                        'urlDocumento' => '',
+                    ])
+                )->toArray();
+
+                if (!empty($documentosHijos)) {
+                    \App\Models\PortafolioDocumento::insert($documentosHijos);
+                }
             }
         });
 
         return response()->json([
             'success' => true,
             'message' => 'Portafolio creado correctamente.',
-            'data' => $portafolio->load('portafolioFichas.ficha', 'portafolioFichas.portafolioDocumentos'),
+            'data' => $portafolio->load('portafolioFichas.ficha', 'portafolioFichas.portafolioDocumentos.categoria'),
         ], 201);
     }
 
@@ -389,7 +413,7 @@ class PortafolioController extends Controller
     {
         $portafolio = Portafolio::with([
             'portafolioFichas.ficha',
-            'portafolioFichas.portafolioDocumentos'
+            'portafolioFichas.portafolioDocumentos.categoria.padre.padre.padre.padre', // <-- eager load de múltiples niveles
         ])->find($id);
 
         if (!$portafolio) {
@@ -411,7 +435,6 @@ class PortafolioController extends Controller
             ], 500);
         }
 
-        // Nivel 1: portafolio.descripcion
         $portafolioFolder = $this->sanitizeName($portafolio->descripcion, 'Portafolio_' . $portafolio->id);
 
         foreach ($portafolio->portafolioFichas as $portafolioFicha) {
@@ -419,23 +442,34 @@ class PortafolioController extends Controller
             $fichaFolder = $portafolioFolder . '/' . $this->sanitizeName($portafolioFicha->descripcion, 'Ficha_' . $portafolioFicha->id);
 
             foreach ($portafolioFicha->portafolioDocumentos as $documento) {
-                $documentoFolder = $fichaFolder . '/' . $this->sanitizeName($documento->descripcion, 'Documento_' . $documento->id);
-                $zip->addEmptyDir($documentoFolder);
+
+                // ── Construye la ruta de carpetas según la jerarquía de categorías ──
+                $categoriaFolder = $documento->categoria
+                    ? $fichaFolder . '/' . $this->buildCategoryPath($documento->categoria)
+                    : $fichaFolder . '/Otros_Documentos';
+
+                // Crear los directorios nivel por nivel para asegurar compatibilidad al extraer
+                $pathSegments = explode('/', $categoriaFolder);
+                $currentPath = '';
+                foreach ($pathSegments as $segment) {
+                    $currentPath .= ($currentPath === '' ? '' : '/') . $segment;
+                    $zip->addEmptyDir($currentPath);
+                }
 
                 if (empty($documento->urlDocumento)) {
                     \Log::warning("DOC {$documento->id} [{$documento->descripcion}]: URL vacía, se omite.");
                     continue;
                 }
 
-                $relativePath = ltrim($documento->urlDocumento, '/');
-                $relativePath = preg_replace('#^storage/#', '', $relativePath);
-                $filePath = storage_path('app/public/' . $relativePath);
+                // Usamos resolveStoragePath para extraer correctamente el path físico
+                $filePath = $this->resolveStoragePath($documento->urlDocumento);
 
-                if (file_exists($filePath) && is_file($filePath)) {
+                if ($filePath && file_exists($filePath) && is_file($filePath)) {
                     $extension = pathinfo($filePath, PATHINFO_EXTENSION);
                     $nombreArchivo = $this->sanitizeName($documento->descripcion, 'Documento_' . $documento->id) . '.' . $extension;
 
-                    $zip->addFile($filePath, $documentoFolder . '/' . $nombreArchivo);
+                    $zip->addFile($filePath, $categoriaFolder . '/' . $nombreArchivo);
+
                 }
             }
         }
@@ -443,6 +477,33 @@ class PortafolioController extends Controller
         $zip->close();
 
         return response()->download($zipFilePath)->deleteFileAfterSend(true);
+    }
+
+    /**
+     * Construye la ruta de carpetas subiendo por la jerarquía de categorías
+     * (padre/hijo/nieto...) hasta llegar a la raíz.
+     * Ej: "Actas de Equipo Ejecutor/Primer Trimestre"
+     */
+    private function buildCategoryPath($categoria, int $maxDepth = 10): string
+    {
+        $segmentos = [];
+        $actual = $categoria;
+        $vistos = [];
+
+        while ($actual && $maxDepth > 0) {
+            // Guard contra ciclos accidentales en la tabla self-referencing
+            if (in_array($actual->id, $vistos)) {
+                break;
+            }
+            $vistos[] = $actual->id;
+
+            array_unshift($segmentos, $this->sanitizeName($actual->nombre, 'Categoria_' . $actual->id));
+
+            $actual = $actual->padre; // sube un nivel
+            $maxDepth--;
+        }
+
+        return implode('/', $segmentos);
     }
 
     private function sanitizeName(?string $name, string $fallback): string

@@ -3,6 +3,7 @@
 use App\Http\Controllers\PortafolioController;
 use App\Http\Controllers\PortafolioDocumentoController;
 use App\Http\Controllers\PortafolioFichaController;
+use App\Http\Controllers\PortafolioCategoriaController;
 use App\Http\Controllers\SchoolBridgeController;
 use App\Http\Controllers\EventoController;
 use App\Http\Controllers\GestionEventoHermanoController;
@@ -1715,4 +1716,5 @@ Route::middleware('auth:api')->group(function () {
     Route::apiResource('portafolios', PortafolioController::class);
     Route::apiResource('portafolio-fichas', PortafolioFichaController::class);
     Route::apiResource('portafolio-documentos', PortafolioDocumentoController::class);
+    Route::get('portafolio-categorias', [PortafolioCategoriaController::class, 'index']);
 });
