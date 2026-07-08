@@ -1831,7 +1831,7 @@ class FichaController extends Controller
     }
 
     /**
-     * Momento de fin de la franja de clase en la fecha dada (ajuste tarde/noche como en sincronizarSesionesCompletadas).
+     * Momento de fin de la franja de clase en la fecha dada (horas literales de horarioMateria, 24h).
      */
     private function carbonFinVentanaClaseDia(
         string $fechaYmd,
@@ -1849,16 +1849,6 @@ class FichaController extends Controller
         $mIni = $horaIni->minute;
         $hFin = $horaFin->hour;
         $mFin = $horaFin->minute;
-        $lowerJ = strtolower((string) $jornadaNombre);
-        $esTardeONoche = str_contains($lowerJ, 'tarde')
-            || str_contains($lowerJ, 'noche')
-            || str_contains($lowerJ, 'nocturna');
-        if ($esTardeONoche && $hIni < 12) {
-            $hIni += 12;
-        }
-        if ($esTardeONoche && $hFin < 12) {
-            $hFin += 12;
-        }
 
         $base = Carbon::parse($fechaYmd)->startOfDay();
         $inicio = $base->copy()->setTime($hIni, $mIni, 0);
