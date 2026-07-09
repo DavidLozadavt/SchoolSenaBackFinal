@@ -1814,9 +1814,11 @@ class FichaController extends Controller
      */
     private function metaHorarioParaSesiones(int $idHorarioMateria): ?object
     {
-        $row = DB::table('horarioMateria as hm')
-            ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
-            ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+        $query = DB::table('horarioMateria as hm')
+            ->join('ficha as f', 'hm.idFicha', '=', 'f.id');
+        $this->applyJoinJornadaFromFicha($query, 'f');
+
+        $row = $query
             ->where('hm.id', $idHorarioMateria)
             ->select(['hm.horaInicial', 'hm.horaFinal', 'j.nombreJornada as jornada_nombre'])
             ->first();
@@ -2125,6 +2127,20 @@ class FichaController extends Controller
     }
 
     /**
+     * Jornada en ficha (legacy) o vía apertura del programa (colegio).
+     */
+    private function applyJoinJornadaFromFicha($query, string $fichaAlias = 'f'): void
+    {
+        if (Schema::hasColumn('ficha', 'idJornada')) {
+            $query->join('jornadas as j', "{$fichaAlias}.idJornada", '=', 'j.id');
+            return;
+        }
+
+        $query->leftJoin('aperturarprograma as ap_hor', 'ap_hor.id', '=', "{$fichaAlias}.idAsignacion")
+            ->leftJoin('jornadas as j', 'j.id', '=', 'ap_hor.idJornada');
+    }
+
+    /**
      * Parsea una hora de forma segura desde diferentes formatos
      * 
      * @param string $hora Hora en formato H:i:s o H:i
@@ -2139,9 +2155,11 @@ class FichaController extends Controller
      */
     private function obtenerSesionesCompletadas(int $idHorarioMateria): array
     {
-        $horario = DB::table('horarioMateria as hm')
-            ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
-            ->join('jornadas as j', 'f.idJornada', '=', 'j.id')
+        $query = DB::table('horarioMateria as hm')
+            ->join('ficha as f', 'hm.idFicha', '=', 'f.id');
+        $this->applyJoinJornadaFromFicha($query, 'f');
+
+        $horario = $query
             ->where('hm.id', $idHorarioMateria)
             ->select([
                 'hm.fechaInicial',
@@ -2272,16 +2290,44 @@ class FichaController extends Controller
             // Mantener alineado con otros módulos (GruposFichaController / AsignacionActividadController).
             $estadosVigentes = ['ACTIVO', 'EN CURSO', 'CURSANDO', 'MATRICULADO', 'EN FORMACION'];
 
-            // 1) Fuente primaria: matrícula con ficha directa (algunos entornos llenan m.idFicha).
+            // 1) Fuente primaria: matrícula con ficha directa (colegio / SENA).
             $matriculas = DB::table('matricula as m')
                 ->where('m.idPersona', $idPersona)
                 ->whereIn(DB::raw('UPPER(TRIM(m.estado))'), $estadosVigentes)
-                ->whereNotNull('m.idFicha')
-                ->select('m.idFicha', 'm.estado', 'm.id')
-                ->distinct()
+                ->select('m.idFicha', 'm.idGrado', 'm.estado', 'm.id')
+                ->orderByDesc('m.id')
                 ->get();
 
-            $idsFichas = $matriculas->pluck('idFicha')->map(fn($v) => (int) $v)->filter()->unique()->values()->toArray();
+            $idsFichas = [];
+            foreach ($matriculas as $matriculaRow) {
+                if (!empty($matriculaRow->idFicha)) {
+                    $idsFichas[] = (int) $matriculaRow->idFicha;
+                    continue;
+                }
+                if (!empty($matriculaRow->idGrado)) {
+                    $fichasGrado = DB::table('ficha as f')
+                        ->where('f.idGrado', (int) $matriculaRow->idGrado)
+                        ->pluck('f.id')
+                        ->map(fn ($v) => (int) $v)
+                        ->toArray();
+                    $idsFichas = array_merge($idsFichas, $fichasGrado);
+                }
+            }
+
+            $idsFichas = collect($idsFichas)->filter()->unique()->values()->toArray();
+
+            // Colegio: si la matrícula trae grado, limitar a fichas de ese grado (apertura + grado).
+            $idGradosMatricula = $matriculas->pluck('idGrado')->filter()->map(fn ($v) => (int) $v)->unique()->values();
+            if ($idsFichas !== [] && $idGradosMatricula->isNotEmpty()) {
+                $idsFichas = DB::table('ficha')
+                    ->whereIn('id', $idsFichas)
+                    ->whereIn('idGrado', $idGradosMatricula->all())
+                    ->pluck('id')
+                    ->map(fn ($v) => (int) $v)
+                    ->unique()
+                    ->values()
+                    ->toArray();
+            }
 
             // 2) Fallback: si no hay m.idFicha, derivar fichas desde matriculaAcademica.
             // Esto cubre aprendices que sí están matriculados en una ficha, pero su ficha solo está reflejada en el módulo académico.
@@ -2299,6 +2345,36 @@ class FichaController extends Controller
                     ->unique()
                     ->values()
                     ->toArray();
+            }
+
+            // 3) Colegio (ESTUDIANTEUP): resolver ficha por idGrado cuando aún no hay ficha explícita.
+            if ($idsFichas === []) {
+                $matriculasColegio = DB::table('matricula as m')
+                    ->where('m.idPersona', $idPersona)
+                    ->whereIn(DB::raw('UPPER(TRIM(m.estado))'), $estadosVigentes)
+                    ->whereNotNull('m.idGrado')
+                    ->select('m.idGrado')
+                    ->distinct()
+                    ->get();
+
+                foreach ($matriculasColegio as $matriculaColegio) {
+                    $idGrado = (int) $matriculaColegio->idGrado;
+                    if ($idGrado <= 0) {
+                        continue;
+                    }
+
+                    $fichasGrado = DB::table('ficha as f')
+                        ->where('f.idGrado', $idGrado)
+                        ->pluck('f.id')
+                        ->map(fn ($v) => (int) $v)
+                        ->filter()
+                        ->values()
+                        ->toArray();
+
+                    $idsFichas = array_merge($idsFichas, $fichasGrado);
+                }
+
+                $idsFichas = array_values(array_unique(array_filter($idsFichas)));
             }
 
             if ($idsFichas === []) {
@@ -2329,6 +2405,8 @@ class FichaController extends Controller
                     COALESCE(per.apellido2, '')
                 )) as profesor_nombre"),
                     'per.email as profesor_email',
+                    'per.celular as profesor_celular',
+                    'per.telefonoFijo as profesor_telefono_fijo',
                     'gm.idMateria as idMateria'
                 ])
                 ->join('ficha as f', 'hm.idFicha', '=', 'f.id')
@@ -2640,12 +2718,17 @@ class FichaController extends Controller
                     ->toArray();
 
                 // — Respuesta final con tipos forzados —
+                $profesorCelular = trim((string) ($primerHorario->profesor_celular ?? ''));
+                $profesorFijo = trim((string) ($primerHorario->profesor_telefono_fijo ?? ''));
+                $profesorTelefono = $profesorCelular !== '' ? $profesorCelular : $profesorFijo;
+
                 $materias[] = [
                     'idMateria'           => (int)   $primerHorario->idMateria,
                     'materia_nombre'      => (string) ($primerHorario->materia_nombre ?? ''),
                     'ficha_codigo'        => (string) ($primerHorario->ficha_codigo ?? ''),
                     'profesor_nombre'     => (string) trim($primerHorario->profesor_nombre ?? 'Sin asignar'),
                     'profesor_email'      => (string) ($primerHorario->profesor_email ?? ''),
+                    'profesor_telefono'     => (string) $profesorTelefono,
                     'aula_nombre'         => (string) $aulaNombre,
                     'horario_texto'       => (string) $horarioTexto,
                     'horarios'            => $diasHorarios,
