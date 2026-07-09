@@ -64,7 +64,6 @@ class SchoolBridgeController extends Controller
                 'digitoVerificacion' => 0,
                 'idCiudad' => 1,
                 'rutaLogo' => '',
-                'reelsUrls' => '',
                 'valorIva' => 0.00,
                 'devolucion' => 0,
                 'garantia' => 0,
@@ -129,30 +128,12 @@ class SchoolBridgeController extends Controller
             $activation->fechaFin = now()->addYears(5)->format('Y-m-d');
             $activation->save();
 
-            // 7. Crear el rol de 'administradorVT' asignado a este tenant y asignárselo
+            // 7. Asignar el rol real de administrador (ya gestionado desde Gestión de Roles y Permisos)
             $role = Role::firstOrCreate([
-                'name' => 'administradorVT',
+                'name' => 'ADMINISTRADOR VT',
                 'guard_name' => 'web',
             ]);
 
-            // Sincronizar permisos estándar de administración
-            $permissions = [
-                'GESTION_ROLES',
-                'GESTION_ROL_PERMISOS',
-                'GESTION_USUARIO',
-                'GESTION_PROCESOS',
-                'GESTION_TIPO_DOCUMENTOS',
-                'GESTION_MEDIO_PAGO',
-                'GESTION_TIPO_PAGO',
-                'GESTION_TIPO_TRANSACCION',
-                'GESTION_CONTRATACION',
-                'GESTION_CONTRATOS',
-                'GESTION_PAGOS_CONTRATOS',
-                'GESTION_LABORAL',
-            ];
-            $role->syncPermissions($permissions);
-
-            // Asignar el rol
             $activation->assignRole($role);
 
             DB::commit();

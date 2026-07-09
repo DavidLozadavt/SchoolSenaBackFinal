@@ -181,6 +181,7 @@ Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
 // Integración con ERP
 Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
+Route::post('integration/sync-password', [ForgotPasswordController::class, 'syncPassword']);
 
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
