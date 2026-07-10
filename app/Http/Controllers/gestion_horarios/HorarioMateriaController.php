@@ -1449,7 +1449,7 @@ class HorarioMateriaController extends Controller
                     'grado' => [
                         'id' => $gradoPrograma->grado->id,
                         'nombre' => $gradoPrograma->grado->nombreGrado,
-                        'numeroGrado' => $gradoPrograma->grado->numeroGrado,
+                        'numeroGrado' => (int) $gradoPrograma->grado->numeroGrado,
                         'fechaInicio' => $gradoPrograma->fechaInicio,
                         'fechaFin' => $gradoPrograma->fechaFin,
                         'estado' => $gradoPrograma->estado,
