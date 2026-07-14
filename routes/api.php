@@ -1717,4 +1717,5 @@ Route::middleware('auth:api')->group(function () {
     Route::apiResource('portafolio-fichas', PortafolioFichaController::class);
     Route::apiResource('portafolio-documentos', PortafolioDocumentoController::class);
     Route::get('portafolio-categorias', [PortafolioCategoriaController::class, 'index']);
+    Route::post('portafolio-categorias', [PortafolioCategoriaController::class, 'store']);
 });
