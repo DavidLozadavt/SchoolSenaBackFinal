@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\DetalleRmi;
 use App\Models\Portafolio;
 use App\Models\Contract;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -216,18 +217,91 @@ class PortafolioController extends Controller
                     ])->toArray()
                 );
 
-                // Documentos de subcategorías (trimestres)
-                $documentosHijos = $categoriasConHijos->flatMap(
-                    fn($padre) => $padre->hijos->map(fn($hijo) => [
-                        'idPortafolioFichas' => $pf->id,
-                        'idCategoria' => $hijo->id,
-                        'descripcion' => $hijo->nombre,
-                        'urlDocumento' => '',
-                    ])
-                )->toArray();
+                // ── 6. Asociar actas y horarios mensuales a los trimestres ───────────────────
+                $actasPorTrimestre = [
+                    't1' => [],
+                    't2' => [],
+                    't3' => [],
+                    't4' => []
+                ];
 
-                if (!empty($documentosHijos)) {
-                    \App\Models\PortafolioDocumento::insert($documentosHijos);
+                // Obtener actas de la ficha
+                $actas = \App\Models\Acta::where('idFicha', $ficha['idFicha'])
+                    ->whereYear('fecha', now()->year)
+                    ->get();
+
+                foreach ($actas as $acta) {
+                    $mesActa = \Carbon\Carbon::parse($acta->fecha)->month;
+                    $trimestre = ceil($mesActa / 3); // 1-3: T1, 4-6: T2, 7-9: T3, 10-12: T4
+                    $actasPorTrimestre["t$trimestre"][] = $acta;
+                }
+
+                // Asociar actas a sus respectivas categorías
+                foreach ($actasPorTrimestre as $trimestre => $actasTrimestre) {
+                    if (empty($actasTrimestre))
+                        continue;
+
+                    $categoriaActas = \App\Models\PortafolioCategoria::where('slug', "actas-equipo-ejecutor-$trimestre")->first();
+                    if ($categoriaActas) {
+                        foreach ($actasTrimestre as $acta) {
+                            $urlDocumento = $acta->rutaDocumentoUrl ?: '';
+
+                            if ($urlDocumento === '') {
+                                \Log::warning("Acta {$acta->id} sin documento, omitiendo registro en el portafolio.", [
+                                    'idFicha' => $ficha['idFicha'],
+                                    'idActa' => $acta->id,
+                                ]);
+                                continue;
+                            }
+
+                            \App\Models\PortafolioDocumento::create([
+                                'idPortafolioFichas' => $pf->id,
+                                'idCategoria' => $categoriaActas->id,
+                                'descripcion' => "Acta No. {$acta->id} - {$acta->nombre}",
+                                'urlDocumento' => $urlDocumento,
+                            ]);
+                        }
+                    }
+                }
+
+                // Generar Horario por mes (para todos los meses que tienen programación)
+                $mesesHorarios = \App\Models\HorarioMateria::where('idFicha', $ficha['idFicha'])
+                    ->where('estado', '!=', 'PENDIENTE')
+                    ->where(function ($q) {
+                        $q->whereYear('fechaInicial', now()->year)
+                            ->orWhereYear('fechaFinal', now()->year);
+                    })
+                    ->get()
+                    ->flatMap(function ($h) {
+                        $inicio = \Carbon\Carbon::parse($h->fechaInicial)->startOfMonth();
+                        $fin = \Carbon\Carbon::parse($h->fechaFinal)->endOfMonth();
+                        $meses = [];
+                        $cursor = $inicio->copy();
+                        while ($cursor->lte($fin)) {
+                            if ($cursor->year === now()->year) {
+                                $meses[] = $cursor->month;
+                            }
+                            $cursor->addMonth();
+                        }
+                        return $meses;
+                    })->unique()->sort()->values();
+
+                foreach ($mesesHorarios as $mes) {
+                    $trimestreNum = ceil($mes / 3);
+                    $trimestreSlug = "t$trimestreNum";
+                    $categoriaHorario = \App\Models\PortafolioCategoria::where('slug', "horario-ficha-$trimestreSlug")->first();
+
+                    if ($categoriaHorario) {
+                        $urlHorarioMensual = $this->generarPdfHorarioMensual($ficha['idFicha'], $mes);
+                        $nombreMes = ucfirst(\Carbon\Carbon::create(null, $mes, 1)->translatedFormat('F'));
+
+                        \App\Models\PortafolioDocumento::create([
+                            'idPortafolioFichas' => $pf->id,
+                            'idCategoria' => $categoriaHorario->id,
+                            'descripcion' => "Horario mensual - $nombreMes",
+                            'urlDocumento' => $urlHorarioMensual,
+                        ]);
+                    }
                 }
             }
         });
@@ -532,5 +606,104 @@ class PortafolioController extends Controller
         // También soporta paths que ya vienen como rutas relativas puras
         // (sin "storage/" al inicio, ej: "programas/documentos/...")
         return storage_path('app/public/' . $path);
+    }
+
+    protected function generarPdfHorarioMensual($idFicha, $mes)
+    {
+        $ficha = \App\Models\Ficha::findOrFail($idFicha);
+        $inicioMes = \Carbon\Carbon::create(now()->year, $mes, 1)->startOfMonth();
+        $finMes = $inicioMes->copy()->endOfMonth();
+
+        $horarios = \App\Models\HorarioMateria::with(['contrato.persona', 'gradoMateria.materia.padre'])
+            ->where('idFicha', $idFicha)
+            ->where('estado', '!=', 'PENDIENTE')
+            ->where(function ($q) use ($inicioMes, $finMes) {
+                $q->whereBetween('fechaInicial', [$inicioMes->toDateString(), $finMes->toDateString()])
+                    ->orWhereBetween('fechaFinal', [$inicioMes->toDateString(), $finMes->toDateString()])
+                    ->orWhere(function ($q2) use ($inicioMes, $finMes) {
+                        $q2->where('fechaInicial', '<=', $inicioMes->toDateString())
+                            ->where('fechaFinal', '>=', $finMes->toDateString());
+                    });
+            })
+            ->get();
+
+        $instructoresConColor = $this->obtenerInstructoresConColor($horarios);
+        $calendario = $this->generarCalendarioMensual($horarios, $inicioMes->toDateString(), $finMes->toDateString());
+
+        $trimestre = ceil($mes / 3);
+        $pdf = Pdf::loadView('pdf.horario_mensual', [
+            'ficha' => $ficha,
+            'calendario' => $calendario,
+            'instructoresConColor' => $instructoresConColor,
+            'trimestre' => $trimestre,
+        ])->setPaper('letter');
+
+        if (!\Storage::disk('public')->exists('portafolios/horarios')) {
+            \Storage::disk('public')->makeDirectory('portafolios/horarios');
+        }
+
+        $nombreMes = ucfirst($inicioMes->translatedFormat('F'));
+        $path = "portafolios/horarios/{$ficha->codigo}-$nombreMes.pdf";
+        $pdf->save(storage_path("app/public/$path"));
+        return url("storage/$path");
+    }
+    protected function obtenerInstructoresConColor($horarios)
+    {
+        $instructores = $horarios->groupBy('idContrato')->map(function ($grupo) {
+            $persona = $grupo->first()->contrato?->persona;
+            return [
+                'idContrato' => $grupo->first()->idContrato,
+                'nombre' => $persona?->nombre1,
+                'apellido' => $persona?->apellido1,
+            ];
+        })->values();
+
+        $colores = ['#FFD700', '#FFA500', '#4CAF50', '#2196F3', '#E91E63', '#9C27B0'];
+        return $instructores->map(function ($instructor, $index) use ($colores) {
+            $instructor['color'] = $colores[$index % count($colores)];
+            return $instructor;
+        });
+    }
+
+    protected function generarCalendarioMensual($horarios, $inicio, $fin)
+    {
+        $diasDelMes = \Carbon\Carbon::parse($inicio)->toPeriod(\Carbon\Carbon::parse($fin));
+        $calendario = [];
+
+        foreach ($diasDelMes as $dia) {
+            $mesKey = $dia->format('Y-m');
+            if (!isset($calendario[$mesKey])) {
+                $calendario[$mesKey] = [];
+            }
+            $calendario[$mesKey][$dia->day] = ['colores' => [], 'esFinde' => $dia->isWeekend()];
+        }
+
+        foreach ($horarios->groupBy('idContrato') as $idContrato => $horariosInstructor) {
+            $instructorConColor = $this->obtenerInstructoresConColor($horarios)->firstWhere('idContrato', $idContrato);
+            if (!$instructorConColor)
+                continue;
+            $color = $instructorConColor['color'];
+
+            foreach ($horariosInstructor as $h) {
+                $desde = \Carbon\Carbon::parse($h->fechaInicial)->max(\Carbon\Carbon::parse($inicio));
+                $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min(\Carbon\Carbon::parse($fin));
+                $idDiaInt = (int) $h->idDia;
+                $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
+
+                $cursor = $desde->copy();
+                while ($cursor->lte($hasta)) {
+                    if ($cursor->dayOfWeek === $diaSemanaCarbon) {
+                        $mesKey = $cursor->format('Y-m');
+                        $day = $cursor->day;
+                        if (isset($calendario[$mesKey][$day]) && !in_array($color, $calendario[$mesKey][$day]['colores'])) {
+                            $calendario[$mesKey][$day]['colores'][] = $color;
+                        }
+                    }
+                    $cursor->addDay();
+                }
+            }
+        }
+
+        return $calendario;
     }
 }
