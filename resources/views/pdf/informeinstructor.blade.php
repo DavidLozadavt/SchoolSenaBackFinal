@@ -134,13 +134,30 @@
             word-wrap: break-word;
             overflow-wrap: break-word;
             white-space: normal;
-            /* Evita que el texto se mantenga en una sola línea */
         }
 
         .tabla-actividades .tabla-horarios {
             table-layout: fixed;
             width: 100%;
             font-size: 10px;
+        }
+
+        .tabla-anidada {
+            table-layout: fixed;
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            margin-bottom: 5px;
+            font-size: 9px;
+        }
+
+        .tabla-anidada td {
+            border: 1px solid #000;
+            padding: 3px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+            text-align: justify;
         }
     </style>
 </head>
@@ -345,7 +362,7 @@
         <colgroup>
             <col style="width: 5%;">
             <col style="width: 20%;">
-            <col style="width: 50%;">
+            <col style="width: 55%;">
             <col style="width: 20%;">
         </colgroup>
         <thead>
@@ -436,30 +453,34 @@
 
                     @foreach ($fichasConProyecto as $ficha)
                         @foreach ($ficha['materias'] as $materia)
-                            <table style="margin-top: 20px; width:100%">
+                            <table class="tabla-anidada">
+                                <colgroup>
+                                    <col style="width: 30%;">
+                                    <col style="width: 70%;">
+                                </colgroup>
                                 <tr>
-                                    <td style="text-align: justify; width: 30%">Ficha</td>
-                                    <td style="text-align: justify">{{ $ficha['codigoFicha'] }}</td>
+                                    <td style="font-weight:bold;">Ficha</td>
+                                    <td>{{ $ficha['codigoFicha'] }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Programa</td>
-                                    <td style="text-align: justify">{{ $ficha['programaFormacion'] }}</td>
+                                    <td style="font-weight:bold;">Programa</td>
+                                    <td>{{ $ficha['programaFormacion'] }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Proyecto</td>
-                                    <td style="text-align: justify">{{ $materia['proyectoFormativo'] }}</td>
+                                    <td style="font-weight:bold;">Proyecto</td>
+                                    <td>{{ $materia['proyectoFormativo'] }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Actividad</td>
-                                    <td style="text-align: justify">
+                                    <td style="font-weight:bold;">Actividad</td>
+                                    <td>
                                         @foreach ($materia['actividades'] as $actividad)
                                             {{ $actividad['descripcionActividad'] }}<br>
                                         @endforeach
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Fase del Proyecto</td>
-                                    <td style="text-align: justify">{{ $materia['faseProyecto'] }}</td>
+                                    <td style="font-weight:bold;">Fase del Proyecto</td>
+                                    <td>{{ $materia['faseProyecto'] }}</td>
                                 </tr>
                             </table>
                         @endforeach
@@ -481,30 +502,34 @@
                             $fichaInfo = $horariosPorFicha->firstWhere('idFicha', $idFicha);
                             $porEstado = collect($aprendices)->groupBy('estado');
                         @endphp
-                        <table style="margin-top: 20px; margin-bottom: 10px;">
+                        <table class="tabla-anidada">
+                            <colgroup>
+                                <col style="width: 40%;">
+                                <col style="width: 60%;">
+                            </colgroup>
                             <tr>
-                                <td style="text-align: justify; width: 40%;"><strong>No. Ficha</strong></td>
-                                <td style="text-align: justify">{{ $fichaInfo['codigoFicha'] ?? $idFicha }}</td>
+                                <td><strong>No. Ficha</strong></td>
+                                <td>{{ $fichaInfo['codigoFicha'] ?? $idFicha }}</td>
                             </tr>
                             <tr>
-                                <td style="text-align: justify"><strong>Nombre Programa</strong></td>
-                                <td style="text-align: justify">{{ $fichaInfo['programaFormacion'] ?? '—' }}</td>
+                                <td><strong>Nombre Programa</strong></td>
+                                <td>{{ $fichaInfo['programaFormacion'] ?? '—' }}</td>
                             </tr>
                             <tr>
-                                <td style="text-align: justify"><strong>No. Aprendices con novedades</strong></td>
-                                <td style="text-align: justify">{{ count($aprendices) }}</td>
+                                <td><strong>No. Aprendices con novedades</strong></td>
+                                <td>{{ count($aprendices) }}</td>
                             </tr>
                             <tr>
-                                <td style="text-align: justify"><strong>Novedad reportada</strong></td>
-                                <td style="text-align: justify">
+                                <td><strong>Novedad reportada</strong></td>
+                                <td>
                                     @foreach ($porEstado as $estado => $grupo)
                                         {{ $estado }} ({{ count($grupo) }})<br>
                                     @endforeach
                                 </td>
                             </tr>
                             <tr>
-                                <td style="text-align: justify"><strong>Nombre de Aprendices</strong></td>
-                                <td style="text-align: justify">
+                                <td><strong>Nombre de Aprendices</strong></td>
+                                <td>
                                     @foreach ($aprendices as $aprendiz)
                                         {{ $aprendiz['nombreCompleto'] }}<br>
                                     @endforeach
@@ -525,30 +550,30 @@
                 </td>
                 <td style="vertical-align: middle; text-align: justify;">
                     {{ $actividadesContrato[3]->accionesRealizadas }}
-                    <table style="margin-top: 20px; margin-bottom: 10px;">
+                    <table class="tabla-anidada">
+                        <colgroup>
+                            <col style="width: 40%;">
+                            <col style="width: 60%;">
+                        </colgroup>
                         <tr>
-                            <td style="text-align: justify; width: 40%;"><strong>No. Ficha</strong></td>
-                            <td style="text-align: justify"></td>
+                            <td><strong>No. Ficha</strong></td>
+                            <td></td>
                         </tr>
                         <tr>
-                            <td style="text-align: justify"><strong>Nombre Programa</strong></td>
-                            <td style="text-align: justify"></td>
+                            <td><strong>Nombre Programa</strong></td>
+                            <td></td>
                         </tr>
                         <tr>
-                            <td style="text-align: justify"><strong>Actividad realizada</strong></td>
-                            <td style="text-align: justify"></td>
+                            <td><strong>Actividad realizada</strong></td>
+                            <td></td>
                         </tr>
                         <tr>
-                            <td style="text-align: justify"><strong>Horas asignadas</strong></td>
-                            <td style="text-align: justify">
-
-                            </td>
+                            <td><strong>Horas asignadas</strong></td>
+                            <td></td>
                         </tr>
                         <tr>
-                            <td style="text-align: justify"><strong>Observación</strong></td>
-                            <td style="text-align: justify">
-
-                            </td>
+                            <td><strong>Observación</strong></td>
+                            <td></td>
                         </tr>
                     </table>
 
