@@ -27,6 +27,7 @@ class Contract extends Model
         'cargoSupervisor',
         'formaDePago',
         'objetoContrato',
+        'numeroContrato',
         'siif',
         'descripcionFormaPago'
     ];

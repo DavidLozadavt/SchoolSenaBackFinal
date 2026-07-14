@@ -17,6 +17,7 @@ class PortafolioDocumento extends Model
         'descripcion',
         'urlDocumento',
         'idPortafolioFichas',
+        'idCategoria',
     ];
 
     public function portafolioFicha()
@@ -39,5 +40,10 @@ class PortafolioDocumento extends Model
         }
 
         return url($this->urlDocumento); // ya tiene storage/ incluido
+    }
+
+    public function categoria()
+    {
+        return $this->belongsTo(PortafolioCategoria::class, 'idCategoria');
     }
 }

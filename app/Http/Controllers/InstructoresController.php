@@ -591,243 +591,243 @@ class InstructoresController extends Controller
             'periodo' => 'nullable|date_format:Y-m',
         ]);
 
-    $idContrato = $validated['idContrato'];
+        $idContrato = $validated['idContrato'];
 
-    // Rango de calculo: el periodo solicitado o el mes actual
-    if (!empty($validated['periodo'])) {
-        $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
-        $rangoFin = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
-    } else {
-        $rangoInicio = \Carbon\Carbon::now()->startOfMonth();
-        $rangoFin = \Carbon\Carbon::now()->endOfMonth();
-    }
+        // Rango de calculo: el periodo solicitado o el mes actual
+        if (!empty($validated['periodo'])) {
+            $rangoInicio = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->startOfMonth();
+            $rangoFin = \Carbon\Carbon::createFromFormat('Y-m', $validated['periodo'])->endOfMonth();
+        } else {
+            $rangoInicio = \Carbon\Carbon::now()->startOfMonth();
+            $rangoFin = \Carbon\Carbon::now()->endOfMonth();
+        }
 
-    $overlapHorario = function ($q) use ($rangoInicio, $rangoFin) {
-        $q->whereBetween('fechaInicial', [$rangoInicio, $rangoFin])
-            ->orWhereBetween('fechaFinal', [$rangoInicio, $rangoFin])
-            ->orWhere(function ($q2) use ($rangoInicio, $rangoFin) {
-                $q2->where('fechaInicial', '<=', $rangoInicio)
-                    ->where('fechaFinal', '>=', $rangoFin);
-            });
-    };
+        $overlapHorario = function ($q) use ($rangoInicio, $rangoFin) {
+            $q->whereBetween('fechaInicial', [$rangoInicio, $rangoFin])
+                ->orWhereBetween('fechaFinal', [$rangoInicio, $rangoFin])
+                ->orWhere(function ($q2) use ($rangoInicio, $rangoFin) {
+                    $q2->where('fechaInicial', '<=', $rangoInicio)
+                        ->where('fechaFinal', '>=', $rangoFin);
+                });
+        };
 
-    // 1) Horarios donde el contrato es titular directo
-    $horariosDirectos = \App\Models\HorarioMateria::with([
+        // 1) Horarios donde el contrato es titular directo
+        $horariosDirectos = \App\Models\HorarioMateria::with([
             'ficha.asignacion.programa',
             'gradoMateria.materia.padre',
         ])
-        ->where('idContrato', $idContrato)
-        ->where('estado', '!=', 'PENDIENTE')
-        ->where($overlapHorario)
-        ->get();
+            ->where('idContrato', $idContrato)
+            ->where('estado', '!=', 'PENDIENTE')
+            ->where($overlapHorario)
+            ->get();
 
-    // 2) Asignaciones (COMPARTIDO / REEMPLAZO) donde este contrato participa como asignado
-    $overlapAsignacion = function ($q) use ($rangoInicio, $rangoFin) {
-        $q->whereBetween('fechaInicio', [$rangoInicio, $rangoFin])
-            ->orWhereBetween('fechaFin', [$rangoInicio, $rangoFin])
-            ->orWhere(function ($q2) use ($rangoInicio, $rangoFin) {
-                $q2->where('fechaInicio', '<=', $rangoInicio)
-                    ->where('fechaFin', '>=', $rangoFin);
-            });
-    };
+        // 2) Asignaciones (COMPARTIDO / REEMPLAZO) donde este contrato participa como asignado
+        $overlapAsignacion = function ($q) use ($rangoInicio, $rangoFin) {
+            $q->whereBetween('fechaInicio', [$rangoInicio, $rangoFin])
+                ->orWhereBetween('fechaFin', [$rangoInicio, $rangoFin])
+                ->orWhere(function ($q2) use ($rangoInicio, $rangoFin) {
+                    $q2->where('fechaInicio', '<=', $rangoInicio)
+                        ->where('fechaFin', '>=', $rangoFin);
+                });
+        };
 
-    $asignaciones = \App\Models\AsignacionSesion::whereIn('tipoAsignacion', ['HORARIO COMPARTIDO', 'REEMPLAZO'])
-        ->where('idContrato', $idContrato)
-        ->where($overlapAsignacion)
-        ->get();
+        $asignaciones = \App\Models\AsignacionSesion::whereIn('tipoAsignacion', ['HORARIO COMPARTIDO', 'REEMPLAZO'])
+            ->where('idContrato', $idContrato)
+            ->where($overlapAsignacion)
+            ->get();
 
-    $idsHorariosAsignados = $asignaciones->pluck('idHorarioMateria')->unique()->values();
+        $idsHorariosAsignados = $asignaciones->pluck('idHorarioMateria')->unique()->values();
 
-    $horariosDeAsignaciones = \App\Models\HorarioMateria::with([
+        $horariosDeAsignaciones = \App\Models\HorarioMateria::with([
             'ficha.asignacion.programa',
             'gradoMateria.materia.padre',
             'contrato.persona', // para saber a quien se le esta reemplazando
         ])
-        ->whereIn('id', $idsHorariosAsignados)
-        ->where('estado', '!=', 'PENDIENTE')
-        ->get()
-        ->keyBy('id');
+            ->whereIn('id', $idsHorariosAsignados)
+            ->where('estado', '!=', 'PENDIENTE')
+            ->get()
+            ->keyBy('id');
 
-    // 3) Si este contrato es titular de algun horario que en este periodo fue REEMPLAZADO
-    //    por otra persona, se descuenta ese rango de fechas de su conteo (para no duplicar horas).
-    $idsHorariosDirectos = $horariosDirectos->pluck('id');
-    $reemplazosSobreMisHorarios = \App\Models\AsignacionSesion::where('tipoAsignacion', 'REEMPLAZO')
-        ->whereIn('idHorarioMateria', $idsHorariosDirectos)
-        ->where('idContrato', '!=', $idContrato)
-        ->where($overlapAsignacion)
-        ->get()
-        ->groupBy('idHorarioMateria');
+        // 3) Si este contrato es titular de algun horario que en este periodo fue REEMPLAZADO
+        //    por otra persona, se descuenta ese rango de fechas de su conteo (para no duplicar horas).
+        $idsHorariosDirectos = $horariosDirectos->pluck('id');
+        $reemplazosSobreMisHorarios = \App\Models\AsignacionSesion::where('tipoAsignacion', 'REEMPLAZO')
+            ->whereIn('idHorarioMateria', $idsHorariosDirectos)
+            ->where('idContrato', '!=', $idContrato)
+            ->where($overlapAsignacion)
+            ->get()
+            ->groupBy('idHorarioMateria');
 
-    // Construimos una coleccion unificada de "registros":
-    // [horario, origen(DIRECTO|COMPARTIDO|REEMPLAZO), desde, hasta, contratoOriginal]
-    $registros = collect();
+        // Construimos una coleccion unificada de "registros":
+        // [horario, origen(DIRECTO|COMPARTIDO|REEMPLAZO), desde, hasta, contratoOriginal]
+        $registros = collect();
 
-    foreach ($horariosDirectos as $h) {
-        $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
-        $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
+        foreach ($horariosDirectos as $h) {
+            $desde = \Carbon\Carbon::parse($h->fechaInicial)->max($rangoInicio);
+            $hasta = \Carbon\Carbon::parse($h->fechaFinal)->min($rangoFin);
 
-        // Recortamos el rango si parte (o todo) de este horario fue cubierto por un reemplazo de otra persona
-        $reemplazos = $reemplazosSobreMisHorarios->get($h->id, collect());
+            // Recortamos el rango si parte (o todo) de este horario fue cubierto por un reemplazo de otra persona
+            $reemplazos = $reemplazosSobreMisHorarios->get($h->id, collect());
 
-        if ($reemplazos->isEmpty()) {
-            if ($desde->lte($hasta)) {
-                $registros->push([
-                    'horario' => $h,
-                    'origen' => 'DIRECTO',
-                    'desde' => $desde,
-                    'hasta' => $hasta,
-                    'contratoOriginal' => null,
-                ]);
-            }
-        } else {
-            // Partimos el rango del titular en los huecos que quedan libres de reemplazo
-            $segmentos = [[$desde->copy(), $hasta->copy()]];
-            foreach ($reemplazos as $r) {
-                $rDesde = \Carbon\Carbon::parse($r->fechaInicio);
-                $rHasta = \Carbon\Carbon::parse($r->fechaFin);
-                $nuevosSegmentos = [];
-                foreach ($segmentos as [$segDesde, $segHasta]) {
-                    if ($rHasta->lt($segDesde) || $rDesde->gt($segHasta)) {
-                        // no se solapan
-                        $nuevosSegmentos[] = [$segDesde, $segHasta];
-                        continue;
-                    }
-                    if ($rDesde->gt($segDesde)) {
-                        $nuevosSegmentos[] = [$segDesde->copy(), $rDesde->copy()->subDay()];
-                    }
-                    if ($rHasta->lt($segHasta)) {
-                        $nuevosSegmentos[] = [$rHasta->copy()->addDay(), $segHasta->copy()];
-                    }
-                }
-                $segmentos = $nuevosSegmentos;
-            }
-
-            foreach ($segmentos as [$segDesde, $segHasta]) {
-                if ($segDesde->lte($segHasta)) {
+            if ($reemplazos->isEmpty()) {
+                if ($desde->lte($hasta)) {
                     $registros->push([
                         'horario' => $h,
                         'origen' => 'DIRECTO',
-                        'desde' => $segDesde,
-                        'hasta' => $segHasta,
+                        'desde' => $desde,
+                        'hasta' => $hasta,
                         'contratoOriginal' => null,
                     ]);
                 }
-            }
-        }
-    }
-
-    foreach ($asignaciones as $a) {
-        $h = $horariosDeAsignaciones->get($a->idHorarioMateria);
-        if (!$h) {
-            continue;
-        }
-
-        $desde = \Carbon\Carbon::parse($a->fechaInicio)->max($rangoInicio)->max(\Carbon\Carbon::parse($h->fechaInicial));
-        $hasta = \Carbon\Carbon::parse($a->fechaFin)->min($rangoFin)->min(\Carbon\Carbon::parse($h->fechaFinal));
-
-        if ($desde->gt($hasta)) {
-            continue;
-        }
-
-        $contratoOriginalNombre = null;
-        if ($a->tipoAsignacion === 'REEMPLAZO' && $h->contrato && $h->contrato->persona) {
-            $p = $h->contrato->persona;
-            $contratoOriginalNombre = trim($p->nombre1 . ' ' . $p->apellido1);
-        }
-
-        $registros->push([
-            'horario' => $h,
-            'origen' => $a->tipoAsignacion === 'REEMPLAZO' ? 'REEMPLAZO' : 'COMPARTIDO',
-            'desde' => $desde,
-            'hasta' => $hasta,
-            'contratoOriginal' => $contratoOriginalNombre,
-        ]);
-    }
-
-    $fichas = $registros
-        ->groupBy(fn ($r) => $r['horario']->ficha?->id)
-        ->map(function ($registrosGrupo) {
-            $ficha = $registrosGrupo->first()['horario']->ficha;
-            $programa = $ficha?->asignacion?->programa;
-
-            $horariosConDatos = $registrosGrupo->map(function ($r) {
-                $h = $r['horario'];
-                $rap = $h->gradoMateria?->materia;
-                $competencia = $rap?->padre;
-                $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
-
-                $desde = $r['desde'];
-                $hasta = $r['hasta'];
-
-                $idDiaInt = (int) $h->idDia;
-                $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
-                $cantidadSesiones = 0;
-                $cursor = $desde->copy();
-
-                while ($cursor->lte($hasta)) {
-                    if ($cursor->dayOfWeek === $diaSemanaCarbon) {
-                        $cantidadSesiones++;
+            } else {
+                // Partimos el rango del titular en los huecos que quedan libres de reemplazo
+                $segmentos = [[$desde->copy(), $hasta->copy()]];
+                foreach ($reemplazos as $r) {
+                    $rDesde = \Carbon\Carbon::parse($r->fechaInicio);
+                    $rHasta = \Carbon\Carbon::parse($r->fechaFin);
+                    $nuevosSegmentos = [];
+                    foreach ($segmentos as [$segDesde, $segHasta]) {
+                        if ($rHasta->lt($segDesde) || $rDesde->gt($segHasta)) {
+                            // no se solapan
+                            $nuevosSegmentos[] = [$segDesde, $segHasta];
+                            continue;
+                        }
+                        if ($rDesde->gt($segDesde)) {
+                            $nuevosSegmentos[] = [$segDesde->copy(), $rDesde->copy()->subDay()];
+                        }
+                        if ($rHasta->lt($segHasta)) {
+                            $nuevosSegmentos[] = [$rHasta->copy()->addDay(), $segHasta->copy()];
+                        }
                     }
-                    $cursor->addDay();
+                    $segmentos = $nuevosSegmentos;
                 }
 
-                return [
-                    'idGradoMateria' => $h->idGradoMateria,
-                    'competencia' => $competencia?->nombreMateria,
-                    'resultadoAprendizaje' => $rap?->nombreMateria,
-                    'idHorario' => $h->id,
-                    'horaInicial' => $h->horaInicial,
-                    'horaFinal' => $h->horaFinal,
-                    'fechaInicial' => $h->fechaInicial,
-                    'fechaFinal' => $h->fechaFinal,
-                    'duracionSesion' => $duracionSesion,
-                    'cantidadSesiones' => $cantidadSesiones,
-                    'duracionHoras' => round($duracionSesion * $cantidadSesiones, 2),
-                    'idDia' => $h->idDia,
-                    'origenAsignacion' => $r['origen'], // DIRECTO | COMPARTIDO | REEMPLAZO
-                    'reemplazaA' => $r['contratoOriginal'],
-                ];
-            });
+                foreach ($segmentos as [$segDesde, $segHasta]) {
+                    if ($segDesde->lte($segHasta)) {
+                        $registros->push([
+                            'horario' => $h,
+                            'origen' => 'DIRECTO',
+                            'desde' => $segDesde,
+                            'hasta' => $segHasta,
+                            'contratoOriginal' => null,
+                        ]);
+                    }
+                }
+            }
+        }
 
-            $resultados = $horariosConDatos
-                ->groupBy('idGradoMateria')
-                ->map(function ($horariosGM) {
-                    $primero = $horariosGM->first();
-                    $detallesRmi = DetalleRmi::whereHas('horarioMateria', function ($query) use ($primero) {
-                        $query->where('idGradoMateria', $primero['idGradoMateria']);
-                    })->get();
+        foreach ($asignaciones as $a) {
+            $h = $horariosDeAsignaciones->get($a->idHorarioMateria);
+            if (!$h) {
+                continue;
+            }
+
+            $desde = \Carbon\Carbon::parse($a->fechaInicio)->max($rangoInicio)->max(\Carbon\Carbon::parse($h->fechaInicial));
+            $hasta = \Carbon\Carbon::parse($a->fechaFin)->min($rangoFin)->min(\Carbon\Carbon::parse($h->fechaFinal));
+
+            if ($desde->gt($hasta)) {
+                continue;
+            }
+
+            $contratoOriginalNombre = null;
+            if ($a->tipoAsignacion === 'REEMPLAZO' && $h->contrato && $h->contrato->persona) {
+                $p = $h->contrato->persona;
+                $contratoOriginalNombre = trim($p->nombre1 . ' ' . $p->apellido1);
+            }
+
+            $registros->push([
+                'horario' => $h,
+                'origen' => $a->tipoAsignacion === 'REEMPLAZO' ? 'REEMPLAZO' : 'COMPARTIDO',
+                'desde' => $desde,
+                'hasta' => $hasta,
+                'contratoOriginal' => $contratoOriginalNombre,
+            ]);
+        }
+
+        $fichas = $registros
+            ->groupBy(fn($r) => $r['horario']->ficha?->id)
+            ->map(function ($registrosGrupo) {
+                $ficha = $registrosGrupo->first()['horario']->ficha;
+                $programa = $ficha?->asignacion?->programa;
+
+                $horariosConDatos = $registrosGrupo->map(function ($r) {
+                    $h = $r['horario'];
+                    $rap = $h->gradoMateria?->materia;
+                    $competencia = $rap?->padre;
+                    $duracionSesion = round((strtotime($h->horaFinal) - strtotime($h->horaInicial)) / 3600, 2);
+
+                    $desde = $r['desde'];
+                    $hasta = $r['hasta'];
+
+                    $idDiaInt = (int) $h->idDia;
+                    $diaSemanaCarbon = $idDiaInt === 7 ? 0 : $idDiaInt;
+                    $cantidadSesiones = 0;
+                    $cursor = $desde->copy();
+
+                    while ($cursor->lte($hasta)) {
+                        if ($cursor->dayOfWeek === $diaSemanaCarbon) {
+                            $cantidadSesiones++;
+                        }
+                        $cursor->addDay();
+                    }
 
                     return [
-                        'idGradoMateria' => $primero['idGradoMateria'],
-                        'competencia' => $primero['competencia'],
-                        'resultadoAprendizaje' => $primero['resultadoAprendizaje'],
-                        'estadoAsociacion' => $detallesRmi->first()?->estadoAsociacion,
-                        'horarios' => $horariosGM->map(function ($item) {
-                            return [
-                                'idHorario' => $item['idHorario'],
-                                'horaInicial' => $item['horaInicial'],
-                                'horaFinal' => $item['horaFinal'],
-                                'fechaInicial' => $item['fechaInicial'],
-                                'fechaFinal' => $item['fechaFinal'],
-                                'duracionSesion' => $item['duracionSesion'],
-                                'cantidadSesiones' => $item['cantidadSesiones'],
-                                'duracionHoras' => $item['duracionHoras'],
-                                'idDia' => $item['idDia'],
-                                'origenAsignacion' => $item['origenAsignacion'],
-                                'reemplazaA' => $item['reemplazaA'],
-                            ];
-                        })->values(),
+                        'idGradoMateria' => $h->idGradoMateria,
+                        'competencia' => $competencia?->nombreMateria,
+                        'resultadoAprendizaje' => $rap?->nombreMateria,
+                        'idHorario' => $h->id,
+                        'horaInicial' => $h->horaInicial,
+                        'horaFinal' => $h->horaFinal,
+                        'fechaInicial' => $h->fechaInicial,
+                        'fechaFinal' => $h->fechaFinal,
+                        'duracionSesion' => $duracionSesion,
+                        'cantidadSesiones' => $cantidadSesiones,
+                        'duracionHoras' => round($duracionSesion * $cantidadSesiones, 2),
+                        'idDia' => $h->idDia,
+                        'origenAsignacion' => $r['origen'], // DIRECTO | COMPARTIDO | REEMPLAZO
+                        'reemplazaA' => $r['contratoOriginal'],
                     ];
-                })->values();
+                });
 
-            return [
-                'idFicha' => $ficha?->id,
-                'codigoFicha' => $ficha?->codigo,
-                'programaFormacion' => $programa?->nombrePrograma,
-                'codigoPrograma' => $programa?->codigoPrograma,
-                'resultados' => $resultados,
-            ];
-        })->values();
+                $resultados = $horariosConDatos
+                    ->groupBy('idGradoMateria')
+                    ->map(function ($horariosGM) {
+                        $primero = $horariosGM->first();
+                        $detallesRmi = DetalleRmi::whereHas('horarioMateria', function ($query) use ($primero) {
+                            $query->where('idGradoMateria', $primero['idGradoMateria']);
+                        })->get();
+
+                        return [
+                            'idGradoMateria' => $primero['idGradoMateria'],
+                            'competencia' => $primero['competencia'],
+                            'resultadoAprendizaje' => $primero['resultadoAprendizaje'],
+                            'estadoAsociacion' => $detallesRmi->first()?->estadoAsociacion,
+                            'horarios' => $horariosGM->map(function ($item) {
+                                return [
+                                    'idHorario' => $item['idHorario'],
+                                    'horaInicial' => $item['horaInicial'],
+                                    'horaFinal' => $item['horaFinal'],
+                                    'fechaInicial' => $item['fechaInicial'],
+                                    'fechaFinal' => $item['fechaFinal'],
+                                    'duracionSesion' => $item['duracionSesion'],
+                                    'cantidadSesiones' => $item['cantidadSesiones'],
+                                    'duracionHoras' => $item['duracionHoras'],
+                                    'idDia' => $item['idDia'],
+                                    'origenAsignacion' => $item['origenAsignacion'],
+                                    'reemplazaA' => $item['reemplazaA'],
+                                ];
+                            })->values(),
+                        ];
+                    })->values();
+
+                return [
+                    'idFicha' => $ficha?->id,
+                    'codigoFicha' => $ficha?->codigo,
+                    'programaFormacion' => $programa?->nombrePrograma,
+                    'codigoPrograma' => $programa?->codigoPrograma,
+                    'resultados' => $resultados,
+                ];
+            })->values();
 
         return response()->json($fichas);
     }
@@ -1319,6 +1319,7 @@ class InstructoresController extends Controller
             'formaDePago' => 'nullable|string|in:COMISIONES,SALARIO INTEGRAL,NORMAL',
             'ciudadExpedicionId' => 'nullable|integer|exists:ciudad,id',
             'siif' => 'nullable|numeric',
+            'numeroContrato' => 'nullable|string|max:255',
             'descripcionFormaPago' => 'nullable|string|max:1000',
         ]);
 
@@ -1331,6 +1332,7 @@ class InstructoresController extends Controller
                 'objetoContrato',
                 'formaDePago',
                 'siif',
+                'numeroContrato',
                 'descripcionFormaPago'
             ]));
 

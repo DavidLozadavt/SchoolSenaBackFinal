@@ -3071,12 +3071,46 @@ class FichaController extends Controller
 
             $estaFinalizado = $aprobadoCount >= 5;
 
+            // ... (dentro de $formatearRap en tu controlador PHP)
             if ($hijasDelPrograma->isNotEmpty()) {
-                $estaFinalizado = $hijasDelPrograma->every(function ($hija) use ($matriculasFicha) {
-                    return $matriculasFicha->get($hija->id, collect())
-                        ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
-                        ->count() >= 5;
-                });
+                $materiaData['hijas'] = $hijasDelPrograma
+                    ->map(function ($hija) use ($datosPorMateria, $matriculasFicha, $horasPorMateria, $datos) { // <-- Pasamos $datos del padre
+                        $datosHija = $datosPorMateria->get($hija->id, [
+                            'instructores' => collect(),
+                            'trimestre' => '',
+                            'fechaInicio' => null,
+                            'fechaFin' => null,
+                            'numeroSesiones' => 0,
+                            'horasActuales' => 0
+                        ]);
+
+                        // SI LA HIJA NO TIENE INSTRUCTORES, HEREDA LOS DEL PADRE
+                        $instructoresHija = $datosHija['instructores']->isNotEmpty()
+                            ? $datosHija['instructores']
+                            : $datos['instructores'];
+
+                        $horasProgramaHija = $horasPorMateria[$hija->id] ?? ($hija->horas ?? 0);
+                        $aprobadoCountHija = $matriculasFicha->get($hija->id, collect())
+                            ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
+                            ->count();
+
+                        $estaFinalizadoHija = $aprobadoCountHija >= 5;
+
+                        return [
+                            'id' => $hija->id,
+                            'nombre' => $hija->nombreMateria ?? $hija->descripcion ?? null,
+                            'instructores' => is_array($instructoresHija) ? $instructoresHija : $instructoresHija->toArray(),
+                            'trimestre' => $datosHija['trimestre'] ?: $datos['trimestre'],
+                            'fechaInicio' => $datosHija['fechaInicio'],
+                            'fechaFin' => $datosHija['fechaFin'],
+                            'numeroSesiones' => $datosHija['numeroSesiones'],
+                            'horasActuales' => $datosHija['horasActuales'],
+                            'horas' => $horasProgramaHija,
+                            'estado' => $estaFinalizadoHija ? 'APROBADO' : 'POR EVALUAR',
+                        ];
+                    })
+                    ->values()
+                    ->toArray();
             }
 
             // Formatear datos de la materia actual

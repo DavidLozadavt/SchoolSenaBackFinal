@@ -22,6 +22,7 @@ class PortafolioDocumentoController extends Controller
         $validator = Validator::make($request->all(), [
             'descripcion' => 'required|string',
             'idPortafolioFichas' => 'required|exists:portafolioFichas,id',
+            'idCategoria' => 'nullable|exists:portafolioCategorias,id',
             'documento' => 'nullable|file|mimes:pdf,doc,docx,xls,xlsx|max:10240',
         ]);
 
@@ -39,6 +40,7 @@ class PortafolioDocumentoController extends Controller
         $documento = PortafolioDocumento::create([
             'descripcion' => $request->descripcion,
             'idPortafolioFichas' => $request->idPortafolioFichas,
+            'idCategoria' => $request->idCategoria,
             'urlDocumento' => $urlDocumento,
         ]);
 
@@ -70,6 +72,7 @@ class PortafolioDocumentoController extends Controller
 
         $validator = Validator::make($request->all(), [
             'descripcion' => 'sometimes|string',
+            'idCategoria' => 'nullable|exists:portafolioCategorias,id',
             'documento' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
         ]);
 
@@ -89,6 +92,10 @@ class PortafolioDocumentoController extends Controller
 
         if ($request->filled('descripcion')) {
             $documento->descripcion = $request->descripcion;
+        }
+
+        if ($request->has('idCategoria')) {
+            $documento->idCategoria = $request->idCategoria;
         }
 
         $documento->save();
