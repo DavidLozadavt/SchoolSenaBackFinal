@@ -46,6 +46,23 @@ class MateriaController extends Controller
         $idPrograma = $request->input('idPrograma');
         $idFicha = $request->input('idFicha');
         try {
+            if (empty($idFicha)) {
+                return response()->json([
+                    'message' => 'El idFicha es requerido'
+                ], 400);
+            }
+
+            if (empty($idPrograma)) {
+                $ficha = Ficha::with('asignacion')->find($idFicha);
+                $idPrograma = $ficha?->asignacion?->idPrograma;
+            }
+
+            if (empty($idPrograma)) {
+                return response()->json([
+                    'message' => 'No se pudo determinar el programa de la ficha'
+                ], 400);
+            }
+
             // Obtener todos los estados de matrícula de la ficha para determinar asignación y avance
             // Esta es ahora nuestra única fuente de verdad para este reporte
             $matriculasFicha = MatriculaAcademica::where('idFicha', $idFicha)
@@ -96,7 +113,7 @@ class MateriaController extends Controller
                 foreach ($rapsIdsEnMatricula as $rapId) {
                     $estudiantes = $matriculasAgrupadas->get($rapId, collect());
                     // Si al menos 5 estudiantes aparecen como EVALUADO, FINALIZADO o APROBADO, se cuenta el RAP como completado
-                    if ($estudiantes->filter(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO']))->count() >= 5) {
+                    if ($estudiantes->filter(fn($m) => in_array(strtoupper($m->estado), ['FINALIZADO', 'EVALUADO', 'APROBADO', 'COMPLETADO']))->count() >= 5) {
                         $rapsFinalizados++;
                     }
                 }
@@ -111,7 +128,8 @@ class MateriaController extends Controller
                     'horas' => $materia->horas_programa,
                     'descripcion' => $materia->descripcion,
                     'isCompleta' => $estaFinalizada,
-                    'estado' => $estaFinalizada ? 'FINALIZADO' : 'PENDIENTE',
+                    // Completada = FINALIZADO/COMPLETADO; el resto disponible para asignación
+                    'estado' => $estaFinalizada ? 'COMPLETADO' : 'PENDIENTE',
                     'idCategoriaFormacion' => $materia->idCategoriaFormacion
                 ];
             })->filter()->values();
@@ -121,7 +139,7 @@ class MateriaController extends Controller
             return response()->json([
                 'message' => 'No se pudieron cargar las competencias',
                 'error' => $error->getMessage()
-            ]);
+            ], 500);
         }
     }
 
