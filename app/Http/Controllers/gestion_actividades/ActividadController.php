@@ -1587,7 +1587,15 @@ class ActividadController extends Controller
                 ->distinct()
                 ->orderBy('m.nombreMateria');
 
-            return response()->json($rows->get()->values());
+            return response()->json(
+                $rows->get()->map(static function ($r) {
+                    return [
+                        'id' => (int) $r->id,
+                        'nombreMateria' => $r->nombreMateria,
+                        'codigo' => $r->codigo,
+                    ];
+                })->values()
+            );
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
