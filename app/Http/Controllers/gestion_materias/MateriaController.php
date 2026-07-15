@@ -45,6 +45,11 @@ class MateriaController extends Controller
     {
         $idPrograma = $request->input('idPrograma');
         $idFicha = $request->input('idFicha');
+        $soloTransversales = filter_var($request->input('soloTransversales'), FILTER_VALIDATE_BOOLEAN);
+        $excluirCompletadas = filter_var(
+            $request->input('excluirCompletadas', $soloTransversales ? true : false),
+            FILTER_VALIDATE_BOOLEAN
+        );
         try {
             if (empty($idFicha)) {
                 return response()->json([
@@ -80,22 +85,50 @@ class MateriaController extends Controller
             // Identificamos las competencias padre (competencias) asociadas a estos RAPs matriculados
             // Obtenemos los padres de las materias encontradas en la matrícula
             $padresIds = $matriculasFicha->map(fn($m) => $m->materia?->idMateriaPadre)->filter()->unique();
-            $materiasPrograma = Materia::whereIn('materia.id', $padresIds)
+
+            $idsCategoriaTransversal = collect();
+            if ($soloTransversales) {
+                $idsCategoriaTransversal = DB::table('categoriaFormacion')
+                    ->where(function ($q) {
+                        $q->whereRaw('UPPER(TRIM(nombre)) LIKE ?', ['%TRASVERSAL%'])
+                            ->orWhereRaw('UPPER(TRIM(nombre)) LIKE ?', ['%TRANSVERSAL%']);
+                    })
+                    ->pluck('id');
+
+                if ($idsCategoriaTransversal->isEmpty()) {
+                    return response()->json([]);
+                }
+            }
+
+            $materiasQuery = Materia::whereIn('materia.id', $padresIds)
                 ->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
                 ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
-                ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa')
-                ->get();
+                ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa');
+
+            if ($soloTransversales) {
+                $materiasQuery->whereIn('materia.idCategoriaFormacion', $idsCategoriaTransversal);
+            }
+
+            $materiasPrograma = $materiasQuery->get();
+            $padresParaRaps = $materiasPrograma->pluck('id')->unique()->values();
+            if ($padresParaRaps->isEmpty()) {
+                return response()->json([]);
+            }
 
             // Obtenemos todos los RAPs posibles de estas competencias para cruzar con la matrícula
-            $todosRaps = Materia::whereIn('idMateriaPadre', $padresIds)
+            $todosRaps = Materia::whereIn('idMateriaPadre', $padresParaRaps)
                 ->join('agregarMateriaPrograma', 'agregarMateriaPrograma.idMateria', '=', 'materia.id')
                 ->where('agregarMateriaPrograma.idPrograma', $idPrograma)
                 ->select('materia.*', 'agregarMateriaPrograma.horas as horas_programa')
                 ->get()
                 ->groupBy('idMateriaPadre');
 
+            $categoriasPorId = DB::table('categoriaFormacion')
+                ->whereIn('id', $materiasPrograma->pluck('idCategoriaFormacion')->filter()->unique())
+                ->pluck('nombre', 'id');
+
             // Mapear cada competencia encontrada
-            $resultado = $materiasPrograma->map(function ($materia) use ($todosRaps, $matriculasAgrupadas) {
+            $resultado = $materiasPrograma->map(function ($materia) use ($todosRaps, $matriculasAgrupadas, $categoriasPorId) {
                 // RAPs de esta competencia particular
                 $rapsDeEstaCompetencia = $todosRaps->get($materia->id, collect());
                 $rapsIds = $rapsDeEstaCompetencia->pluck('id');
@@ -121,18 +154,26 @@ class MateriaController extends Controller
                 $estaFinalizada = ($rapsFinalizados >= $totalRaps);
                 if ($totalRaps === 0) $estaFinalizada = false;
 
+                $idCat = $materia->idCategoriaFormacion;
+
                 return [
-                    'id' => $materia->id,
+                    'id' => (int) $materia->id,
                     'nombreMateria' => $materia->nombreMateria,
                     'codigo' => $materia->codigo,
                     'horas' => $materia->horas_programa,
                     'descripcion' => $materia->descripcion,
                     'isCompleta' => $estaFinalizada,
-                    // Completada = FINALIZADO/COMPLETADO; el resto disponible para asignación
                     'estado' => $estaFinalizada ? 'COMPLETADO' : 'PENDIENTE',
-                    'idCategoriaFormacion' => $materia->idCategoriaFormacion
+                    'idCategoriaFormacion' => $idCat !== null ? (int) $idCat : null,
+                    'categoriaFormacionNombre' => $idCat !== null ? ($categoriasPorId[$idCat] ?? null) : null,
                 ];
             })->filter()->values();
+
+            if ($excluirCompletadas) {
+                $resultado = $resultado
+                    ->filter(fn ($row) => empty($row['isCompleta']) && strtoupper((string) ($row['estado'] ?? '')) !== 'COMPLETADO')
+                    ->values();
+            }
 
             return response()->json($resultado);
         } catch (\Throwable $error) {
