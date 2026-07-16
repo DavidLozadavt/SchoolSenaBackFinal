@@ -165,6 +165,10 @@ class PortafolioController extends Controller
         ];
 
         $categoriasBase = \App\Models\PortafolioCategoria::whereIn('slug', $slugsBase)
+            ->where(function ($q) use ($request) {
+                $q->whereNull('idContrato')
+                  ->orWhere('idContrato', $request->idContrato);
+            })
             ->orderBy('orden')
             ->get(); // trae id, nombre, slug — lo necesitas para el insert
 
@@ -178,7 +182,14 @@ class PortafolioController extends Controller
 
             // ── Se consulta UNA sola vez, fuera del foreach ─────────────────────
             $categoriasConHijos = \App\Models\PortafolioCategoria::whereIn('slug', ['horario-ficha', 'actas-equipo-ejecutor'])
-                ->with('hijos')
+                ->where(function ($q) use ($request) {
+                    $q->whereNull('idContrato')
+                      ->orWhere('idContrato', $request->idContrato);
+                })
+                ->with(['hijos' => function ($q) use ($request) {
+                    $q->whereNull('idContrato')
+                      ->orWhere('idContrato', $request->idContrato);
+                }])
                 ->get();
 
             foreach ($fichas as $ficha) {
@@ -254,7 +265,12 @@ class PortafolioController extends Controller
                     if (empty($actasTrimestre))
                         continue;
 
-                    $categoriaActas = \App\Models\PortafolioCategoria::where('slug', "actas-equipo-ejecutor-$trimestre")->first();
+                    $categoriaActas = \App\Models\PortafolioCategoria::where('slug', "actas-equipo-ejecutor-$trimestre")
+                        ->where(function ($q) use ($request) {
+                            $q->whereNull('idContrato')
+                              ->orWhere('idContrato', $request->idContrato);
+                        })
+                        ->first();
                     if ($categoriaActas) {
                         foreach ($actasTrimestre as $acta) {
                             $urlDocumento = $acta->rutaDocumentoUrl ?: '';
@@ -302,7 +318,12 @@ class PortafolioController extends Controller
                 foreach ($mesesHorarios as $mes) {
                     $trimestreNum = ceil($mes / 3);
                     $trimestreSlug = "t$trimestreNum";
-                    $categoriaHorario = \App\Models\PortafolioCategoria::where('slug', "horario-ficha-$trimestreSlug")->first();
+                    $categoriaHorario = \App\Models\PortafolioCategoria::where('slug', "horario-ficha-$trimestreSlug")
+                        ->where(function ($q) use ($request) {
+                            $q->whereNull('idContrato')
+                              ->orWhere('idContrato', $request->idContrato);
+                        })
+                        ->first();
 
                     if ($categoriaHorario) {
                         $urlHorarioMensual = $this->generarPdfHorarioMensual($ficha['idFicha'], $mes);
