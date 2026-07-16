@@ -9,9 +9,18 @@ class PortafolioCategoriaController extends Controller
 {
     public function index()
     {
-        $categorias = PortafolioCategoria::where('activo', true)
-            ->orderBy('orden')
-            ->get();
+        $query = PortafolioCategoria::where('activo', true);
+
+        if (request()->has('idContrato')) {
+            $query->where(function ($q) {
+                $q->whereNull('idContrato')
+                  ->orWhere('idContrato', request()->idContrato);
+            });
+        } else {
+            $query->whereNull('idContrato');
+        }
+
+        $categorias = $query->orderBy('orden')->get();
 
         $categoriasPorId = $categorias->keyBy('id');
 
@@ -43,7 +52,8 @@ class PortafolioCategoriaController extends Controller
     {
         $request->validate([
             'nombre' => 'required|string|max:150',
-            'idCategoriaPadre' => 'nullable|exists:portafolioCategorias,id'
+            'idCategoriaPadre' => 'nullable|exists:portafolioCategorias,id',
+            'idContrato' => 'nullable|exists:contrato,id'
         ]);
 
         $slug = \Str::slug($request->nombre);
@@ -56,6 +66,7 @@ class PortafolioCategoriaController extends Controller
             'nombre' => $request->nombre,
             'slug' => $slug,
             'idCategoriaPadre' => $request->idCategoriaPadre,
+            'idContrato' => $request->idContrato,
             'orden' => PortafolioCategoria::where('idCategoriaPadre', $request->idCategoriaPadre)->max('orden') + 1,
             'activo' => true
         ]);
