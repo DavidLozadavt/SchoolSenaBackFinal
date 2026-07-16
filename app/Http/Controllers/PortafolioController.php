@@ -202,19 +202,26 @@ class PortafolioController extends Controller
                     \Log::error('Error generando excel planeación: ' . $e->getMessage());
                 }
 
-                // Documentos base (9 categorías raíz)
+                // Categorías que se documentan a través de sus hijos (trimestres) — no deben tener fila propia
+                $slugsConHijos = ['horario-ficha', 'actas-equipo-ejecutor'];
+
                 \App\Models\PortafolioDocumento::insert(
-                    $categoriasBase->map(fn($cat) => [
-                        'idPortafolioFichas' => $pf->id,
-                        'idCategoria' => $cat->id,
-                        'descripcion' => $cat->nombre,
-                        'urlDocumento' => match ($cat->slug) {
-                            'programa-formacion' => $ficha['programaUrlDocumento'] ?? '',
-                            'proyecto-formativo' => $ficha['fichaUrlDocumento'] ?? '',
-                            'planeacion-pedagogica' => $urlPlaneacion ?? '',
-                            default => '',
-                        },
-                    ])->toArray()
+                    $categoriasBase
+                        ->reject(fn($cat) => in_array($cat->slug, $slugsConHijos))
+                        ->map(fn($cat) => [
+                            'idPortafolioFichas' => $pf->id,
+                            'idCategoria' => $cat->id,
+                            'descripcion' => $cat->nombre,
+                            'urlDocumento' => match ($cat->slug) {
+                                'programa-formacion' => $ficha['programaUrlDocumento'] ?? '',
+                                'proyecto-formativo' => $ficha['fichaUrlDocumento'] ?? '',
+                                'planeacion-pedagogica' => $urlPlaneacion ?? '',
+                                default => null, // no crear si no hay documento
+                            },
+                        ])
+                        ->filter(fn($doc) => $doc['urlDocumento'] !== null && $doc['urlDocumento'] !== '')
+                        ->values()
+                        ->toArray()
                 );
 
                 // ── 6. Asociar actas y horarios mensuales a los trimestres ───────────────────
@@ -238,6 +245,12 @@ class PortafolioController extends Controller
 
                 // Asociar actas a sus respectivas categorías
                 foreach ($actasPorTrimestre as $trimestre => $actasTrimestre) {
+                    \Log::info('Debug actas', [
+                        'idFicha' => $ficha['idFicha'],
+                        'totalActas' => $actas->count(),
+                        'actasPorTrimestre' => array_map('count', $actasPorTrimestre),
+                    ]);
+
                     if (empty($actasTrimestre))
                         continue;
 
