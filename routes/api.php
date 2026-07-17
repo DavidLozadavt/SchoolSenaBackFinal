@@ -191,6 +191,12 @@ Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioControll
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
 Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
+// Inscripción pública a eventos (sin auth de School, para usuarios de NexiService)
+Route::post('eventos-multimedia/{id}/register-public', [App\Http\Controllers\EventoController::class, 'registerPublic']);
+Route::get('eventos-multimedia/{id}/check-registration-public', [App\Http\Controllers\EventoController::class, 'checkRegistrationPublic']);
+Route::get('eventos-multimedia/{id}/inscripciones', [App\Http\Controllers\EventoController::class, 'inscripciones']);
+Route::delete('eventos-multimedia/{id}/inscripciones/{respuestaId}', [App\Http\Controllers\EventoController::class, 'eliminarInscripcion']);
+
 Route::group([
     'middleware' => 'api',
 ], function () {
