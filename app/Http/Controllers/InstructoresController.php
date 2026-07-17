@@ -2541,73 +2541,101 @@ class InstructoresController extends Controller
 
     public function getEstadoInformePago(Request $request)
     {
-        $user = auth()->user();
-        $persona = $user?->persona;
-        if (!$persona) {
-            return response()->json(['step' => 0]);
+        try {
+            $user = auth()->user();
+            $persona = $user?->persona;
+            if (!$persona) {
+                return response()->json(['step' => 0]);
+            }
+
+            // 1. Contrato activo
+            $contrato = Contract::where('idpersona', (int) $persona->id)
+                ->where('idEstado', 1)
+                ->first();
+            if (!$contrato) {
+                return response()->json(['step' => 0]);
+            }
+
+            $actividadesCount = \App\Models\ActividadContrato::where('idContrato', (int) $contrato->id)->count();
+
+            $isValidContrato = !empty($contrato->supervisorContrato) &&
+                !empty($contrato->cargoSupervisor) &&
+                !empty($contrato->objetoContrato) &&
+                !empty($contrato->formaDePago) &&
+                !empty($contrato->descripcionFormaPago) &&
+                !empty($contrato->siif) &&
+                !empty($persona->ciudadExpedicion) &&
+                $actividadesCount >= 6;
+
+            if (!$isValidContrato) {
+                return response()->json(['step' => 0]);
+            }
+
+            $year = date('Y');
+            $periodoActual = date('Y-m');
+
+            $req = new Request([
+                'year'     => $year,
+                'idPerson' => (int) $persona->id,
+            ]);
+
+            $dataResponse = $this->getDataRmiConfiguracionByYear($req);
+            $data = json_decode($dataResponse->getContent(), true);
+
+            if (!is_array($data) || isset($data['message'])) {
+                // Sin datos de RMI → paso 1
+                return response()->json(['step' => 1]);
+            }
+
+            // Cast explícito para comparación segura independientemente de json_decode
+            $idContrato = (int) $contrato->id;
+            $contratoData = null;
+            foreach ($data as $item) {
+                if ((int) ($item['idContrato'] ?? 0) === $idContrato) {
+                    $contratoData = $item;
+                    break;
+                }
+            }
+
+            if (!$contratoData) {
+                return response()->json(['step' => 1]);
+            }
+
+            $periodoData = null;
+            foreach (($contratoData['periodos'] ?? []) as $p) {
+                if (($p['periodo'] ?? '') === $periodoActual) {
+                    $periodoData = $p;
+                    break;
+                }
+            }
+
+            if (!$periodoData) {
+                return response()->json(['step' => 1]);
+            }
+
+            $estadoRmi = (string) ($periodoData['estadoRmi'] ?? 'PENDIENTE');
+            if ($estadoRmi !== 'ACEPTADO') {
+                return response()->json(['step' => 1]);
+            }
+
+            $estadoInforme = (string) ($periodoData['estadoInforme'] ?? 'PENDIENTE');
+            if ($estadoInforme !== 'ACEPTADO') {
+                return response()->json(['step' => 2]);
+            }
+
+            $gc = $periodoData['gc'] ?? null;
+            $estadoGc = is_array($gc) ? (string) ($gc['estado'] ?? 'PENDIENTE') : 'PENDIENTE';
+            if ($estadoGc !== 'ACEPTADO') {
+                return response()->json(['step' => 3]);
+            }
+
+            return response()->json(['step' => 4]);
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error en getEstadoInformePago: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return response()->json(['step' => 0, 'error' => $e->getMessage()], 500);
         }
-
-        // 1. Contrato
-        $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->first();
-        if (!$contrato) {
-            return response()->json(['step' => 0]);
-        }
-
-        $actividadesCount = \App\Models\ActividadContrato::where('idContrato', $contrato->id)->count();
-
-        $isValidContrato = !empty($contrato->supervisorContrato) &&
-            !empty($contrato->cargoSupervisor) &&
-            !empty($contrato->objetoContrato) &&
-            !empty($contrato->formaDePago) &&
-            !empty($contrato->descripcionFormaPago) &&
-            !empty($contrato->siif) &&
-            !empty($persona->ciudadExpedicion) &&
-            $actividadesCount >= 6;
-
-        if (!$isValidContrato) {
-            return response()->json(['step' => 0]);
-        }
-
-        $year = date('Y');
-        $periodoActual = date('Y-m');
-
-        $req = new Request([
-            'year' => $year,
-            'idPerson' => $persona->id
-        ]);
-
-        $dataResponse = $this->getDataRmiConfiguracionByYear($req);
-        $data = json_decode($dataResponse->getContent(), true);
-
-        if (isset($data['message']) || !is_array($data)) {
-            // Si hay error, es porque no hay datos de RMI, se queda en paso 1
-            return response()->json(['step' => 1]);
-        }
-
-        $contratoData = collect($data)->firstWhere('idContrato', $contrato->id);
-
-        if (!$contratoData) {
-            return response()->json(['step' => 1]);
-        }
-
-        $periodoData = collect($contratoData['periodos'])->firstWhere('periodo', $periodoActual);
-
-        if (!$periodoData) {
-            return response()->json(['step' => 1]);
-        }
-
-        if (($periodoData['estadoRmi'] ?? 'PENDIENTE') !== 'ACEPTADO') {
-            return response()->json(['step' => 1]);
-        }
-
-        if (($periodoData['estadoInforme'] ?? 'PENDIENTE') !== 'ACEPTADO') {
-            return response()->json(['step' => 2]);
-        }
-
-        if (!isset($periodoData['gc']) || ($periodoData['gc']['estado'] ?? 'PENDIENTE') !== 'ACEPTADO') {
-            return response()->json(['step' => 3]);
-        }
-
-        return response()->json(['step' => 4]);
     }
 }
