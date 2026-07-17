@@ -129,6 +129,11 @@ use App\Http\Controllers\gestion_regional\RegionalController;
 use App\Http\Controllers\PeriodosController;
 use App\Http\Controllers\gestion_jornadas\JornadaController;
 use App\Http\Controllers\GCController;
+use App\Http\Controllers\SeguimientoAspiranteController;
+use App\Http\Controllers\WhatsappPlantillaController;
+use App\Http\Controllers\TelecomConfigController;
+use App\Http\Controllers\WhatsappWebhookController;
+use App\Permission\PermissionConst;
 
 use App\Http\Controllers\gestion_programas_academicos\NivelesProgramaController;
 use App\Http\Controllers\SedeController as ControllersSedeController;
@@ -185,6 +190,11 @@ Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
 // Integración con ERP
 Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
+
+// Webhook público de WhatsApp Cloud API (Meta) — módulo Seguimiento de Aspirantes.
+// NO requiere autenticación: Meta llama directamente a estas URLs.
+Route::get('webhooks/meta', [WhatsappWebhookController::class, 'verify']);   // Validación (hub.challenge)
+Route::post('webhooks/meta', [WhatsappWebhookController::class, 'receive']); // Recepción de mensajes/estados
 
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
@@ -1718,4 +1728,24 @@ Route::middleware('auth:api')->group(function () {
     Route::apiResource('portafolio-documentos', PortafolioDocumentoController::class);
     Route::get('portafolio-categorias', [PortafolioCategoriaController::class, 'index']);
     Route::post('portafolio-categorias', [PortafolioCategoriaController::class, 'store']);
+  
+    // Módulo de Seguimiento de Aspirantes
+    Route::post('seguimiento-aspirantes/importar', [SeguimientoAspiranteController::class, 'importar']);
+    Route::get('seguimiento-aspirantes', [SeguimientoAspiranteController::class, 'index']);
+    Route::get('seguimiento-aspirantes/programas', [SeguimientoAspiranteController::class, 'getProgramas']);
+    Route::get('seguimiento-aspirantes/centros', [SeguimientoAspiranteController::class, 'getCentros']);
+    Route::get('seguimiento-aspirantes/fichas', [SeguimientoAspiranteController::class, 'getFichas']);
+    Route::post('seguimiento-aspirantes/eliminar', [SeguimientoAspiranteController::class, 'eliminarSeleccionados']);
+    Route::delete('seguimiento-aspirantes/todos', [SeguimientoAspiranteController::class, 'eliminarTodos']);
+    Route::post('seguimiento-aspirantes/enviar-whatsapp', [SeguimientoAspiranteController::class, 'enviarWhatsApp']);
+    Route::apiResource('whatsapp-plantillas', WhatsappPlantillaController::class);
+
+    // Configuración local de WhatsApp Cloud API (Meta) — CRUD autónomo.
+    // Protegido por el permiso GESTION_TELECOM_CONFIG (mismo middleware que el resto del proyecto).
+    Route::middleware('permission:' . PermissionConst::GESTION_TELECOM_CONFIG)->group(function () {
+        Route::get('telecom-config/activa', [TelecomConfigController::class, 'activa']);
+        Route::post('telecom-config/probar', [TelecomConfigController::class, 'probar']);
+        Route::apiResource('telecom-config', TelecomConfigController::class)
+            ->parameters(['telecom-config' => 'id']);
+    });
 });
