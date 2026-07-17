@@ -1482,6 +1482,7 @@ Route::get('asistencias-instructor-global', [AsistenciaController::class, 'asist
 //Intructores:
 Route::middleware('auth:api')->group(function () {
     Route::get('instructores', [InstructoresController::class, 'getInstructors']);
+    Route::get('instructores/estado_informe_pago', [InstructoresController::class, 'getEstadoInformePago']);
     Route::get('instructores/historial', [InstructoresController::class, 'getInstructorsHistorial']);
     Route::get('instructores/fichas', [InstructoresController::class, 'getFichasByContrato']);
     Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
