@@ -1645,6 +1645,7 @@ Route::middleware('auth:api')->group(function () {
     Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update']);
     Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy']);
     Route::get('formularios/{id}/respuestas', [App\Http\Controllers\FormularioController::class, 'respuestas']);
+    Route::delete('formularios/{id}/respuestas/{respuestaId}', [App\Http\Controllers\FormularioController::class, 'destroyRespuesta']);
 
 });
 
