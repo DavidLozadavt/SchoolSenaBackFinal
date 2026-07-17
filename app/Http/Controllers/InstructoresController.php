@@ -2538,4 +2538,76 @@ class InstructoresController extends Controller
 
         return $pdf->stream("RMI_{$idContrato}_{$idRmi}.pdf");
     }
+
+    public function getEstadoInformePago(Request $request)
+    {
+        $user = auth()->user();
+        $persona = $user?->persona;
+        if (!$persona) {
+            return response()->json(['step' => 0]);
+        }
+
+        // 1. Contrato
+        $contrato = Contract::where('idpersona', $persona->id)->where('idEstado', 1)->first();
+        if (!$contrato) {
+            return response()->json(['step' => 0]);
+        }
+
+        $actividadesCount = \App\Models\ActividadContrato::where('idContrato', $contrato->id)->count();
+
+        $isValidContrato = !empty($contrato->supervisorContrato) &&
+            !empty($contrato->cargoSupervisor) &&
+            !empty($contrato->objetoContrato) &&
+            !empty($contrato->formaDePago) &&
+            !empty($contrato->descripcionFormaPago) &&
+            !empty($contrato->siif) &&
+            !empty($persona->ciudadExpedicion) &&
+            $actividadesCount >= 6;
+
+        if (!$isValidContrato) {
+            return response()->json(['step' => 0]);
+        }
+
+        $year = date('Y');
+        $periodoActual = date('Y-m');
+
+        $req = new Request([
+            'year' => $year,
+            'idPerson' => $persona->id
+        ]);
+
+        $dataResponse = $this->getDataRmiConfiguracionByYear($req);
+        $data = json_decode($dataResponse->getContent(), true);
+
+        if (isset($data['message']) || !is_array($data)) {
+            // Si hay error, es porque no hay datos de RMI, se queda en paso 1
+            return response()->json(['step' => 1]);
+        }
+
+        $contratoData = collect($data)->firstWhere('idContrato', $contrato->id);
+
+        if (!$contratoData) {
+            return response()->json(['step' => 1]);
+        }
+
+        $periodoData = collect($contratoData['periodos'])->firstWhere('periodo', $periodoActual);
+
+        if (!$periodoData) {
+            return response()->json(['step' => 1]);
+        }
+
+        if (($periodoData['estadoRmi'] ?? 'PENDIENTE') !== 'ACEPTADO') {
+            return response()->json(['step' => 1]);
+        }
+
+        if (($periodoData['estadoInforme'] ?? 'PENDIENTE') !== 'ACEPTADO') {
+            return response()->json(['step' => 2]);
+        }
+
+        if (!isset($periodoData['gc']) || ($periodoData['gc']['estado'] ?? 'PENDIENTE') !== 'ACEPTADO') {
+            return response()->json(['step' => 3]);
+        }
+
+        return response()->json(['step' => 4]);
+    }
 }

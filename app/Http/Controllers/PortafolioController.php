@@ -545,9 +545,33 @@ class PortafolioController extends Controller
 
         $portafolioFolder = $this->sanitizeName($portafolio->descripcion, 'Portafolio_' . $portafolio->id);
 
+        // Obtener todas las categorías para construir la estructura de carpetas (incluso las vacías)
+        $categorias = \App\Models\PortafolioCategoria::where('activo', true)
+            ->where(function ($q) use ($portafolio) {
+                $q->whereNull('idContrato')
+                  ->orWhere('idContrato', $portafolio->idContrato);
+            })
+            ->with('padre.padre.padre.padre')
+            ->get();
+
         foreach ($portafolio->portafolioFichas as $portafolioFicha) {
 
             $fichaFolder = $portafolioFolder . '/' . $this->sanitizeName($portafolioFicha->descripcion, 'Ficha_' . $portafolioFicha->id);
+            
+            // Asegurarse de que al menos la carpeta de la ficha exista
+            $zip->addEmptyDir($fichaFolder);
+
+            // ── Crear todas las carpetas base de categorías ──
+            foreach ($categorias as $categoria) {
+                $categoriaFolder = $fichaFolder . '/' . $this->buildCategoryPath($categoria);
+                
+                $pathSegments = explode('/', $categoriaFolder);
+                $currentPath = '';
+                foreach ($pathSegments as $segment) {
+                    $currentPath .= ($currentPath === '' ? '' : '/') . $segment;
+                    $zip->addEmptyDir($currentPath);
+                }
+            }
 
             foreach ($portafolioFicha->portafolioDocumentos as $documento) {
 
