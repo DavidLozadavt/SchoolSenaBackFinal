@@ -14,19 +14,88 @@ use Carbon\Carbon;
 
 class ForgotPasswordController extends Controller
 {
+    /**
+     * Si hay un JWT válido en la petición, el correo queda fijo al de la cuenta
+     * autenticada (usuario.email, el sincronizado desde nexiservice/ERP) y se
+     * ignora cualquier email que venga en el body. Null si no hay sesión (flujo
+     * público de "olvidé mi contraseña" antes de iniciar sesión).
+     */
+    private function authenticatedEmail(): ?string
+    {
+        try {
+            $user = \Tymon\JWTAuth\Facades\JWTAuth::parseToken()->authenticate();
+            return $user?->email;
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Propaga el nuevo hash de contraseña a nexiservice y RentUs cuando el
+     * usuario la cambia en School. Fire-and-forget: si un destino falla, no
+     * rompe el cambio de contraseña local.
+     */
+    private function syncPasswordToSiblings(string $email, string $hash): void
+    {
+        $bridgeToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
+        $targets = [
+            env('NEXI_API_URL', 'http://localhost:8001') . '/api/integration/sync-password',
+            env('RENTUS_API_URL', 'http://localhost:8004') . '/api/integration/sync-password',
+        ];
+
+        foreach ($targets as $url) {
+            try {
+                (new \GuzzleHttp\Client())->post($url, [
+                    'headers' => ['X-Bridge-Token' => $bridgeToken, 'Accept' => 'application/json'],
+                    'json' => ['email' => $email, 'contrasena_hash' => $hash],
+                    'timeout' => 5,
+                ]);
+            } catch (\Exception $e) {
+                \Log::error("Error sincronizando contraseña hacia {$url}: " . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Recibe la sincronización de contraseña cuando el usuario la cambia en
+     * nexiservice o RentUs. No dispara nada de vuelta (evita ping-pong).
+     */
+    public function syncPassword(Request $request)
+    {
+        $receivedToken = $request->header('X-Bridge-Token');
+        $expectedToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
+
+        if (empty($receivedToken) || $receivedToken !== $expectedToken) {
+            return response()->json(['error' => 'No autorizado.'], 401);
+        }
+
+        $request->validate([
+            'email' => 'required|email',
+            'contrasena_hash' => 'required|string',
+        ]);
+
+        $updated = DB::table('usuario')
+            ->where('email', $request->email)
+            ->update(['contrasena' => $request->contrasena_hash]);
+
+        return response()->json(['matched' => (bool) $updated]);
+    }
 
     public function sendOtp(Request $request)
     {
         try {
+            $lockedEmail = $this->authenticatedEmail();
+
             $request->validate([
-                'email' => 'required|email'
+                'email' => $lockedEmail ? 'nullable|email' : 'required|email'
             ]);
 
-            $email = $request->email;
-            
+            $email = $lockedEmail ?? $request->email;
+
             \Log::info('Enviando OTP a:', ['email' => $email]);
 
-            $userExists = DB::table('persona')->where('email', $email)->exists();
+            $userExists = DB::table('persona')->where('email', $email)->exists()
+                || DB::table('usuario')->where('email', $email)->exists();
             
             $responseMessage = 'Si el correo existe en nuestro sistema, recibirás un código de verificación en tu correo electrónico.';
             
@@ -85,13 +154,15 @@ class ForgotPasswordController extends Controller
     {
         try {
             \Log::info('=== VERIFICANDO OTP ===');
-            
+
+            $lockedEmail = $this->authenticatedEmail();
+
             $request->validate([
-                'email' => 'required|email',
+                'email' => $lockedEmail ? 'nullable|email' : 'required|email',
                 'otp' => 'required|string|size:6'
             ]);
 
-            $email = $request->email;
+            $email = $lockedEmail ?? $request->email;
             $otp = $request->otp;
 
             \Log::info('Datos recibidos:', ['email' => $email, 'otp' => $otp]);
@@ -168,25 +239,42 @@ class ForgotPasswordController extends Controller
    public function resetPassword(Request $request)
 {
     try {
+        $lockedEmail = $this->authenticatedEmail();
+
         $request->validate([
-            'email' => 'required|email|exists:persona,email',
+            'email' => $lockedEmail ? 'nullable|email' : 'required|email|exists:persona,email',
             'token' => 'required|string',
             'password' => 'required|min:8|confirmed'
         ]);
 
-
-        $email = $request->email;
+        $email = $lockedEmail ?? $request->email;
         $token = $request->token;
         $password = $request->password;
 
-        $findUser = DB::table('persona')
-                ->where('email', $email)
-                ->first();
+        if ($lockedEmail) {
+            $user = \App\Models\User::where('email', $lockedEmail)->first();
+            if (!$user) {
+                return response()->json([
+                    'message' => 'Usuario no encontrado'
+                ], 404);
+            }
+        } else {
+            $findUser = DB::table('persona')
+                    ->where('email', $email)
+                    ->first();
 
             if (!$findUser) {
                 return response()->json([
                     'message' => 'Persona no encontrada'
                 ], 404);
+            }
+
+            $user = \App\Models\User::where('idpersona', $findUser->id)->first();
+            if (!$user) {
+                return response()->json([
+                    'message' => 'No se encontró un usuario asociado a esta persona'
+                ], 404);
+            }
         }
 
         \Log::info('Reseteando contraseña para:', ['email' => $email]);
@@ -220,21 +308,14 @@ class ForgotPasswordController extends Controller
                 'error' => 'expired_token'
             ], 400);
         }
-        // Actualizar la contraseña usando el modelo User para consistencia
-        $user = \App\Models\User::where('idpersona', $findUser->id)->first();
-
-        if (!$user) {
-            \Log::warning('Usuario no encontrado en tabla usuario para idpersona:', ['id' => $findUser->id]);
-            return response()->json([
-                'message' => 'No se encontró un usuario asociado a esta persona'
-            ], 404);
-        }
-
+        // $user ya fue resuelto arriba (cuenta autenticada o vía persona.email)
         $user->contrasena = Hash::make($password);
         $user->updated_at = now();
         $user->save();
 
         \Log::info('Contraseña actualizada para usuario ID:', ['user_id' => $user->id]);
+
+        $this->syncPasswordToSiblings($user->email, $user->contrasena);
 
         try {
             // Ya tenemos el objeto $user, podemos usarlo directamente

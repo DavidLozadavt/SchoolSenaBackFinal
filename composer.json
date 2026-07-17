@@ -58,6 +58,9 @@
         ],
         "post-create-project-cmd": [
             "@php artisan key:generate --ansi"
+        ],
+        "serve": [
+            "@php artisan serve --port=8000"
         ]
     },
     "extra": {
@@ -68,7 +71,15 @@
     "config": {
         "optimize-autoloader": true,
         "preferred-install": "dist",
-        "sort-packages": true
+        "sort-packages": true,
+        "policy": {
+            "advisories": {
+                "block": false
+            }
+        },
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
     },
     "minimum-stability": "dev",
     "prefer-stable": true
