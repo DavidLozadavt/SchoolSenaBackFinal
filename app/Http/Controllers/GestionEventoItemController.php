@@ -12,8 +12,16 @@ class GestionEventoItemController extends Controller
     {
         $query = Item::orderBy('hora_inicio');
         
-        if ($request->has('idEvento')) {
+        if ($request->has('idEvento') && $request->has('incluirDisponibles')) {
+            $idEvento = $request->query('idEvento');
+            $query->where(function($q) use ($idEvento) {
+                $q->where('idEvento', $idEvento)
+                  ->orWhereNull('idEvento');
+            });
+        } elseif ($request->has('idEvento')) {
             $query->where('idEvento', $request->query('idEvento'));
+        } elseif ($request->has('sinEvento')) {
+            $query->whereNull('idEvento');
         }
 
         return response()->json($query->get());
