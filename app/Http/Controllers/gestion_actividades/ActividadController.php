@@ -319,10 +319,10 @@ class ActividadController extends Controller
                             'descripcion' => $p->descripcion,
                             'tipoPregunta' => $p->tipoPregunta ? ['tipoPregunta' => $p->tipoPregunta->tipoPregunta ?? null] : null,
                             'urlDocumento' => $p->urlDocumento,
+                            // No exponer chkCorrecta al aprendiz antes de la revisión del intento.
                             'respuestas' => $p->respuestas ? $p->respuestas->map(fn ($r) => [
                                 'id' => $r->id,
                                 'descripcionRespuesta' => $r->descripcionRespuesta,
-                                'chkCorrecta' => $r->chkCorrecta,
                             ])->values() : [],
                         ])->values();
                     }
@@ -465,6 +465,7 @@ class ActividadController extends Controller
                     'activa' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO') && !$fechaVencida && !$fechaInactiva,
                     'esGrupal' => !empty($row->idGrupo),
                     'idGrupo' => $row->idGrupo,
+                    'tieneRespuestasCuestionario' => $tieneRespuestasCuestionario,
                     'preguntas' => ($row->tipoActividad ?? '') === 'cuestionario' ? ($preguntasPorActividad[$row->idActividad] ?? []) : null,
                 ];
             })->values();
@@ -1157,6 +1158,200 @@ class ActividadController extends Controller
             return response()->json(['message' => 'Cuestionario respondido correctamente']);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Revisión de intento de cuestionario (solo lectura) para el aprendiz dueño de la calificación.
+     */
+    public function revisionCuestionarioAprendiz(int $idCalificacionActividad): JsonResponse
+    {
+        try {
+            if (!Schema::hasTable('calificacionActividad')) {
+                return response()->json(['error' => 'Tabla no disponible'], 500);
+            }
+
+            $user = KeyUtil::user();
+            $idPersona = $user?->idpersona;
+            if (!$idPersona) {
+                return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
+            }
+
+            $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+            $ca = DB::table('calificacionActividad as ca')
+                ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+                ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+                ->where('ca.id', $idCalificacionActividad)
+                ->where('m.idPersona', $idPersona)
+                ->select([
+                    'ca.id',
+                    'ca.idActividad',
+                    'ca.calificacionNumerica',
+                    'ca.fechaCalificacion',
+                    'ca.ComentarioDocente',
+                    'ca.ComentarioEstudiante',
+                    'a.tituloActividad',
+                    'a.tipoActividad',
+                ])
+                ->first();
+
+            if (!$ca) {
+                return response()->json(['error' => 'Intento no encontrado para este aprendiz'], 404);
+            }
+
+            if (($ca->tipoActividad ?? '') !== 'cuestionario') {
+                return response()->json(['error' => 'Esta actividad no es un cuestionario'], 422);
+            }
+
+            $tblRc = Schema::hasTable('respuestaCuestionarios')
+                ? 'respuestaCuestionarios'
+                : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            if (!$tblRc) {
+                return response()->json(['error' => 'Tabla de respuestas de cuestionario no disponible'], 500);
+            }
+
+            $respuestasAlumno = DB::table($tblRc)
+                ->where('idCalificacion', $idCalificacionActividad)
+                ->get()
+                ->keyBy('idPregunta');
+
+            if ($respuestasAlumno->isEmpty()) {
+                return response()->json(['error' => 'Aún no hay un intento respondido para este cuestionario'], 404);
+            }
+
+            // Tras haber respondido, se muestran las correctas (no existe flag de configuración en el modelo).
+            $mostrarRespuestasCorrectas = true;
+
+            $preguntas = Pregunta::with(['tipoPregunta', 'respuestas'])
+                ->where('idActividad', $ca->idActividad)
+                ->orderBy('id')
+                ->get();
+
+            $correctas = 0;
+            $incorrectas = 0;
+            $pendientes = 0;
+
+            $preguntasPayload = $preguntas->map(function ($pregunta) use (
+                $respuestasAlumno,
+                $mostrarRespuestasCorrectas,
+                $ca,
+                &$correctas,
+                &$incorrectas,
+                &$pendientes
+            ) {
+                $tipo = trim((string) ($pregunta->tipoPregunta->tipoPregunta ?? 'Párrafo'));
+                $esOpcionMultiple = strcasecmp($tipo, 'Varias opciones') === 0;
+                $respAlumno = $respuestasAlumno->get($pregunta->id);
+
+                $opciones = [];
+                $respuestaCorrecta = null;
+                $respuestaAprendiz = null;
+                $estado = 'pendiente';
+                $puntaje = null;
+                $retroalimentacion = null;
+
+                if ($esOpcionMultiple) {
+                    $idSeleccionada = $respAlumno?->idRespuesta ? (int) $respAlumno->idRespuesta : null;
+                    $textoSeleccionada = null;
+
+                    foreach ($pregunta->respuestas ?? [] as $op) {
+                        $esCorrecta = (bool) $op->chkCorrecta;
+                        $seleccionada = $idSeleccionada !== null && (int) $op->id === $idSeleccionada;
+                        if ($seleccionada) {
+                            $textoSeleccionada = $op->descripcionRespuesta;
+                        }
+                        if ($esCorrecta) {
+                            $respuestaCorrecta = [
+                                'id' => (int) $op->id,
+                                'texto' => $op->descripcionRespuesta,
+                            ];
+                        }
+                        $opciones[] = [
+                            'id' => (int) $op->id,
+                            'texto' => $op->descripcionRespuesta,
+                            'seleccionada' => $seleccionada,
+                            'esCorrecta' => $mostrarRespuestasCorrectas ? $esCorrecta : null,
+                        ];
+                    }
+
+                    $respuestaAprendiz = [
+                        'idRespuesta' => $idSeleccionada,
+                        'texto' => $textoSeleccionada,
+                    ];
+
+                    if ($idSeleccionada === null) {
+                        $estado = 'incorrecta';
+                        $incorrectas++;
+                    } elseif ($respuestaCorrecta && $idSeleccionada === (int) $respuestaCorrecta['id']) {
+                        $estado = 'correcta';
+                        $correctas++;
+                    } else {
+                        $estado = 'incorrecta';
+                        $incorrectas++;
+                    }
+
+                    if (!$mostrarRespuestasCorrectas) {
+                        $respuestaCorrecta = null;
+                    }
+                } else {
+                    $texto = trim((string) ($respAlumno->respuesta ?? ''));
+                    $respuestaAprendiz = ['texto' => $texto !== '' ? $texto : null];
+
+                    $calificadoPregunta = (bool) ($respAlumno->calificado ?? false);
+                    $puntajePregunta = $respAlumno->puntaje ?? null;
+
+                    // Párrafo: solo se considera calificado si el instructor marcó la pregunta
+                    // (la nota automática del cuestionario no califica párrafos).
+                    if ($calificadoPregunta) {
+                        $estado = 'calificada';
+                        $puntaje = $puntajePregunta !== null ? (float) $puntajePregunta : null;
+                        $retroalimentacion = $ca->ComentarioDocente ?: null;
+                    } else {
+                        $estado = 'pendiente';
+                        $pendientes++;
+                    }
+                }
+
+                return [
+                    'id' => (int) $pregunta->id,
+                    'descripcion' => $pregunta->descripcion,
+                    'tipoPregunta' => $tipo,
+                    'urlDocumento' => $pregunta->urlDocumento,
+                    'urlDocumentoUrl' => $this->publicUrl($pregunta->urlDocumento),
+                    'estado' => $estado,
+                    'puntaje' => $puntaje,
+                    'retroalimentacion' => $retroalimentacion,
+                    'respuestaAprendiz' => $respuestaAprendiz,
+                    'respuestaCorrecta' => $respuestaCorrecta,
+                    'opciones' => $opciones,
+                ];
+            })->values();
+
+            $notaFinal = null;
+            if ($ca->calificacionNumerica !== null && trim((string) $ca->calificacionNumerica) !== '') {
+                $notaFinal = (float) $ca->calificacionNumerica;
+            }
+            $porcentaje = $notaFinal !== null ? round(($notaFinal / 5) * 100, 1) : null;
+
+            return response()->json([
+                'idCalificacionActividad' => (int) $ca->id,
+                'idActividad' => (int) $ca->idActividad,
+                'tituloActividad' => $ca->tituloActividad,
+                'notaFinal' => $notaFinal,
+                'porcentaje' => $porcentaje,
+                'comentarioDocente' => $ca->ComentarioDocente,
+                'mostrarRespuestasCorrectas' => $mostrarRespuestasCorrectas,
+                'resumen' => [
+                    'totalPreguntas' => $preguntasPayload->count(),
+                    'correctas' => $correctas,
+                    'incorrectas' => $incorrectas,
+                    'pendientes' => $pendientes,
+                ],
+                'preguntas' => $preguntasPayload,
+            ]);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -2289,9 +2484,22 @@ class ActividadController extends Controller
                 ->value('chkCorrecta');
 
             $totalRespondidas++;
-            if ($respuestaCorrecta ?? false) {
+            $esCorrecta = (bool) ($respuestaCorrecta ?? false);
+            if ($esCorrecta) {
                 $correctas++;
             }
+
+            // Marcar cada respuesta MC como calificada (puntaje proporcional 0..5)
+            $puntajePregunta = $esCorrecta && $totalPreguntas > 0
+                ? round(5 / $totalPreguntas, 2)
+                : 0;
+            DB::table($tblRc)
+                ->where('idCalificacion', $idCalificacionActividad)
+                ->where('idPregunta', $idPregunta)
+                ->update([
+                    'calificado' => true,
+                    'puntaje' => $puntajePregunta,
+                ]);
         }
 
         if ($totalRespondidas === 0) {
