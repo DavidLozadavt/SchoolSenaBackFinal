@@ -1298,6 +1298,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('ambiente-virtual/material-apoyo', [ActividadController::class, 'materialApoyoAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta-cuestionario', [ActividadController::class, 'responderCuestionarioAprendiz']);
+    Route::get('actividades-aprendiz/{idCalificacionActividad}/revision-cuestionario', [ActividadController::class, 'revisionCuestionarioAprendiz']);
     Route::get('actividades/{id}', [ActividadController::class, 'show']);
     Route::put('actividades/{id}', [ActividadController::class, 'update']);
     Route::delete('actividades/{id}', [ActividadController::class, 'destroy']);
