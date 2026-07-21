@@ -599,9 +599,9 @@ class HorarioMateriaController extends Controller
     public function updateTeacherHorarioMateria(Request $request): JsonResponse
     {
         $idContrato = $request->input('idContrato');
-        $horarios = $request->input('horarios');
+        $horariosRequest = $request->input('horarios');
 
-        if (!$idContrato || !is_array($horarios)) {
+        if (!$idContrato || !is_array($horariosRequest)) {
             return response()->json([
                 'message' => 'El contrato y la lista de horarios son obligatorios'
             ], 400);
@@ -610,8 +610,19 @@ class HorarioMateriaController extends Controller
         try {
             DB::beginTransaction();
 
-            foreach ($horarios as $h) {
-                $horarioMateria = HorarioMateria::findOrFail($h['id']);
+            foreach ($horariosRequest as $h) {
+                $idHorario = is_array($h) ? ($h['id'] ?? null) : ($h->id ?? null);
+                if (!$idHorario) {
+                    continue;
+                }
+
+                $horarioMateria = HorarioMateria::findOrFail($idHorario);
+                $estadoActual = strtoupper(trim((string) $horarioMateria->estado));
+
+                // INTERRUMPIDO: no se asigna por este flujo.
+                if ($estadoActual === EstadoHorarioMateria::INTERRUMPIDO) {
+                    continue;
+                }
 
                 // Validar cruces para el docente
                 $validacion = $this->validateHorariosByDocente($horarioMateria, $idContrato);
@@ -625,7 +636,12 @@ class HorarioMateriaController extends Controller
                     ], 422);
                 }
 
-                if ($horarioMateria->estado != 'FINALIZADO' && $horarioMateria->estado != 'INTERRUMPIDO') {
+                // FINALIZADO / EVALUADO: solo idContrato (trazabilidad); no cambiar estado.
+                if (in_array($estadoActual, [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO], true)) {
+                    $horarioMateria->update([
+                        'idContrato' => $idContrato,
+                    ]);
+                } else {
                     $horarioMateria->update([
                         'idContrato' => $idContrato,
                         'estado' => EstadoHorarioMateria::ASIGNADO
@@ -639,10 +655,10 @@ class HorarioMateriaController extends Controller
                 // Actualizar el estado del detalle RMI del periodo actual a PENDIENTE
                 $periodoActual = now()->format('Y-m');
                 $rmiActual = Rmi::where('periodo', $periodoActual)->first();
-                $horarios = HorarioMateria::where('idContrato', $idContrato)->get();
+                $horariosDelContrato = HorarioMateria::where('idContrato', $idContrato)->get();
 
-                if ($rmiActual && $horarios) {
-                    foreach ($horarios as $horario) {
+                if ($rmiActual && $horariosDelContrato->isNotEmpty()) {
+                    foreach ($horariosDelContrato as $horario) {
                         DetalleRmi::where('idHorarioMateria', $horario->id)
                             ->where('idRmi', $rmiActual->id)
                             ->update([
@@ -1568,7 +1584,7 @@ class HorarioMateriaController extends Controller
                                             ];
                                         })->values(),
                                     'sinAsignar' => $horariosDeHijos
-                                        ->filter(fn($h) => $h->idDia != null && $h->horaInicial != null && $h->horaFinal != null && $h->fechaInicial != null && $h->idContrato == null && $h->estado == EstadoHorarioMateria::PENDIENTE)
+                                        ->filter(fn($h) => $h->idDia != null && $h->horaInicial != null && $h->horaFinal != null && $h->fechaInicial != null && $h->idContrato == null && $h->estado != EstadoHorarioMateria::INTERRUMPIDO)
                                         ->map(function ($h) use ($estadoRapsGlobal) {
                                             $isFinished = $estadoRapsGlobal[$h->gradoMateria->idMateria] ?? false;
                                             return [

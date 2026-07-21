@@ -585,7 +585,7 @@ class MateriaController extends Controller
                                 $h->horaFinal != null &&
                                 $h->fechaInicial != null &&
                                 $h->idContrato == null &&
-                                $h->estado == EstadoHorarioMateria::PENDIENTE;
+                                $h->estado != EstadoHorarioMateria::INTERRUMPIDO;
                         })
                         ->map(function ($h) {
                             return [
