@@ -1,15 +1,27 @@
 <?php
 namespace App\Http\Controllers;
 
+use App\Enums\Estado;
 use App\Models\MatriculaAcademica;
+use App\Models\Status;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 
 class MatriculaAcademicaController extends Controller
 {
     private array $relations;
     private array $columns;
+
+    /** Estados de matrícula.estado que permiten ver al aprendiz en Ambiente Virtual. */
+    private const ESTADOS_MATRICULA_VIGENTES = [
+        Estado::EN_FORMACION,
+        Estado::ACTIVO,
+        Estado::ENCURSO,
+        Estado::CURSANDO,
+        Estado::MATRICULADO,
+    ];
 
     function __construct(){
         $this-> relations=[];
@@ -46,6 +58,8 @@ class MatriculaAcademicaController extends Controller
                     $idFicha = (int) $horarioParaMateria->idFicha;
                 }
             }
+
+            $placeholders = implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?'));
  
             $matriculasAcademicas = MatriculaAcademica::with([
                 'matricula.person',
@@ -54,8 +68,13 @@ class MatriculaAcademicaController extends Controller
                 'materia'
             ])
             ->where('idMateria', $idMateria)
-            ->whereHas('matricula', function ($query) {
-                $query->where('estado', 'EN FORMACION');
+            // 1) Matrícula vigente en ficha (matricula.estado)
+            // 2) Usuario de plataforma ACTIVO: activation_company_users.state_id = 1 (tabla estado)
+            ->whereHas('matricula', function ($query) use ($placeholders) {
+                $query->whereRaw('UPPER(TRIM(estado)) IN ('.$placeholders.')', self::ESTADOS_MATRICULA_VIGENTES)
+                    ->whereHas('person.usuario.activationCompanyUsers', function ($q) {
+                        $q->where('state_id', Status::ID_ACTIVE);
+                    });
             });
  
             if ($idFicha) {
@@ -352,6 +371,14 @@ class MatriculaAcademicaController extends Controller
 
         // Aplicar filtros
         $query->where('idMateria', $idMateria);
+
+        $placeholders = implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?'));
+        $query->whereHas('matricula', function ($q) use ($placeholders) {
+            $q->whereRaw('UPPER(TRIM(estado)) IN ('.$placeholders.')', self::ESTADOS_MATRICULA_VIGENTES)
+                ->whereHas('person.usuario.activationCompanyUsers', function ($uq) {
+                    $uq->where('state_id', Status::ID_ACTIVE);
+                });
+        });
 
         if ($idFicha) {
             $query->where('idFicha', $idFicha);

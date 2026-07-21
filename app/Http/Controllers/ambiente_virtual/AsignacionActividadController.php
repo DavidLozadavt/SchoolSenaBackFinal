@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Actividad;
 use App\Models\GrupoFicha;
 use App\Models\PlaneacionActividad;
+use App\Models\Status;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -20,10 +21,8 @@ use Illuminate\Support\Facades\Schema;
 class AsignacionActividadController extends Controller
 {
     /**
-     * Estados de matricula.estado que representan aprendiz vigente en la ficha.
-     * Fuente de verdad del estado del aprendiz: tabla `matricula`, campo `estado`.
-     * En SENA el estado canónico vigente es "EN FORMACION" (no "ACTIVO").
-     * Alineado con GruposFichaController / FichaController / lista de clase.
+     * Estados de matricula.estado (matrícula en ficha) que permiten listar al aprendiz.
+     * Fuente académica: tabla `matricula`, campo `estado` (enum string).
      */
     private const ESTADOS_MATRICULA_VIGENTES = [
         Estado::EN_FORMACION,
@@ -33,6 +32,10 @@ class AsignacionActividadController extends Controller
         Estado::MATRICULADO,
     ];
 
+    /**
+     * Estado de usuario en plataforma: activation_company_users.state_id → estado.id
+     * ACTIVO = 1 (tabla `estado`). Si el usuario no está ACTIVO, no aparece en Ambiente Virtual.
+     */
     /**
      * Estudiantes (matrículas) en ficha y, por actividad, cuántos ya tienen registro en calificacionActividad.
      * Usado en la lista de actividades: el estado "Asignado" es informativo; no bloquea nuevas asignaciones
@@ -566,7 +569,10 @@ class AsignacionActividadController extends Controller
             if (Schema::hasColumn('matricula', 'idFicha')) {
                 $matriculas = DB::table('matricula')
                     ->where('idFicha', $idFicha)
-                    ->whereIn(DB::raw('UPPER(TRIM(estado))'), self::ESTADOS_MATRICULA_VIGENTES)
+                    ->whereRaw(
+                        'UPPER(TRIM(estado)) IN ('.implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?')).')',
+                        self::ESTADOS_MATRICULA_VIGENTES
+                    )
                     ->pluck('id');
             } elseif (Schema::hasColumn('matricula', 'idAsignacionPeriodoProgramaJornada')) {
                 $idAppj = null;
@@ -582,7 +588,10 @@ class AsignacionActividadController extends Controller
                 if ($idAppj) {
                     $matriculas = DB::table('matricula')
                         ->where('idAsignacionPeriodoProgramaJornada', $idAppj)
-                        ->whereIn(DB::raw('UPPER(TRIM(estado))'), self::ESTADOS_MATRICULA_VIGENTES)
+                        ->whereRaw(
+                            'UPPER(TRIM(estado)) IN ('.implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?')).')',
+                            self::ESTADOS_MATRICULA_VIGENTES
+                        )
                         ->pluck('id');
                 }
             }
@@ -591,7 +600,7 @@ class AsignacionActividadController extends Controller
                 : collect();
         }
 
-        // Solo aprendices vigentes en la ficha (matricula.estado).
+        // Matrícula vigente + usuario plataforma ACTIVO (state_id = 1).
         $idsVigentes = $this->filtrarMatriculasEstadoVigente($ma->pluck('idMatricula'));
         $ma = $ma->filter(fn ($m) => $idsVigentes->contains((int) ($m->idMatricula ?? 0)))->values();
 
@@ -652,7 +661,10 @@ class AsignacionActividadController extends Controller
             if (Schema::hasColumn('matricula', 'idFicha')) {
                 $matriculas = DB::table('matricula')
                     ->where('idFicha', $idFicha)
-                    ->whereIn(DB::raw('UPPER(TRIM(estado))'), self::ESTADOS_MATRICULA_VIGENTES)
+                    ->whereRaw(
+                        'UPPER(TRIM(estado)) IN ('.implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?')).')',
+                        self::ESTADOS_MATRICULA_VIGENTES
+                    )
                     ->pluck('id');
             } elseif (Schema::hasColumn('matricula', 'idAsignacionPeriodoProgramaJornada')) {
                 $idAppj = null;
@@ -666,7 +678,10 @@ class AsignacionActividadController extends Controller
                 if ($idAppj) {
                     $matriculas = DB::table('matricula')
                         ->where('idAsignacionPeriodoProgramaJornada', $idAppj)
-                        ->whereIn(DB::raw('UPPER(TRIM(estado))'), self::ESTADOS_MATRICULA_VIGENTES)
+                        ->whereRaw(
+                            'UPPER(TRIM(estado)) IN ('.implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?')).')',
+                            self::ESTADOS_MATRICULA_VIGENTES
+                        )
                         ->pluck('id');
                 }
             }
@@ -804,10 +819,13 @@ class AsignacionActividadController extends Controller
     }
 
     /**
-     * Deja solo matrículas con estado vigente en la ficha.
-     * Campo: matricula.estado (NO usuario/persona/ficha).
-     * Valores vigentes: EN FORMACION (canónico), ACTIVO, EN CURSO, CURSANDO, MATRICULADO.
-     * Excluye: RETIRO VOLUNTARIO, TRASLADADO, DESERCION, APLAZADO, CANCELADO, etc.
+     * Deja solo matrículas vigentes con usuario de plataforma ACTIVO.
+     *
+     * Fuentes:
+     * - Académica: matricula.estado ∈ EN FORMACION / ACTIVO / EN CURSO / CURSANDO / MATRICULADO
+     * - Plataforma: activation_company_users.state_id = 1 (tabla estado → ACTIVO)
+     *
+     * Por eso cambiar solo user_state/idEstado a CANCELADO/INACTIVO excluye al estudiante.
      *
      * @param  \Illuminate\Support\Collection|array  $idsMatricula
      * @return \Illuminate\Support\Collection<int, int>
@@ -824,10 +842,24 @@ class AsignacionActividadController extends Controller
             return $ids;
         }
 
-        return DB::table('matricula')
-            ->whereIn('id', $ids->all())
-            ->whereIn(DB::raw('UPPER(TRIM(estado))'), self::ESTADOS_MATRICULA_VIGENTES)
-            ->pluck('id')
+        $placeholders = implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?'));
+
+        $q = DB::table('matricula as m')
+            ->whereIn('m.id', $ids->all())
+            ->whereRaw('UPPER(TRIM(m.estado)) IN ('.$placeholders.')', self::ESTADOS_MATRICULA_VIGENTES);
+
+        // Usuario plataforma ACTIVO (estado.id = 1)
+        if (Schema::hasTable('usuario') && Schema::hasTable('activation_company_users')) {
+            $q->whereExists(function ($sub) {
+                $sub->select(DB::raw(1))
+                    ->from('usuario as u')
+                    ->join('activation_company_users as acu', 'acu.user_id', '=', 'u.id')
+                    ->whereColumn('u.idpersona', 'm.idPersona')
+                    ->where('acu.state_id', Status::ID_ACTIVE);
+            });
+        }
+
+        return $q->pluck('m.id')
             ->map(fn ($v) => (int) $v)
             ->values();
     }
