@@ -44,6 +44,20 @@ class HorarioMateriaController extends Controller
     private array $relations;
     private array $columns;
 
+    /**
+     * Estados de horarioMateria que sí ocupan franja / disponibilidad activa.
+     * INTERRUMPIDO, FINALIZADO y EVALUADO NO deben bloquear al instructor ni la franja.
+     */
+    private const ESTADOS_HORARIO_ACTIVOS = [
+        EstadoHorarioMateria::PENDIENTE,
+        EstadoHorarioMateria::ASIGNADO,
+    ];
+
+    /** Estados que hacen que el instructor quede ocupado en cruce de docente. */
+    private const ESTADOS_QUE_OCUPAN_INSTRUCTOR = [
+        EstadoHorarioMateria::ASIGNADO,
+    ];
+
     function __construct()
     {
         $this->relations = [];
@@ -330,7 +344,8 @@ class HorarioMateriaController extends Controller
         $query = HorarioMateria::where('idFicha', $data['idFicha'])
             // Filtrar por Día
             ->where('idDia', $data['idDia'])
-            ->where('estado', [EstadoHorarioMateria::PENDIENTE, EstadoHorarioMateria::ASIGNADO, EstadoHorarioMateria::INTERRUMPIDO])
+            // Solo horarios activos ocupan la franja (no INTERRUMPIDO / FINALIZADO / EVALUADO)
+            ->whereIn('estado', self::ESTADOS_HORARIO_ACTIVOS)
             // Excluir el horario actual si se está editando
             ->when($currentHorarioMateriaId, function ($q) use ($currentHorarioMateriaId) {
                 return $q->where('id', '<>', $currentHorarioMateriaId);
@@ -751,7 +766,8 @@ class HorarioMateriaController extends Controller
             ->when($horarioMateria->id, function ($query) use ($horarioMateria) {
                 $query->where('id', '<>', $horarioMateria->id);
             })
-            ->where('estado', EstadoHorarioMateria::ASIGNADO)
+            // Solo ASIGNADO bloquea al instructor; INTERRUMPIDO / FINALIZADO / EVALUADO liberan
+            ->whereIn('estado', self::ESTADOS_QUE_OCUPAN_INSTRUCTOR)
             ->where('idContrato', $idContrato)
             ->where('idDia', $horarioMateria->idDia)
             ->where(function ($query) use ($horarioMateria) {
@@ -1072,6 +1088,7 @@ class HorarioMateriaController extends Controller
                 ->when(isset($horarioMateria->id) ? $horarioMateria->id : null, function ($query) use ($horarioMateria) {
                     return $query->where('id', '<>', $horarioMateria->id);
                 })
+                ->whereIn('estado', self::ESTADOS_HORARIO_ACTIVOS)
                 ->where('idAsignacionPeriodoJornada', $idAsignacionPeriodoJornada)
                 ->where('idDia', $idDia)
                 ->where('idGradoMateria', $idGradoMateria)
@@ -1158,6 +1175,7 @@ class HorarioMateriaController extends Controller
             ->when(isset($horarioMateria->id) ? $horarioMateria->id : null, function ($query) use ($horarioMateria) {
                 return $query->where('id', '<>', $horarioMateria->id);
             })
+            ->whereIn('estado', self::ESTADOS_HORARIO_ACTIVOS)
             ->where('idAsignacionPeriodoJornada', $idAsignacionPeriodoJornada)
             ->where('idDia', $idDia)
             ->where('idGradoMateria', $idGradoMateria)

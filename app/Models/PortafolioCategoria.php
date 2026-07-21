@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class PortafolioCategoria extends Model
 {
     protected $table = 'portafolioCategorias';
-    protected $fillable = ['nombre', 'slug', 'idCategoriaPadre', 'orden', 'activo'];
+    protected $fillable = ['nombre', 'slug', 'idCategoriaPadre', 'orden', 'activo', 'idContrato'];
 
     public function hijos()
     {

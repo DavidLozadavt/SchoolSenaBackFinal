@@ -201,6 +201,12 @@ Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioControll
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
 Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
+// Inscripción pública a eventos (sin auth de School, para usuarios de NexiService)
+Route::post('eventos-multimedia/{id}/register-public', [App\Http\Controllers\EventoController::class, 'registerPublic']);
+Route::get('eventos-multimedia/{id}/check-registration-public', [App\Http\Controllers\EventoController::class, 'checkRegistrationPublic']);
+Route::get('eventos-multimedia/{id}/inscripciones', [App\Http\Controllers\EventoController::class, 'inscripciones']);
+Route::delete('eventos-multimedia/{id}/inscripciones/{respuestaId}', [App\Http\Controllers\EventoController::class, 'eliminarInscripcion']);
+
 Route::group([
     'middleware' => 'api',
 ], function () {
@@ -1302,6 +1308,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('ambiente-virtual/material-apoyo', [ActividadController::class, 'materialApoyoAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta-cuestionario', [ActividadController::class, 'responderCuestionarioAprendiz']);
+    Route::get('actividades-aprendiz/{idCalificacionActividad}/revision-cuestionario', [ActividadController::class, 'revisionCuestionarioAprendiz']);
     Route::get('actividades/{id}', [ActividadController::class, 'show']);
     Route::put('actividades/{id}', [ActividadController::class, 'update']);
     Route::delete('actividades/{id}', [ActividadController::class, 'destroy']);
@@ -1492,6 +1499,7 @@ Route::get('asistencias-instructor-global', [AsistenciaController::class, 'asist
 //Intructores:
 Route::middleware('auth:api')->group(function () {
     Route::get('instructores', [InstructoresController::class, 'getInstructors']);
+    Route::get('instructores/estado_informe_pago', [InstructoresController::class, 'getEstadoInformePago']);
     Route::get('instructores/historial', [InstructoresController::class, 'getInstructorsHistorial']);
     Route::get('instructores/fichas', [InstructoresController::class, 'getFichasByContrato']);
     Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
@@ -1654,6 +1662,7 @@ Route::middleware('auth:api')->group(function () {
     Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update']);
     Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy']);
     Route::get('formularios/{id}/respuestas', [App\Http\Controllers\FormularioController::class, 'respuestas']);
+    Route::delete('formularios/{id}/respuestas/{respuestaId}', [App\Http\Controllers\FormularioController::class, 'destroyRespuesta']);
 
 });
 

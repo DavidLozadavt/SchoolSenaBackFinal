@@ -44,7 +44,7 @@ class FormularioInscripcionSeeder extends Seeder
                 'descripcion' => 'Selecciona el tipo de identificación oficial.',
                 'esObligatoria' => true,
                 'orden' => 2,
-                'opciones' => ['Registro Civil', 'Tarjeta de Identidad', 'Cédula de Ciudadanía', 'Cédula de Extranjería']
+                'opciones' => ['Tarjeta de Identidad', 'Cédula de Ciudadanía', 'Cédula de Extranjería']
             ],
             [
                 'titulo' => 'Número de Documento del Estudiante',
@@ -75,18 +75,33 @@ class FormularioInscripcionSeeder extends Seeder
                 'orden' => 6,
             ],
             [
+                'titulo' => 'Teléfono Secundario (Opcional)',
+                'tipo' => 'texto_corto',
+                'descripcion' => 'Otro número de teléfono de contacto.',
+                'esObligatoria' => false,
+                'orden' => 7,
+            ],
+            [
+                'titulo' => 'Programa de Interés',
+                'tipo' => 'desplegable',
+                'descripcion' => 'Selecciona el programa académico al que te deseas inscribir.',
+                'esObligatoria' => true,
+                'orden' => 8,
+                'opciones' => [] // Will be populated dynamically or default
+            ],
+            [
                 'titulo' => 'Nombre Completo del Tutor / Acudiente',
                 'tipo' => 'texto_corto',
                 'descripcion' => 'Nombre completo del representante legal responsable del alumno.',
                 'esObligatoria' => true,
-                'orden' => 7,
+                'orden' => 9,
             ],
             [
                 'titulo' => 'Parentesco del Tutor',
                 'tipo' => 'desplegable',
                 'descripcion' => 'Relación familiar del acudiente con el estudiante.',
                 'esObligatoria' => true,
-                'orden' => 8,
+                'orden' => 10,
                 'opciones' => ['Madre', 'Padre', 'Abuelo/a', 'Tío/a', 'Hermano/a mayor de edad', 'Tutor Legal']
             ],
             [
@@ -94,28 +109,28 @@ class FormularioInscripcionSeeder extends Seeder
                 'tipo' => 'texto_corto',
                 'descripcion' => 'Número de documento del acudiente.',
                 'esObligatoria' => true,
-                'orden' => 9,
+                'orden' => 11,
             ],
             [
                 'titulo' => 'Teléfono del Tutor',
                 'tipo' => 'texto_corto',
                 'descripcion' => 'Teléfono de contacto prioritario para emergencias.',
                 'esObligatoria' => true,
-                'orden' => 10,
+                'orden' => 12,
             ],
             [
                 'titulo' => 'Correo del Tutor',
                 'tipo' => 'texto_corto',
                 'descripcion' => 'Dirección de correo electrónico del acudiente.',
                 'esObligatoria' => true,
-                'orden' => 11,
+                'orden' => 13,
             ],
             [
                 'titulo' => 'Certificado de Estudios de la Institución Anterior',
-                'tipo' => 'texto_largo',
+                'tipo' => 'archivo',
                 'descripcion' => 'Por favor, suba el último certificado académico en formato PDF o Imagen.',
                 'esObligatoria' => true,
-                'orden' => 12,
+                'orden' => 14,
             ],
         ];
 

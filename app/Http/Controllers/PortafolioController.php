@@ -165,6 +165,10 @@ class PortafolioController extends Controller
         ];
 
         $categoriasBase = \App\Models\PortafolioCategoria::whereIn('slug', $slugsBase)
+            ->where(function ($q) use ($request) {
+                $q->whereNull('idContrato')
+                  ->orWhere('idContrato', $request->idContrato);
+            })
             ->orderBy('orden')
             ->get(); // trae id, nombre, slug — lo necesitas para el insert
 
@@ -178,7 +182,14 @@ class PortafolioController extends Controller
 
             // ── Se consulta UNA sola vez, fuera del foreach ─────────────────────
             $categoriasConHijos = \App\Models\PortafolioCategoria::whereIn('slug', ['horario-ficha', 'actas-equipo-ejecutor'])
-                ->with('hijos')
+                ->where(function ($q) use ($request) {
+                    $q->whereNull('idContrato')
+                      ->orWhere('idContrato', $request->idContrato);
+                })
+                ->with(['hijos' => function ($q) use ($request) {
+                    $q->whereNull('idContrato')
+                      ->orWhere('idContrato', $request->idContrato);
+                }])
                 ->get();
 
             foreach ($fichas as $ficha) {
@@ -202,19 +213,26 @@ class PortafolioController extends Controller
                     \Log::error('Error generando excel planeación: ' . $e->getMessage());
                 }
 
-                // Documentos base (9 categorías raíz)
+                // Categorías que se documentan a través de sus hijos (trimestres) — no deben tener fila propia
+                $slugsConHijos = ['horario-ficha', 'actas-equipo-ejecutor'];
+
                 \App\Models\PortafolioDocumento::insert(
-                    $categoriasBase->map(fn($cat) => [
-                        'idPortafolioFichas' => $pf->id,
-                        'idCategoria' => $cat->id,
-                        'descripcion' => $cat->nombre,
-                        'urlDocumento' => match ($cat->slug) {
-                            'programa-formacion' => $ficha['programaUrlDocumento'] ?? '',
-                            'proyecto-formativo' => $ficha['fichaUrlDocumento'] ?? '',
-                            'planeacion-pedagogica' => $urlPlaneacion ?? '',
-                            default => '',
-                        },
-                    ])->toArray()
+                    $categoriasBase
+                        ->reject(fn($cat) => in_array($cat->slug, $slugsConHijos))
+                        ->map(fn($cat) => [
+                            'idPortafolioFichas' => $pf->id,
+                            'idCategoria' => $cat->id,
+                            'descripcion' => $cat->nombre,
+                            'urlDocumento' => match ($cat->slug) {
+                                'programa-formacion' => $ficha['programaUrlDocumento'] ?? '',
+                                'proyecto-formativo' => $ficha['fichaUrlDocumento'] ?? '',
+                                'planeacion-pedagogica' => $urlPlaneacion ?? '',
+                                default => null, // no crear si no hay documento
+                            },
+                        ])
+                        ->filter(fn($doc) => $doc['urlDocumento'] !== null && $doc['urlDocumento'] !== '')
+                        ->values()
+                        ->toArray()
                 );
 
                 // ── 6. Asociar actas y horarios mensuales a los trimestres ───────────────────
@@ -238,10 +256,21 @@ class PortafolioController extends Controller
 
                 // Asociar actas a sus respectivas categorías
                 foreach ($actasPorTrimestre as $trimestre => $actasTrimestre) {
+                    \Log::info('Debug actas', [
+                        'idFicha' => $ficha['idFicha'],
+                        'totalActas' => $actas->count(),
+                        'actasPorTrimestre' => array_map('count', $actasPorTrimestre),
+                    ]);
+
                     if (empty($actasTrimestre))
                         continue;
 
-                    $categoriaActas = \App\Models\PortafolioCategoria::where('slug', "actas-equipo-ejecutor-$trimestre")->first();
+                    $categoriaActas = \App\Models\PortafolioCategoria::where('slug', "actas-equipo-ejecutor-$trimestre")
+                        ->where(function ($q) use ($request) {
+                            $q->whereNull('idContrato')
+                              ->orWhere('idContrato', $request->idContrato);
+                        })
+                        ->first();
                     if ($categoriaActas) {
                         foreach ($actasTrimestre as $acta) {
                             $urlDocumento = $acta->rutaDocumentoUrl ?: '';
@@ -289,7 +318,12 @@ class PortafolioController extends Controller
                 foreach ($mesesHorarios as $mes) {
                     $trimestreNum = ceil($mes / 3);
                     $trimestreSlug = "t$trimestreNum";
-                    $categoriaHorario = \App\Models\PortafolioCategoria::where('slug', "horario-ficha-$trimestreSlug")->first();
+                    $categoriaHorario = \App\Models\PortafolioCategoria::where('slug', "horario-ficha-$trimestreSlug")
+                        ->where(function ($q) use ($request) {
+                            $q->whereNull('idContrato')
+                              ->orWhere('idContrato', $request->idContrato);
+                        })
+                        ->first();
 
                     if ($categoriaHorario) {
                         $urlHorarioMensual = $this->generarPdfHorarioMensual($ficha['idFicha'], $mes);
@@ -511,9 +545,33 @@ class PortafolioController extends Controller
 
         $portafolioFolder = $this->sanitizeName($portafolio->descripcion, 'Portafolio_' . $portafolio->id);
 
+        // Obtener todas las categorías para construir la estructura de carpetas (incluso las vacías)
+        $categorias = \App\Models\PortafolioCategoria::where('activo', true)
+            ->where(function ($q) use ($portafolio) {
+                $q->whereNull('idContrato')
+                  ->orWhere('idContrato', $portafolio->idContrato);
+            })
+            ->with('padre.padre.padre.padre')
+            ->get();
+
         foreach ($portafolio->portafolioFichas as $portafolioFicha) {
 
             $fichaFolder = $portafolioFolder . '/' . $this->sanitizeName($portafolioFicha->descripcion, 'Ficha_' . $portafolioFicha->id);
+            
+            // Asegurarse de que al menos la carpeta de la ficha exista
+            $zip->addEmptyDir($fichaFolder);
+
+            // ── Crear todas las carpetas base de categorías ──
+            foreach ($categorias as $categoria) {
+                $categoriaFolder = $fichaFolder . '/' . $this->buildCategoryPath($categoria);
+                
+                $pathSegments = explode('/', $categoriaFolder);
+                $currentPath = '';
+                foreach ($pathSegments as $segment) {
+                    $currentPath .= ($currentPath === '' ? '' : '/') . $segment;
+                    $zip->addEmptyDir($currentPath);
+                }
+            }
 
             foreach ($portafolioFicha->portafolioDocumentos as $documento) {
 
