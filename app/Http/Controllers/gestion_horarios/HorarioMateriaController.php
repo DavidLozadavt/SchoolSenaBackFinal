@@ -1353,20 +1353,44 @@ class HorarioMateriaController extends Controller
             }
 
             $materias = HorarioMateria::where('idFicha', $idFicha)
-                ->with('gradoMateria.materia')
-                ->with('contrato.persona')
-                ->with('asignacionSesion.contrato.persona')
+                ->with([
+                    'dia',
+                    'gradoMateria.materia',
+                    'contrato.persona',
+                    'asignacionSesion.contrato.persona',
+                ])
+                // Sin filtro por fecha: histórico + actual + futuro de la ficha.
+                ->orderBy('fechaInicial')
+                ->orderBy('horaInicial')
                 ->get();
 
-            if ($materias->isEmpty()) {
-                return response()->json([
-                    'message' => 'No se encontraron registros para la ficha enviada'
-                ], 404);
-            }
+            // Normalizar fechas/horas para el calendario (strings Y-m-d / H:i).
+            $data = $materias->map(function (HorarioMateria $h) {
+                $arr = $h->toArray();
+                try {
+                    if (!empty($h->fechaInicial)) {
+                        $arr['fechaInicial'] = Carbon::parse($h->fechaInicial)->format('Y-m-d');
+                    }
+                    if (!empty($h->fechaFinal)) {
+                        $arr['fechaFinal'] = Carbon::parse($h->fechaFinal)->format('Y-m-d');
+                    }
+                } catch (\Throwable $e) {
+                    // conservar valor original si no es parseable
+                }
+                if (!empty($h->horaInicial)) {
+                    $arr['horaInicial'] = substr((string) $h->horaInicial, 0, 5);
+                }
+                if (!empty($h->horaFinal)) {
+                    $arr['horaFinal'] = substr((string) $h->horaFinal, 0, 5);
+                }
+                // Alias de instructor para el frontend del calendario.
+                $arr['instructor'] = $h->contrato?->persona;
+                return $arr;
+            })->values();
 
             return response()->json([
                 'message' => 'Consulta realizada correctamente',
-                'data' => $materias
+                'data' => $data
             ], 200);
         } catch (\Throwable $e) {
             return response()->json([
