@@ -3,10 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Models\SeguimientoAspirante;
+use App\Models\SeguimientoRevisionHistorial;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Carbon\Carbon;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
@@ -136,6 +141,7 @@ class SeguimientoAspiranteController extends Controller
 
                 try {
                     SeguimientoAspirante::create([
+                        'tokenPublico' => (string) \Illuminate\Support\Str::uuid(),
                         'nombre' => $nombre,
                         'apellido' => $apellido,
                         'celular' => $celular,
@@ -234,6 +240,142 @@ class SeguimientoAspiranteController extends Controller
             Log::error('Error al obtener listado de aspirantes: ' . $e->getMessage());
             return response()->json(['error' => 'Error al obtener la información: ' . $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Exporta el listado de aspirantes (PDF o CSV/Excel) aplicando los mismos
+     * filtros que `index`, más filtro por estado documental (link enviado,
+     * formulario enviado, documentación completa/incompleta, aprobado, etc).
+     */
+    public function exportar(Request $request)
+    {
+        $formato = $request->get('formato', 'excel'); // 'pdf' | 'excel'
+
+        $query = SeguimientoAspirante::query();
+
+        if ($request->filled('programa')) {
+            $query->where('programa', $request->programa);
+        }
+        if ($request->filled('centro_formacion')) {
+            $query->where('centro_formacion', $request->centro_formacion);
+        }
+        if ($request->filled('ficha')) {
+            $query->where('ficha', $request->ficha);
+        }
+        if ($request->filled('estado')) {
+            $query->where('estado', $request->estado);
+        }
+        if ($request->filled('estadoDocumental')) {
+            $query->where('estadoDocumental', $request->estadoDocumental);
+        }
+        if ($request->filled('fecha_desde')) {
+            $query->whereDate('fecha_registro_excel', '>=', $request->fecha_desde);
+        }
+        if ($request->filled('fecha_hasta')) {
+            $query->whereDate('fecha_registro_excel', '<=', $request->fecha_hasta);
+        }
+
+        $aspirantes = $query->orderBy('created_at', 'desc')->get();
+
+        // Último evento de aprobación/rechazo por aspirante (motivo, revisor, fecha).
+        $ultimasRevisiones = SeguimientoRevisionHistorial::with('usuarioRevisor')
+            ->whereIn('idAspirante', $aspirantes->pluck('id'))
+            ->whereIn('accion', ['aprobado', 'rechazado'])
+            ->orderByDesc('fecha')
+            ->get()
+            ->groupBy('idAspirante')
+            ->map(fn ($rows) => $rows->first());
+
+        $estadoDocumentalLabel = [
+            'link_enviado' => 'Link enviado',
+            'formulario_iniciado' => 'Formulario iniciado',
+            'formulario_enviado' => 'Formulario enviado',
+            'documentacion_completa' => 'Documentación completa',
+            'documentacion_incompleta' => 'Documentación incompleta',
+            'pendiente_revision' => 'Pendiente de revisión',
+            'aprobado' => 'Aprobado',
+            'rechazado' => 'Rechazado',
+            'correccion_solicitada' => 'Corrección solicitada',
+        ];
+
+        $documentosCompletos = function (?string $estadoDocumental): string {
+            if (!$estadoDocumental) {
+                return 'N/A';
+            }
+            if ($estadoDocumental === 'documentacion_incompleta') {
+                return 'No';
+            }
+            if (in_array($estadoDocumental, ['documentacion_completa', 'pendiente_revision', 'aprobado', 'rechazado'], true)) {
+                return 'Sí';
+            }
+            return 'N/A';
+        };
+
+        $headers = [
+            'Nombre completo', 'Celular', 'Correo', 'Centro de formación', 'Programa', 'Ficha',
+            'Estado WhatsApp', 'Respuesta aspirante', 'Fecha respuesta',
+            'Estado documental', 'Documentos completos', 'Fecha formulario enviado',
+            'Resultado revisión', 'Motivo rechazo', 'Revisado por', 'Fecha revisión',
+        ];
+
+        $filas = $aspirantes->map(function ($a) use ($ultimasRevisiones, $estadoDocumentalLabel, $documentosCompletos) {
+            $revision = $ultimasRevisiones->get($a->id);
+
+            return [
+                trim($a->nombre . ' ' . $a->apellido),
+                $a->celular,
+                $a->correo ?: '—',
+                $a->centro_formacion,
+                $a->programa,
+                $a->ficha,
+                $a->estado,
+                $a->respuesta ?: '—',
+                $a->fechaRespuesta ?: '—',
+                $estadoDocumentalLabel[$a->estadoDocumental] ?? ($a->estadoDocumental ?: '—'),
+                $documentosCompletos($a->estadoDocumental),
+                $a->fechaFormularioEnviado ?: '—',
+                $revision ? ucfirst($revision->accion) : '—',
+                $revision?->motivo ?: '—',
+                $revision?->usuarioRevisor?->email ?: '—',
+                $revision?->fecha ?: '—',
+            ];
+        })->all();
+
+        if ($formato === 'pdf') {
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.aspirantes', [
+                'headers' => $headers,
+                'filas' => $filas,
+            ])->setPaper('a4', 'landscape');
+
+            return $pdf->stream('aspirantes.pdf');
+        }
+
+        // Excel real (.xlsx) con encabezado con estilo y columnas autoajustadas.
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Aspirantes');
+
+        $sheet->fromArray($headers, null, 'A1');
+        $sheet->getStyle('A1:' . $sheet->getHighestColumn() . '1')->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
+        $sheet->getStyle('A1:' . $sheet->getHighestColumn() . '1')->getFill()
+            ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('16a34a');
+        $sheet->getStyle('A1:' . $sheet->getHighestColumn() . '1')->getAlignment()
+            ->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+
+        $sheet->fromArray($filas, null, 'A2');
+
+        foreach (range('A', $sheet->getHighestColumn()) as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+        $sheet->freezePane('A2');
+        $sheet->setAutoFilter('A1:' . $sheet->getHighestColumn() . '1');
+
+        $tmpPath = tempnam(sys_get_temp_dir(), 'aspirantes') . '.xlsx';
+        (new Xlsx($spreadsheet))->save($tmpPath);
+
+        return response()->download($tmpPath, 'aspirantes.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ])->deleteFileAfterSend(true);
     }
 
     /**

@@ -201,6 +201,12 @@ Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioControll
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
 Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
+// Inscripción pública del aspirante (Seguimiento de Aspirantes) — identifica
+// al aspirante únicamente por tokenPublico, sin login. Reutiliza el módulo
+// de Formularios y su endpoint de upload-adjunto de arriba.
+Route::get('inscripcion-aspirante/{token}', [App\Http\Controllers\AspiranteInscripcionController::class, 'show']);
+Route::post('inscripcion-aspirante/{token}/responder', [App\Http\Controllers\AspiranteInscripcionController::class, 'responder']);
+
 // Inscripción pública a eventos (sin auth de School, para usuarios de NexiService)
 Route::post('eventos-multimedia/{id}/register-public', [App\Http\Controllers\EventoController::class, 'registerPublic']);
 Route::get('eventos-multimedia/{id}/check-registration-public', [App\Http\Controllers\EventoController::class, 'checkRegistrationPublic']);
@@ -1744,10 +1750,20 @@ Route::middleware('auth:api')->group(function () {
     Route::get('seguimiento-aspirantes/programas', [SeguimientoAspiranteController::class, 'getProgramas']);
     Route::get('seguimiento-aspirantes/centros', [SeguimientoAspiranteController::class, 'getCentros']);
     Route::get('seguimiento-aspirantes/fichas', [SeguimientoAspiranteController::class, 'getFichas']);
+    Route::get('seguimiento-aspirantes/exportar', [SeguimientoAspiranteController::class, 'exportar']);
     Route::post('seguimiento-aspirantes/eliminar', [SeguimientoAspiranteController::class, 'eliminarSeleccionados']);
     Route::delete('seguimiento-aspirantes/todos', [SeguimientoAspiranteController::class, 'eliminarTodos']);
     Route::post('seguimiento-aspirantes/enviar-whatsapp', [SeguimientoAspiranteController::class, 'enviarWhatsApp']);
     Route::apiResource('whatsapp-plantillas', WhatsappPlantillaController::class);
+
+    // Panel administrativo "Solicitudes de Inscripción" — independiente del
+    // listado de Seguimiento de Aspirantes, mismo permiso del módulo.
+    Route::middleware('permission:' . PermissionConst::GESTION_SEGUIMIENTO_ASPIRANTES)->group(function () {
+        Route::get('solicitudes-inscripcion', [App\Http\Controllers\SolicitudInscripcionController::class, 'index']);
+        Route::get('solicitudes-inscripcion/{id}', [App\Http\Controllers\SolicitudInscripcionController::class, 'show']);
+        Route::post('solicitudes-inscripcion/{id}/aprobar', [App\Http\Controllers\SolicitudInscripcionController::class, 'aprobar']);
+        Route::post('solicitudes-inscripcion/{id}/rechazar', [App\Http\Controllers\SolicitudInscripcionController::class, 'rechazar']);
+    });
 
     // Configuración local de WhatsApp Cloud API (Meta) — CRUD autónomo.
     // Protegido por el permiso GESTION_TELECOM_CONFIG (mismo middleware que el resto del proyecto).

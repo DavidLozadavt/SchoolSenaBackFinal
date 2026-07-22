@@ -32,6 +32,7 @@ class TelecomConfig extends Model
         'webhookUrl',
         'graphVersion',
         'activo',
+        'idFormularioInscripcion',
     ];
 
     protected $casts = [

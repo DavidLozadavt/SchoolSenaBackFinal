@@ -18,8 +18,6 @@ use Illuminate\Support\Facades\Log;
  */
 class WhatsappWebhookController extends Controller
 {
-    /** URL de prueba a donde se dirige al aspirante para completar su inscripción. */
-    private const URL_INSCRIPCION = 'https://www.sena.edu.co';
 
     /**
      * Verificación del webhook. Devuelve hub.challenge si el verify_token coincide
@@ -126,10 +124,19 @@ class WhatsappWebhookController extends Controller
         $programa = trim((string) $aspirante->programa);
 
         if ($estado === 'SI') {
+            if (!$aspirante->tokenPublico) {
+                $aspirante->tokenPublico = (string) \Illuminate\Support\Str::uuid();
+            }
+            $aspirante->estadoDocumental = 'link_enviado';
+            $aspirante->save();
+
+            $urlInscripcion = rtrim(config('app.frontend_url'), '/')
+                . '/formulario-aspirante/' . $aspirante->tokenPublico;
+
             $mensaje = "¡Perfecto, {$nombre}! 🎉\n\n"
                 . "Para finalizar tu registro" . ($programa !== '' ? " al programa {$programa}" : '') . ", "
                 . "ingresa a este enlace y completa tus datos:\n"
-                . self::URL_INSCRIPCION . "\n\n"
+                . $urlInscripcion . "\n\n"
                 . "¡Te esperamos!";
         } elseif ($estado === 'NO') {
             $mensaje = "Entendido, {$nombre}. 🙏\n\n"

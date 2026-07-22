@@ -133,6 +133,7 @@ class TelecomConfigController extends Controller
             'webhookUrl'        => ['nullable', 'string', 'max:255'],
             'graphVersion'      => ['nullable', 'string', 'max:20'],
             'activo'            => ['nullable', 'boolean'],
+            'idFormularioInscripcion' => ['nullable', 'integer', 'exists:formularios,id'],
         ]);
     }
 }
