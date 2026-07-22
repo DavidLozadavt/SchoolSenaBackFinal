@@ -22,6 +22,7 @@ use App\Models\GradoMateria;
 use App\Models\GradoPrograma;
 use App\Models\HorarioMateria;
 use App\Models\MatriculaAcademica;
+use App\Services\TrimestreActualFichaService;
 
 use function PHPUnit\Framework\isEmpty;
 
@@ -585,7 +586,7 @@ class MateriaController extends Controller
                                 $h->horaFinal != null &&
                                 $h->fechaInicial != null &&
                                 $h->idContrato == null &&
-                                $h->estado == EstadoHorarioMateria::PENDIENTE;
+                                $h->estado != EstadoHorarioMateria::INTERRUMPIDO;
                         })
                         ->map(function ($h) {
                             return [
@@ -741,6 +742,16 @@ class MateriaController extends Controller
             $idGradoMateria = $request->input('id');
             $eliminarTrimestre = $request->boolean('eliminarTrimestre');
             $idFicha = $request->input('idFicha');
+
+            if ($idFicha && $idGradoMateria) {
+                $bloqueo = TrimestreActualFichaService::abortSiGradoMateriaNoActual(
+                    (int) $idGradoMateria,
+                    (int) $idFicha
+                );
+                if ($bloqueo) {
+                    return $bloqueo;
+                }
+            }
 
             DB::beginTransaction();
 

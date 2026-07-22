@@ -37,6 +37,7 @@ use App\Models\GradoPrograma;
 use App\Models\Rmi;
 use App\Models\MatriculaAcademica;
 use App\Models\NotificacionSistema;
+use App\Services\TrimestreActualFichaService;
 
 class HorarioMateriaController extends Controller
 {
@@ -109,6 +110,13 @@ class HorarioMateriaController extends Controller
                 return response()->json(['message' => 'Faltan datos obligatorios'], 400);
             }
 
+            $bloqueo = TrimestreActualFichaService::abortSiAlgunHorarioNoActual(
+                array_map(fn ($id) => ['id' => (int) $id], (array) $horarioIds)
+            );
+            if ($bloqueo) {
+                return $bloqueo;
+            }
+
             $compartidos = AsignacionSesion::whereIn('idHorarioMateria', $horarioIds)
                 ->where('tipoAsignacion', 'HORARIO COMPARTIDO')
                 ->whereNull('idContrato')
@@ -156,6 +164,14 @@ class HorarioMateriaController extends Controller
             $horarios       = $data['horarios'] ?? [];
             $observacion  = $data['observacion'] ?? null;
             $festivos  = $data['festivos'] ?? false;
+
+            $bloqueo = TrimestreActualFichaService::abortSiGradoMateriaNoActual(
+                (int) $idGradoMateria,
+                (int) $idFicha
+            );
+            if ($bloqueo) {
+                return $bloqueo;
+            }
 
             if (empty($horarios)) {
                 return response()->json(['message' => 'No se enviaron horarios'], 400);
@@ -477,7 +493,16 @@ class HorarioMateriaController extends Controller
         DB::beginTransaction();
 
         try {
-            $horarioMateria = HorarioMateria::findOrFail($id);
+            $horarioMateria = HorarioMateria::with('gradoMateria.gradoPrograma.grado')->findOrFail($id);
+
+            $idFicha = (int) $horarioMateria->idFicha;
+            $numeroHorario = (int) ($horarioMateria->gradoMateria?->gradoPrograma?->grado?->numeroGrado ?? 0);
+            $maxNumero = TrimestreActualFichaService::maxNumeroGradoFicha($idFicha);
+
+            if ($maxNumero <= 0 || $numeroHorario <= 0 || $numeroHorario !== $maxNumero) {
+                DB::rollBack();
+                return TrimestreActualFichaService::respuestaBloqueo();
+            }
 
             // Buscar todos los horarios que correspondan al mismo slot (incluyendo compartidos/duplicados)
             $horariosRelacionados = HorarioMateria::where('idFicha', $horarioMateria->idFicha)
@@ -599,19 +624,35 @@ class HorarioMateriaController extends Controller
     public function updateTeacherHorarioMateria(Request $request): JsonResponse
     {
         $idContrato = $request->input('idContrato');
-        $horarios = $request->input('horarios');
+        $horariosRequest = $request->input('horarios');
 
-        if (!$idContrato || !is_array($horarios)) {
+        if (!$idContrato || !is_array($horariosRequest)) {
             return response()->json([
                 'message' => 'El contrato y la lista de horarios son obligatorios'
             ], 400);
         }
 
+        $bloqueo = TrimestreActualFichaService::abortSiAlgunHorarioNoActual($horariosRequest);
+        if ($bloqueo) {
+            return $bloqueo;
+        }
+
         try {
             DB::beginTransaction();
 
-            foreach ($horarios as $h) {
-                $horarioMateria = HorarioMateria::findOrFail($h['id']);
+            foreach ($horariosRequest as $h) {
+                $idHorario = is_array($h) ? ($h['id'] ?? null) : ($h->id ?? null);
+                if (!$idHorario) {
+                    continue;
+                }
+
+                $horarioMateria = HorarioMateria::findOrFail($idHorario);
+                $estadoActual = strtoupper(trim((string) $horarioMateria->estado));
+
+                // INTERRUMPIDO: no se asigna por este flujo.
+                if ($estadoActual === EstadoHorarioMateria::INTERRUMPIDO) {
+                    continue;
+                }
 
                 // Validar cruces para el docente
                 $validacion = $this->validateHorariosByDocente($horarioMateria, $idContrato);
@@ -625,7 +666,12 @@ class HorarioMateriaController extends Controller
                     ], 422);
                 }
 
-                if ($horarioMateria->estado != 'FINALIZADO' && $horarioMateria->estado != 'INTERRUMPIDO') {
+                // FINALIZADO / EVALUADO: solo idContrato (trazabilidad); no cambiar estado.
+                if (in_array($estadoActual, [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO], true)) {
+                    $horarioMateria->update([
+                        'idContrato' => $idContrato,
+                    ]);
+                } else {
                     $horarioMateria->update([
                         'idContrato' => $idContrato,
                         'estado' => EstadoHorarioMateria::ASIGNADO
@@ -639,10 +685,10 @@ class HorarioMateriaController extends Controller
                 // Actualizar el estado del detalle RMI del periodo actual a PENDIENTE
                 $periodoActual = now()->format('Y-m');
                 $rmiActual = Rmi::where('periodo', $periodoActual)->first();
-                $horarios = HorarioMateria::where('idContrato', $idContrato)->get();
+                $horariosDelContrato = HorarioMateria::where('idContrato', $idContrato)->get();
 
-                if ($rmiActual && $horarios) {
-                    foreach ($horarios as $horario) {
+                if ($rmiActual && $horariosDelContrato->isNotEmpty()) {
+                    foreach ($horariosDelContrato as $horario) {
                         DetalleRmi::where('idHorarioMateria', $horario->id)
                             ->where('idRmi', $rmiActual->id)
                             ->update([
@@ -680,6 +726,11 @@ class HorarioMateriaController extends Controller
             return response()->json([
                 'message' => 'La lista de horarios es obligatoria'
             ], 400);
+        }
+
+        $bloqueo = TrimestreActualFichaService::abortSiAlgunHorarioNoActual($horarios);
+        if ($bloqueo) {
+            return $bloqueo;
         }
 
         try {
@@ -1337,20 +1388,57 @@ class HorarioMateriaController extends Controller
             }
 
             $materias = HorarioMateria::where('idFicha', $idFicha)
-                ->with('gradoMateria.materia')
-                ->with('contrato.persona')
-                ->with('asignacionSesion.contrato.persona')
+                ->with([
+                    'dia',
+                    'gradoMateria.materia',
+                    'gradoMateria.gradoPrograma.grado',
+                    'contrato.persona',
+                    'asignacionSesion.contrato.persona',
+                ])
+                // Sin filtro por fecha: histórico + actual + futuro de la ficha.
+                ->orderBy('fechaInicial')
+                ->orderBy('horaInicial')
                 ->get();
 
-            if ($materias->isEmpty()) {
-                return response()->json([
-                    'message' => 'No se encontraron registros para la ficha enviada'
-                ], 404);
-            }
+            // Normalizar fechas/horas para el calendario (strings Y-m-d / H:i).
+            $maxNumeroTrimestre = TrimestreActualFichaService::maxNumeroGradoFicha((int) $idFicha);
+
+            $data = $materias->map(function (HorarioMateria $h) use ($maxNumeroTrimestre) {
+                $arr = $h->toArray();
+                try {
+                    if (!empty($h->fechaInicial)) {
+                        $arr['fechaInicial'] = Carbon::parse($h->fechaInicial)->format('Y-m-d');
+                    }
+                    if (!empty($h->fechaFinal)) {
+                        $arr['fechaFinal'] = Carbon::parse($h->fechaFinal)->format('Y-m-d');
+                    }
+                } catch (\Throwable $e) {
+                    // conservar valor original si no es parseable
+                }
+                if (!empty($h->horaInicial)) {
+                    $arr['horaInicial'] = substr((string) $h->horaInicial, 0, 5);
+                }
+                if (!empty($h->horaFinal)) {
+                    $arr['horaFinal'] = substr((string) $h->horaFinal, 0, 5);
+                }
+                // Alias de instructor para el frontend del calendario.
+                $arr['instructor'] = $h->contrato?->persona;
+
+                $numeroTrimestre = (int) ($h->gradoMateria?->gradoPrograma?->grado?->numeroGrado ?? 0);
+                $arr['numeroTrimestre'] = $numeroTrimestre > 0 ? $numeroTrimestre : null;
+                $arr['esTrimestreActual'] = $numeroTrimestre > 0
+                    && $maxNumeroTrimestre > 0
+                    && $numeroTrimestre === $maxNumeroTrimestre;
+                $arr['idHorarioMateria'] = (int) $h->id;
+
+                return $arr;
+            })->values();
 
             return response()->json([
                 'message' => 'Consulta realizada correctamente',
-                'data' => $materias
+                'data' => $data,
+                'maxNumeroTrimestre' => $maxNumeroTrimestre,
+                'trimestreActual' => $maxNumeroTrimestre > 0 ? $maxNumeroTrimestre : null,
             ], 200);
         } catch (\Throwable $e) {
             return response()->json([
@@ -1568,7 +1656,7 @@ class HorarioMateriaController extends Controller
                                             ];
                                         })->values(),
                                     'sinAsignar' => $horariosDeHijos
-                                        ->filter(fn($h) => $h->idDia != null && $h->horaInicial != null && $h->horaFinal != null && $h->fechaInicial != null && $h->idContrato == null && $h->estado == EstadoHorarioMateria::PENDIENTE)
+                                        ->filter(fn($h) => $h->idDia != null && $h->horaInicial != null && $h->horaFinal != null && $h->fechaInicial != null && $h->idContrato == null && $h->estado != EstadoHorarioMateria::INTERRUMPIDO)
                                         ->map(function ($h) use ($estadoRapsGlobal) {
                                             $isFinished = $estadoRapsGlobal[$h->gradoMateria->idMateria] ?? false;
                                             return [
@@ -1746,6 +1834,14 @@ class HorarioMateriaController extends Controller
     {
         try {
             $idGradoMateria = $request->input('idGradoMateria');
+            $idFicha = $request->input('idFicha');
+            $bloqueo = TrimestreActualFichaService::abortSiGradoMateriaNoActual(
+                (int) $idGradoMateria,
+                $idFicha ? (int) $idFicha : null
+            );
+            if ($bloqueo) {
+                return $bloqueo;
+            }
             DB::beginTransaction();
             $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
                 ->whereNotIn('estado', [EstadoHorarioMateria::EVALUADO, EstadoHorarioMateria::FINALIZADO])
@@ -1832,6 +1928,14 @@ class HorarioMateriaController extends Controller
     {
         try {
             $idGradoMateria = $request->input('idGradoMateria');
+            $idFicha = $request->input('idFicha');
+            $bloqueo = TrimestreActualFichaService::abortSiGradoMateriaNoActual(
+                (int) $idGradoMateria,
+                $idFicha ? (int) $idFicha : null
+            );
+            if ($bloqueo) {
+                return $bloqueo;
+            }
             DB::beginTransaction();
             $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
                 ->whereNotIn('estado', [EstadoHorarioMateria::EVALUADO, EstadoHorarioMateria::FINALIZADO])
