@@ -60,6 +60,11 @@ class FormularioController extends Controller
                 'colorTema' => $request->colorTema ?? '#6366f1',
                 'estado' => $request->estado ?? 'borrador',
                 'requiereAutenticacion' => $request->requiereAutenticacion ?? false,
+                'permiteMultiplesRespuestas' => $request->permiteMultiplesRespuestas ?? true,
+                'fechaInicio' => $request->fechaInicio ?? null,
+                'fechaLimite' => $request->fechaLimite ?? null,
+                'limiteRespuestas' => $request->limiteRespuestas ?? null,
+                'mensajeCierre' => $request->mensajeCierre ?? null,
             ]);
 
             if ($request->has('preguntas')) {
@@ -129,7 +134,12 @@ class FormularioController extends Controller
                 'descripcion' => $request->descripcion,
                 'colorTema' => $request->colorTema,
                 'estado' => $request->estado,
-                'requiereAutenticacion' => $request->requiereAutenticacion,
+                'requiereAutenticacion' => $request->exists('requiereAutenticacion') ? $request->requiereAutenticacion : $formulario->requiereAutenticacion,
+                'permiteMultiplesRespuestas' => $request->exists('permiteMultiplesRespuestas') ? $request->permiteMultiplesRespuestas : $formulario->permiteMultiplesRespuestas,
+                'fechaInicio' => $request->exists('fechaInicio') ? $request->fechaInicio : $formulario->fechaInicio,
+                'fechaLimite' => $request->exists('fechaLimite') ? $request->fechaLimite : $formulario->fechaLimite,
+                'limiteRespuestas' => $request->exists('limiteRespuestas') ? $request->limiteRespuestas : $formulario->limiteRespuestas,
+                'mensajeCierre' => $request->exists('mensajeCierre') ? $request->mensajeCierre : $formulario->mensajeCierre,
                 'slug' => $newSlug,
             ]);
 
@@ -243,9 +253,33 @@ class FormularioController extends Controller
         $user = Auth::user() ?: Auth::guard('api')->user();
         $isEmbed = request()->query('embed') === 'true';
 
-        if ($formulario->estado !== 'publicado' && !$isAuth && !$isEmbed) {
-            return response()->json(['error' => 'Formulario no disponible'], 403);
+        $totalRespuestas = FormularioRespuesta::where('idFormulario', $formulario->id)->count();
+        $formulario->setAttribute('respuestas_count', $totalRespuestas);
+
+        // Expiration & availability status check
+        $now = Carbon::now();
+        $isExpired = false;
+        $motivoExpiracion = null; // 'no_iniciado' | 'expirado' | 'pausado' | 'limite_alcanzado' | 'borrador'
+
+        if ($formulario->estado === 'borrador' && !$isAuth && !$isEmbed) {
+            $isExpired = true;
+            $motivoExpiracion = 'borrador';
+        } elseif ($formulario->estado === 'pausado') {
+            $isExpired = true;
+            $motivoExpiracion = 'pausado';
+        } elseif ($formulario->fechaInicio && $now->lt(Carbon::parse($formulario->fechaInicio))) {
+            $isExpired = true;
+            $motivoExpiracion = 'no_iniciado';
+        } elseif ($formulario->fechaLimite && $now->gt(Carbon::parse($formulario->fechaLimite))) {
+            $isExpired = true;
+            $motivoExpiracion = 'expirado';
+        } elseif ($formulario->limiteRespuestas && $formulario->limiteRespuestas > 0 && $totalRespuestas >= $formulario->limiteRespuestas) {
+            $isExpired = true;
+            $motivoExpiracion = 'limite_alcanzado';
         }
+
+        $formulario->setAttribute('is_expired', $isExpired);
+        $formulario->setAttribute('motivo_expiracion', $motivoExpiracion);
 
         $ultimaRespuesta = null;
         if ($isEmbed) {
