@@ -40,9 +40,10 @@ class PermissionSeeder extends Seeder
         $this->savePermission(PermissionConst::GESTION_CHAT, "Gestión de mensajes");
         $this->savePermission(PermissionConst::GESTION_NOMINA, "Gestión de nominas");
         $this->savePermission(PermissionConst::GESTION_PUNTO_VENTAS, "Gestión de punto de venta");
+        $this->savePermission(PermissionConst::GESTION_TELECOM_CONFIG, "Configuración de WhatsApp Cloud API (Meta)");
 
 
-        
+
     }
 
     private function savePermission($name, $description)

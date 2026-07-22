@@ -38,4 +38,10 @@ class PermissionConst
 
     /** Aula Virtual - Aprendiz */
     const AULA_VIRTUAL_APRENDIZ = 'AULA_VIRTUAL_APRENDIZ';
+
+    const GESTION_SEGUIMIENTO_ASPIRANTES = 'GESTION_SEGUIMIENTO_ASPIRANTES';
+
+    /** Configuración de credenciales de Meta WhatsApp Cloud API (TelecomConfig) */
+    const GESTION_TELECOM_CONFIG = 'GESTION_TELECOM_CONFIG';
 }
+
