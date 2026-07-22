@@ -18,6 +18,7 @@ use App\Models\TipoGrado;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Services\TrimestreActualFichaService;
 use PhpParser\Node\Stmt\TryCatch;
 
 use function PHPUnit\Framework\isEmpty;
@@ -242,6 +243,14 @@ class GradoProgramaController extends Controller
                 'idFicha' => 'required|integer',
                 'materias' => 'required|array',
             ]);
+
+            $bloqueo = TrimestreActualFichaService::abortSiGradoProgramaNoActual(
+                (int) $datos['idGradoPrograma'],
+                (int) $datos['idFicha']
+            );
+            if ($bloqueo) {
+                return $bloqueo;
+            }
 
             foreach ($datos['materias'] as $nueva) {
 
