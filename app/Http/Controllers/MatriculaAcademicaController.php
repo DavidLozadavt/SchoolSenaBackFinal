@@ -235,6 +235,8 @@ class MatriculaAcademicaController extends Controller
                 ->orderBy('id', 'asc')
                 ->paginate($perPage, ['*'], 'page', $page);
 
+            $hoy = now()->toDateString();
+
             // Calcular nota parcial y porcentaje de avance
             $result->getCollection()->transform(function ($matricula) use ($hoy) { $permiso = null; $idPersona = $matricula->matricula?->idPersona; $idFicha = $matricula->idFicha; if ($idPersona && $idFicha) { try { $detalle = \App\Models\JustificacionAsistenciaRangoDetalle::whereHas('rango', function($q) use ($idPersona, $hoy) { $q->where('idPersonaAprendiz', $idPersona)->whereDate('fechaInicial', '<=', $hoy)->whereDate('fechaFinal', '>=', $hoy); })->where('idFicha', $idFicha)->with(['rango', 'personaAutoriza'])->first(); if ($detalle) { $permiso = [ 'tienePermiso' => true, 'estado' => $detalle->estado, 'fechaInicial' => $detalle->rango->fechaInicial, 'fechaFinal' => $detalle->rango->fechaFinal, 'tipoExcusa' => $detalle->rango->tipoExcusa, 'observacion' => $detalle->rango->observacion, 'archivoSoporteUrl' => $detalle->rango->archivoSoporte ? url('storage/' . $detalle->rango->archivoSoporte) : null, 'autorizadoPor' => $detalle->personaAutoriza ? trim($detalle->personaAutoriza->nombre1 . ' ' . $detalle->personaAutoriza->apellido1) : null, 'fechaRespuesta' => $detalle->fechaRespuesta, 'observacionInstructor' => $detalle->observacionInstructor ]; } } catch (\Throwable $e) {} } $matricula->permisoAsistencia = $permiso; // Debido a posibles cruces al momento de asignar actividades, buscamos por todas las matrículas académicas del estudiante
                 $idsMaEstudiante = \DB::table('matriculaAcademica')
