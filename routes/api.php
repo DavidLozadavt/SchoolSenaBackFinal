@@ -29,6 +29,7 @@ use App\Http\Controllers\auth\UserController;
 use App\Http\Controllers\auth\LoginController;
 use App\Http\Controllers\ClaseVehiculoController;
 use App\Http\Controllers\ComprasWebController;
+use App\Http\Controllers\gestion_horarios\CalificacionSesionController;
 use App\Http\Controllers\PuntoVentaController;
 use App\Http\Controllers\DepartamentoController;
 use App\Http\Controllers\DetalleRevisionController;
@@ -1376,6 +1377,10 @@ Route::middleware('auth:api')->group(function () {
     Route::post('calificaciones/individual', [CalificacionActividadController::class, 'calificarIndividual']);
     Route::post('calificaciones/por-grupo', [CalificacionActividadController::class, 'calificarPorGrupo']);
     Route::get('calificaciones_ficha_by_instructor/{idInstructor}', [MatriculaAcademicaController::class, 'calificacionesFichaByInstructor']);
+
+    // Calificaciones de Sesiones de Clase
+    Route::post('calificacion-sesion', [CalificacionSesionController::class, 'store']);
+    Route::get('calificacion-sesion/sesion/{idSesionMateria}', [CalificacionSesionController::class, 'getPorSesion']);
 }); //Juicios evaluativos:
 Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
 
