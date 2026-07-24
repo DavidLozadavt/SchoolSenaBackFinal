@@ -978,13 +978,20 @@ class ActividadController extends Controller
                     return;
                 }
 
-                // Para los demás tipos, mantenemos la validación segura por "mimes" (sin sql).
+                $entregaMsg = 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, PNG, JPG, JPEG, ZIP, RAR, SQL.';
+
+                // Word: no usar mimes: (falla con octet-stream / ZIP / OLE detectados por finfo).
+                if ($this->assertWordFileByExtensionAndMime($v, $file, 'archivo', $entregaMsg)) {
+                    return;
+                }
+
+                // Para los demás tipos, mantenemos la validación segura por "mimes" (sin sql/doc/docx).
                 $secondary = Validator::make(['archivo' => $file], [
-                    'archivo' => 'mimes:pdf,doc,docx,png,jpg,jpeg,zip,rar',
+                    'archivo' => 'mimes:pdf,png,jpg,jpeg,zip,rar',
                 ]);
 
                 if ($secondary->fails()) {
-                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, PNG, JPG, JPEG, ZIP, RAR, SQL.');
+                    $v->errors()->add('archivo', $entregaMsg);
                 }
             });
 
@@ -1492,11 +1499,17 @@ class ActividadController extends Controller
     public function uploadDocumento(Request $request): JsonResponse
     {
         try {
-            $request->validate([
-                'documento' => 'required|file|mimes:pdf,doc,docx|max:51200',
+            $validator = Validator::make($request->all(), [
+                'documento' => 'required|file|max:51200',
             ], [
                 'documento.max' => 'El archivo no puede superar los 50 MB.',
             ]);
+
+            $validator->after(function ($v) use ($request) {
+                $this->assertActividadDocumentoFile($v, $request->file('documento'), 'documento');
+            });
+
+            $validator->validate();
 
             $file = $request->file('documento');
             $dir = 'actividades/documentos';
@@ -1521,11 +1534,17 @@ class ActividadController extends Controller
     {
         try {
             $actividad = Actividad::findOrFail($id);
-            $request->validate([
-                'documento' => 'required|file|mimes:pdf,doc,docx|max:51200',
+            $validator = Validator::make($request->all(), [
+                'documento' => 'required|file|max:51200',
             ], [
                 'documento.max' => 'El archivo no puede superar los 50 MB.',
             ]);
+
+            $validator->after(function ($v) use ($request) {
+                $this->assertActividadDocumentoFile($v, $request->file('documento'), 'documento');
+            });
+
+            $validator->validate();
 
             $file = $request->file('documento');
             $dir = "actividades/{$id}";
