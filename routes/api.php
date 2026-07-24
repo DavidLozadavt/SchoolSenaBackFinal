@@ -1382,7 +1382,11 @@ Route::middleware('auth:api')->group(function () {
     Route::post('calificacion-sesion', [CalificacionSesionController::class, 'store']);
     Route::get('calificacion-sesion/sesion/{idSesionMateria}', [CalificacionSesionController::class, 'getPorSesion']);
 }); //Juicios evaluativos:
-Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
+Route::middleware('auth:api')->group(function () {
+    Route::post('raps', [TmpRapController::class, 'uploadRaps']);
+    Route::get('juicios-evaluativos/ficha/{idFicha}', [TmpRapController::class, 'getJuiciosByFicha']);
+    Route::get('raps/ultima-carga/{idFicha}', [TmpRapController::class, 'lastUpdateFicha']);
+});
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);

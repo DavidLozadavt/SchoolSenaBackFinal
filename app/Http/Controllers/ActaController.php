@@ -381,6 +381,8 @@ class ActaController extends Controller
         $request->validate([
             'idFicha' => 'required|integer',
             'periodo' => 'nullable|date_format:Y-m',
+            'fechaInicial' => 'nullable|date',
+            'fechaFinal' => 'nullable|date',
         ]);
 
         try {
@@ -389,8 +391,16 @@ class ActaController extends Controller
                 ->where('idFicha', $idFicha)
                 ->whereNotNull('idContrato');
 
-            // Si se proporciona el período, filtrar por fechas
-            if ($request->filled('periodo')) {
+            // Si se proporcionan fechas exactas, filtrar por ellas
+            if ($request->filled('fechaInicial') && $request->filled('fechaFinal')) {
+                $fechaInicial = \Carbon\Carbon::parse($request->input('fechaInicial'))->toDateString();
+                $fechaFinal = \Carbon\Carbon::parse($request->input('fechaFinal'))->toDateString();
+
+                $query->where('fechaInicial', '<=', $fechaFinal)
+                    ->where('fechaFinal', '>=', $fechaInicial);
+            } 
+            // Si se proporciona el período, filtrar por fechas de ese mes
+            elseif ($request->filled('periodo')) {
                 $fechaInicial = \Carbon\Carbon::createFromFormat('Y-m', $request->input('periodo'))
                     ->startOfMonth()
                     ->toDateString();

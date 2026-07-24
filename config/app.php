@@ -56,7 +56,7 @@ return [
 
     'asset_url' => env('ASSET_URL', null),
 
-    'frontend_url' => env('FRONTEND_URL', 'http://localhost:4210'),
+    'frontend_url' => env('VITE_APP_API_URL'),
 
     /*
     |--------------------------------------------------------------------------

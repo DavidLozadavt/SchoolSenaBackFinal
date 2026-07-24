@@ -9,6 +9,7 @@ use App\Models\SeguimientoRevisionHistorial;
 use App\Models\TelecomConfig;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 /**
  * Flujo público de inscripción del aspirante (Fase 3/4 del seguimiento de
@@ -32,14 +33,47 @@ class AspiranteInscripcionController extends Controller
     }
 
     /**
+     * Estado de disponibilidad del formulario (borrador/pausado/fechas/límite).
+     * El flujo de aspirantes no tiene concepto de "usuario autenticado" que
+     * pueda saltarse restricciones (a diferencia del formulario genérico
+     * público): cualquier bloqueo aplica siempre.
+     */
+    private function evaluarDisponibilidad(Formulario $formulario): ?string
+    {
+        $now = Carbon::now();
+
+        if ($formulario->estado === 'borrador') {
+            return 'borrador';
+        }
+        if ($formulario->estado === 'pausado') {
+            return 'pausado';
+        }
+        if ($formulario->fechaInicio && $now->lt(Carbon::parse($formulario->fechaInicio))) {
+            return 'no_iniciado';
+        }
+        if ($formulario->fechaLimite && $now->gt(Carbon::parse($formulario->fechaLimite))) {
+            return 'expirado';
+        }
+        if ($formulario->limiteRespuestas && $formulario->limiteRespuestas > 0) {
+            $total = FormularioRespuesta::where('idFormulario', $formulario->id)->count();
+            if ($total >= $formulario->limiteRespuestas) {
+                return 'limite_alcanzado';
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * GET /api/inscripcion-aspirante/{token}
      */
     public function show(string $token)
     {
         $aspirante = $this->resolverAspirante($token);
         $formulario = $this->resolverFormulario();
+        $motivoNoDisponible = $this->evaluarDisponibilidad($formulario);
 
-        if (in_array($aspirante->estadoDocumental, [null, 'link_enviado'], true)) {
+        if (!$motivoNoDisponible && in_array($aspirante->estadoDocumental, [null, 'link_enviado'], true)) {
             $aspirante->estadoDocumental = 'formulario_iniciado';
             $aspirante->save();
         }
@@ -61,6 +95,7 @@ class AspiranteInscripcionController extends Controller
             ],
             'formulario' => $formulario,
             'respuestaPrevia' => $respuesta?->respuestas,
+            'motivoNoDisponible' => $motivoNoDisponible,
         ]);
     }
 
@@ -73,6 +108,10 @@ class AspiranteInscripcionController extends Controller
     {
         $aspirante = $this->resolverAspirante($token);
         $formulario = $this->resolverFormulario();
+
+        if ($motivo = $this->evaluarDisponibilidad($formulario)) {
+            return response()->json(['error' => 'El formulario no está disponible.', 'motivo' => $motivo], 403);
+        }
 
         $request->validate([
             'respuestas' => 'required|array|min:1',
