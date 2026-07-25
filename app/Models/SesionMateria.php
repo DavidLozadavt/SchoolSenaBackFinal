@@ -44,4 +44,9 @@ class SesionMateria extends Model
     return $this->belongsTo(AsignacionSesion::class, 'idAsignacionSesion', 'id');
   }
 
+  public function calificacionSesiones(): HasMany
+  {
+    return $this->hasMany(CalificacionSesion::class, 'idSesionMateria', 'id');
+  }
+
 }

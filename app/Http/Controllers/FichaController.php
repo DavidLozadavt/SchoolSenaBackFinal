@@ -2614,6 +2614,46 @@ class FichaController extends Controller
                     $sesion['idHorarioMateria'] = (int) ($sesion['idHorarioMateria'] ?? 0);
                     $sesion['estado'] = $sesion['estado'] ?? 'PENDIENTE';
                     $sesion['numeroSesion'] = (int) ($sesion['numeroSesion'] ?? 0);
+
+                    // Buscar si existe el id de sesionMateria real en base de datos para esta sesión
+                    $idSesionReal = null;
+                    foreach ($todasLasSesiones as $ts) {
+                        if ($ts['idHorarioMateria'] === $sesion['idHorarioMateria'] && $ts['fechaSesion'] === $sesion['fecha']) {
+                            $idSesionReal = (int) $ts['id'];
+                            break;
+                        }
+                    }
+                    $sesion['idSesionMateria'] = $idSesionReal;
+
+                    // Si ya existe la sesión real, verificar si el estudiante actual ya la calificó
+                    $yaCalificada = false;
+                    $calificacionInfo = null;
+                    if ($idSesionReal) {
+                        $matriculaAcademica = \App\Models\MatriculaAcademica::whereHas('matricula', function($q) use ($idPersona) {
+                            $q->where('idPersona', $idPersona);
+                        })
+                        ->where('idFicha', $sesion['idHorarioMateria'] ? \DB::table('horarioMateria')->where('id', $sesion['idHorarioMateria'])->value('idFicha') : null)
+                        ->where('idMateria', (int) $primerHorario->idMateria)
+                        ->first();
+
+                        if ($matriculaAcademica) {
+                            $califDb = \DB::table('calificacionSesiones')
+                                ->where('idSesionMateria', $idSesionReal)
+                                ->where('idMatriculaAcademica', $matriculaAcademica->id)
+                                ->first();
+                            
+                            if ($califDb) {
+                                $yaCalificada = true;
+                                $calificacionInfo = [
+                                    'id' => $califDb->id,
+                                    'estrellas' => $califDb->estrellas,
+                                    'comentarios' => $califDb->comentarios,
+                                ];
+                            }
+                        }
+                    }
+                    $sesion['yaCalificada'] = $yaCalificada;
+                    $sesion['calificacionInfo'] = $calificacionInfo;
                 }
                 unset($sesion);
 
