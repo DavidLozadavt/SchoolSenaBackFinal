@@ -1615,10 +1615,12 @@ class HorarioMateriaController extends Controller
                                 }
                             }
 
-                            // Verificar y actualizar estado de la competencia (Padre)
+                            // Verificar y actualizar estado de la competencia (Padre):
+                            // Únicamente cuando TODOS sus RAPs de la ficha están aprobados/finalizados.
+                            // No usar horas acumuladas como atajo: la competencia agrupa RAPs, no actividades.
                             $gradoMateriaParaEstado = $horariosPorMateriaPadre->first()->gradoMateria;
                             $todosRapsTerminados = $estadoRapsGlobal->isNotEmpty() && $estadoRapsGlobal->every(fn($f) => $f);
-                            if ($todosRapsTerminados || ($horasData['horasActuales'] >= $horasPadre && $horasData['horasActuales'] > 0)) {
+                            if ($todosRapsTerminados) {
                                 if ($gradoMateriaParaEstado->estado != EstadoHorarioMateria::FINALIZADO) {
                                     $gradoMateriaParaEstado->update(['estado' => EstadoHorarioMateria::FINALIZADO]);
                                 }

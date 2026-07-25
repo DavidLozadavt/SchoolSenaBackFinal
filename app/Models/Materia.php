@@ -86,6 +86,57 @@ class Materia extends Model
     {
         return $this->hasMany(Materia::class, 'idMateriaPadre');
     }
+
+    /** True si es un RAP (hijo de una competencia). False si es competencia u otro nodo raíz. */
+    public function esRap(): bool
+    {
+        return ! empty($this->idMateriaPadre) && (int) $this->idMateriaPadre > 0;
+    }
+
+    /** True si es competencia (sin padre). */
+    public function esCompetencia(): bool
+    {
+        return empty($this->idMateriaPadre) || (int) $this->idMateriaPadre <= 0;
+    }
+
+    /**
+     * Número de orden del RAP (01, 02, …) a partir de código o nombre.
+     * No usa el id de BD.
+     */
+    public static function numeroOrdenRap(?string $codigo, ?string $nombre = null): int
+    {
+        $codigo = trim((string) $codigo);
+        $nombre = trim((string) $nombre);
+
+        foreach ([$codigo, $nombre] as $texto) {
+            if ($texto === '') {
+                continue;
+            }
+            // "RAP 01", "RAP-02", "R.A.P. 3"
+            if (preg_match('/\br\.?\s*a\.?\s*p\.?\s*[-#:]?\s*0*(\d{1,3})\b/iu', $texto, $m)) {
+                return (int) $m[1];
+            }
+            // Código corto numérico: "01", "2", "04"
+            if (preg_match('/^0*(\d{1,3})$/', $texto, $m)) {
+                return (int) $m[1];
+            }
+            // "593101 - 02 ESTRUCTURAR..." o "... - 02 - ..."
+            if (preg_match('/(?:^|[\s\-–—])0*(\d{1,3})(?:\s*[\-–—]\s*|\s+)/u', $texto, $m)) {
+                $n = (int) $m[1];
+                // Evitar tomar códigos largos tipo 593101 como número de RAP
+                if ($n > 0 && $n <= 99) {
+                    return $n;
+                }
+            }
+            // Al inicio del nombre: "02 ESTRUCTURAR..."
+            if (preg_match('/^0*(\d{1,2})\b/', $texto, $m)) {
+                return (int) $m[1];
+            }
+        }
+
+        return PHP_INT_MAX;
+    }
+
     public function faseProyectoRaps(): HasMany
     {
         return $this->hasMany(FaseProyectoRap::class, 'idMateria');
