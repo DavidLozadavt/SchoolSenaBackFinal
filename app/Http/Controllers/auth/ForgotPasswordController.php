@@ -179,17 +179,23 @@ class ForgotPasswordController extends Controller
         $token = $request->token;
         $password = $request->password;
 
-        $findUser = DB::table('persona')
-                ->where('email', $email)
-                ->first();
+        // Un mismo correo puede existir en varias filas de persona (datos históricos).
+        // El login usa usuario.email (a menudo la identificación), no persona.email.
+        // Hay que actualizar TODOS los usuarios vinculados a ese correo.
+        $personaIds = DB::table('persona')
+            ->where('email', $email)
+            ->pluck('id');
 
-            if (!$findUser) {
-                return response()->json([
-                    'message' => 'Persona no encontrada'
-                ], 404);
+        if ($personaIds->isEmpty()) {
+            return response()->json([
+                'message' => 'Persona no encontrada'
+            ], 404);
         }
 
-        \Log::info('Reseteando contraseña para:', ['email' => $email]);
+        \Log::info('Reseteando contraseña para:', [
+            'email' => $email,
+            'persona_ids' => $personaIds->values()->all(),
+        ]);
 
         $resetRecord = DB::table('password_resets')
             ->where('email', $email)
@@ -220,69 +226,81 @@ class ForgotPasswordController extends Controller
                 'error' => 'expired_token'
             ], 400);
         }
-        // Actualizar la contraseña usando el modelo User para consistencia
-        $user = \App\Models\User::where('idpersona', $findUser->id)->first();
 
-        if (!$user) {
-            \Log::warning('Usuario no encontrado en tabla usuario para idpersona:', ['id' => $findUser->id]);
+        $users = \App\Models\User::whereIn('idpersona', $personaIds->all())->get();
+
+        if ($users->isEmpty()) {
+            \Log::warning('Usuario no encontrado en tabla usuario para personas:', [
+                'persona_ids' => $personaIds->values()->all(),
+            ]);
             return response()->json([
                 'message' => 'No se encontró un usuario asociado a esta persona'
             ], 404);
         }
 
-        $user->contrasena = Hash::make($password);
-        $user->updated_at = now();
-        $user->save();
+        $hashedPassword = Hash::make($password);
+        $updatedUserIds = [];
 
-        \Log::info('Contraseña actualizada para usuario ID:', ['user_id' => $user->id]);
+        foreach ($users as $user) {
+            $user->contrasena = $hashedPassword;
+            $user->updated_at = now();
+            $user->save();
+            $updatedUserIds[] = $user->id;
+        }
+
+        \Log::info('Contraseña actualizada para usuarios:', [
+            'user_ids' => $updatedUserIds,
+            'count' => count($updatedUserIds),
+        ]);
+
+        $profileCompleted = false;
 
         try {
-            // Ya tenemos el objeto $user, podemos usarlo directamente
-            \Log::info('Verificando activación para:', ['user_id' => $user->id]);
+            foreach ($users as $user) {
+                \Log::info('Verificando activación para:', ['user_id' => $user->id]);
 
-                // Buscar la activación que esté específicamente en estado 18
                 $activacion = \App\Models\ActivationCompanyUser::where('user_id', $user->id)
                     ->where('state_id', 18)
                     ->first();
 
-                if ($activacion) {
-                    \Log::info('Cambiando state_id de 18 a 1 para usuario:', ['user_id' => $user->id]);
-
-                    $activacion->state_id = 1;
-                    $activacion->save();
-
-                    \Log::info('State_id actualizado exitosamente');
-
-                    // Actualizar roles según el tipo de usuario
-                    if ($activacion->hasRole('ESTUDIANTEUP')) {
-                        $activacion->removeRole('ESTUDIANTEUP');
-                        $activacion->assignRole('APRENDIZ');
-                        \Log::info('Rol ESTUDIANTEUP revertido a APRENDIZ SENA');
-                    } elseif ($activacion->hasRole('DOCENTEUP')) {
-                        $activacion->removeRole('DOCENTEUP');
-                        $activacion->assignRole('INSTRUCTOR SENA');
-                        \Log::info('Rol DOCENTEUP revertido a INSTRUCTOR SENA');
-                    }
-
-                    DB::table('password_resets')->where('email', $email)->delete();
-                    DB::table('otps')->where('identifier', $email)->delete();
-
-                    return response()->json([
-                        'message' => '¡Proceso completado! Contraseña actualizada y perfil activado correctamente.',
-                        'profile_completed' => true
-                    ], 200);
-                } else {
+                if (!$activacion) {
                     \Log::info('El usuario no tiene activación en estado 18.', ['user_id' => $user->id]);
+                    continue;
+                }
+
+                \Log::info('Cambiando state_id de 18 a 1 para usuario:', ['user_id' => $user->id]);
+
+                $activacion->state_id = 1;
+                $activacion->save();
+                $profileCompleted = true;
+
+                \Log::info('State_id actualizado exitosamente');
+
+                if ($activacion->hasRole('ESTUDIANTEUP')) {
+                    $activacion->removeRole('ESTUDIANTEUP');
+                    $activacion->assignRole('APRENDIZ');
+                    \Log::info('Rol ESTUDIANTEUP revertido a APRENDIZ SENA');
+                } elseif ($activacion->hasRole('DOCENTEUP')) {
+                    $activacion->removeRole('DOCENTEUP');
+                    $activacion->assignRole('INSTRUCTOR SENA');
+                    \Log::info('Rol DOCENTEUP revertido a INSTRUCTOR SENA');
+                }
             }
         } catch (\Exception $e) {
             \Log::error('Error actualizando state_id: ' . $e->getMessage());
         }
-        // ===== FIN =====
 
         DB::table('password_resets')->where('email', $email)->delete();
         DB::table('otps')->where('identifier', $email)->delete();
 
         \Log::info('Registros limpiados');
+
+        if ($profileCompleted) {
+            return response()->json([
+                'message' => '¡Proceso completado! Contraseña actualizada y perfil activado correctamente.',
+                'profile_completed' => true
+            ], 200);
+        }
 
         return response()->json([
             'message' => 'Contraseña actualizada correctamente. Ya puedes iniciar sesión con tu nueva contraseña.',
