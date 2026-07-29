@@ -17,6 +17,7 @@ use App\Models\MaterialApoyoRap;
 use App\Models\Pregunta;
 use App\Models\TipoPregunta;
 use App\Models\Respuesta;
+use App\Support\DiagnosticoActividadesRapHistoricas;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -587,6 +588,27 @@ class ActividadController extends Controller
             }
 
             $actividades = $query->orderBy('id', 'asc')->get();
+
+            // Compatibilidad histórica: si el listado queda vacío, diagnosticar RAP hermanos.
+            // No se añaden al listado; solo se registran logs de diagnóstico.
+            if ($actividades->isEmpty()) {
+                $idRapDiag = $idRapExacto > 0
+                    ? $idRapExacto
+                    : ($idMateriaExacta > 0
+                        ? $idMateriaExacta
+                        : (is_array($materiaIdsFilter) && count($materiaIdsFilter) === 1
+                            ? (int) $materiaIdsFilter[0]
+                            : 0));
+                if ($idRapDiag > 0) {
+                    DiagnosticoActividadesRapHistoricas::diagnosticarListadoVacio(
+                        $idRapDiag,
+                        (int) $idCompany,
+                        null,
+                        'GET actividades'
+                    );
+                }
+            }
+
             return response()->json($actividades);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -1382,6 +1404,12 @@ class ActividadController extends Controller
             $this->assertIdMateriaEsRap((int) $validated['idMateria']);
 
             $actividad = Actividad::create($validated);
+            DiagnosticoActividadesRapHistoricas::logCreacionActividad(
+                (int) $actividad->id,
+                (int) $actividad->idMateria,
+                'store'
+            );
+
             return response()->json($actividad, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
@@ -1729,6 +1757,23 @@ class ActividadController extends Controller
                 }
             }
 
+            // Compatibilidad histórica: listado vacío → diagnosticar hermanos (solo logs; no altera el JSON).
+            if ($items->isEmpty()) {
+                $idRapDiag = $idRapExacto > 0
+                    ? $idRapExacto
+                    : ($idMateriaExacta > 0
+                        ? $idMateriaExacta
+                        : ((int) ($mcPlaneacion ?: 0)));
+                if ($idRapDiag > 0) {
+                    DiagnosticoActividadesRapHistoricas::diagnosticarListadoVacio(
+                        $idRapDiag,
+                        null,
+                        $idFicha,
+                        'GET planeacionactividades/ficha'
+                    );
+                }
+            }
+
             return response()->json($items);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -1748,6 +1793,14 @@ class ActividadController extends Controller
                 $idPlaneacion = $idPlaneacion['id'] ?? $idPlaneacion[0] ?? null;
             }
             $validated['idPlaneacion'] = (int) $idPlaneacion;
+
+            // Fuente de verdad: actividades.idMateria (RAP propietario). Evita desfase histórico.
+            $actividad = Actividad::query()->findOrFail((int) $validated['idActividad']);
+            $idMateriaRap = (int) ($actividad->idMateria ?? 0);
+            $this->assertIdMateriaEsRap($idMateriaRap);
+            if ((int) $validated['idMateria'] !== $idMateriaRap) {
+                $validated['idMateria'] = $idMateriaRap;
+            }
 
             $item = PlaneacionActividad::firstOrCreate([
                 'idActividad' => $validated['idActividad'],
@@ -1834,6 +1887,9 @@ class ActividadController extends Controller
      */
     public function moverActividadRap(Request $request, int $idActividad): JsonResponse
     {
+        $idOrigen = 0;
+        $idMateriaDestino = 0;
+        $idFicha = 0;
         try {
             $validated = $request->validate([
                 'idFicha' => 'required|integer|exists:ficha,id',
@@ -1981,6 +2037,14 @@ class ActividadController extends Controller
                 }
             });
 
+            DiagnosticoActividadesRapHistoricas::logMovimientoRap(
+                $idActividad,
+                $idOrigen,
+                $idMateriaDestino,
+                $idFicha,
+                true
+            );
+
             return response()->json([
                 'message' => 'Actividad movida correctamente al RAP seleccionado.',
                 'idActividad' => $actividad->id,
@@ -1989,6 +2053,14 @@ class ActividadController extends Controller
         } catch (ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
+            DiagnosticoActividadesRapHistoricas::logMovimientoRap(
+                $idActividad,
+                $idOrigen,
+                $idMateriaDestino,
+                $idFicha,
+                false,
+                $e->getMessage()
+            );
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
@@ -2329,6 +2401,12 @@ class ActividadController extends Controller
                 'estrategia' => 'Cuestionario',
                 'entregables' => 'Respuestas al cuestionario',
             ]);
+
+            DiagnosticoActividadesRapHistoricas::logCreacionActividad(
+                (int) $actividad->id,
+                (int) $actividad->idMateria,
+                'storeCuestionario'
+            );
 
             $tiposPregunta = TipoPregunta::pluck('id', 'tipoPregunta')->toArray();
             if (empty($tiposPregunta)) {
