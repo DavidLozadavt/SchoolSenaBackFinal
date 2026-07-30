@@ -19,6 +19,7 @@ use App\Traits\CalculateEndDate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use App\Enums\EstadoHorarioMateria;
 use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
@@ -37,6 +38,7 @@ use App\Models\GradoPrograma;
 use App\Models\Rmi;
 use App\Models\MatriculaAcademica;
 use App\Models\NotificacionSistema;
+use App\Models\HistorialHorarioMateria;
 use App\Services\TrimestreActualFichaService;
 
 class HorarioMateriaController extends Controller
@@ -1958,6 +1960,173 @@ class HorarioMateriaController extends Controller
                 'error' => $th->getMessage()
             ]);
         }
+    }
+
+    public function interrumpirHorario(Request $request, int $id): JsonResponse
+    {
+        return $this->cerrarHorarioAnticipado($request, $id, EstadoHorarioMateria::INTERRUMPIDO);
+    }
+
+    public function finalizarHorario(Request $request, int $id): JsonResponse
+    {
+        return $this->cerrarHorarioAnticipado($request, $id, EstadoHorarioMateria::FINALIZADO);
+    }
+
+    private function cerrarHorarioAnticipado(Request $request, int $id, string $nuevoEstado): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'fechaFinal' => 'required|date',
+                'observacion' => 'nullable|string|max:2000',
+            ]);
+
+            $horario = HorarioMateria::find($id);
+            if (! $horario) {
+                return response()->json(['message' => 'Horario no encontrado'], 404);
+            }
+
+            if (! in_array($horario->estado, self::ESTADOS_HORARIO_ACTIVOS, true)) {
+                return response()->json([
+                    'message' => 'Solo se pueden modificar horarios en estado PENDIENTE o ASIGNADO.',
+                ], 422);
+            }
+
+            $bloqueo = TrimestreActualFichaService::abortSiGradoMateriaNoActual(
+                (int) $horario->idGradoMateria,
+                $horario->idFicha ? (int) $horario->idFicha : null
+            );
+            if ($bloqueo) {
+                return $bloqueo;
+            }
+
+            $tz = config('app.timezone');
+            $nuevaFecha = Carbon::parse((string) $validated['fechaFinal'], $tz)->startOfDay();
+            $fechaInicial = $horario->fechaInicial
+                ? Carbon::parse((string) $horario->fechaInicial, $tz)->startOfDay()
+                : null;
+            $fechaFinalActual = $horario->fechaFinal
+                ? Carbon::parse((string) $horario->fechaFinal, $tz)->startOfDay()
+                : null;
+
+            if ($fechaInicial && $nuevaFecha->lt($fechaInicial)) {
+                return response()->json([
+                    'message' => 'La fecha no puede ser anterior a la fecha inicial del horario.',
+                ], 422);
+            }
+
+            if ($fechaFinalActual && $nuevaFecha->gt($fechaFinalActual)) {
+                return response()->json([
+                    'message' => 'La fecha no puede ser mayor que la fecha final actual del horario.',
+                ], 422);
+            }
+
+            $hoy = Carbon::today($tz);
+            if ($nuevaFecha->lt($hoy)) {
+                $bloqueoSesiones = $this->validarSesionesSinDatosPosteriores($horario->id, $nuevaFecha);
+                if ($bloqueoSesiones !== null) {
+                    return $bloqueoSesiones;
+                }
+            }
+
+            $idUsuario = auth()->id() ?? KeyUtil::user()?->id;
+            if (! $idUsuario) {
+                return response()->json(['message' => 'Sesión inválida'], 401);
+            }
+
+            $fechaFinalAnterior = $horario->fechaFinal
+                ? Carbon::parse((string) $horario->fechaFinal, $tz)->toDateString()
+                : null;
+            $fechaFinalNueva = $nuevaFecha->toDateString();
+            $observacion = trim((string) ($validated['observacion'] ?? ''));
+
+            DB::transaction(function () use (
+                $horario,
+                $nuevoEstado,
+                $fechaFinalAnterior,
+                $fechaFinalNueva,
+                $idUsuario,
+                $observacion,
+                $nuevaFecha
+            ) {
+                $horario->fechaFinal = $fechaFinalNueva;
+                $horario->estado = $nuevoEstado;
+                if ($observacion !== '') {
+                    $marca = $nuevoEstado === EstadoHorarioMateria::INTERRUMPIDO
+                        ? '[INTERRUPCIÓN]'
+                        : '[FINALIZACIÓN]';
+                    $prev = trim((string) ($horario->observacion ?? ''));
+                    $horario->observacion = trim($prev . "\n" . $marca . ' ' . $observacion);
+                }
+                $horario->save();
+
+                if (Schema::hasTable('historialHorarioMateria')) {
+                    HistorialHorarioMateria::create([
+                        'idHorarioMateria' => $horario->id,
+                        'tipoAccion' => $nuevoEstado,
+                        'fechaFinalAnterior' => $fechaFinalAnterior,
+                        'fechaFinalNueva' => $fechaFinalNueva,
+                        'idUsuario' => (int) $idUsuario,
+                        'observacion' => $observacion !== '' ? $observacion : null,
+                    ]);
+                }
+
+                SesionMateria::where('idHorarioMateria', $horario->id)
+                    ->whereDate('fechaSesion', '>', $nuevaFecha->toDateString())
+                    ->whereDoesntHave('asistencia')
+                    ->whereDoesntHave('calificacionSesiones')
+                    ->delete();
+            });
+
+            $horario->refresh();
+
+            $accionLabel = $nuevoEstado === EstadoHorarioMateria::INTERRUMPIDO
+                ? 'interrumpido'
+                : 'finalizado';
+
+            return response()->json([
+                'message' => "Horario {$accionLabel} correctamente",
+                'data' => [
+                    'id' => $horario->id,
+                    'estado' => $horario->estado,
+                    'fechaFinal' => $horario->fechaFinal,
+                    'fechaFinalAnterior' => $fechaFinalAnterior,
+                ],
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['message' => 'Datos inválidos', 'errors' => $e->errors()], 422);
+        } catch (\Throwable $th) {
+            Log::error('Error al cerrar horario anticipadamente', [
+                'id' => $id,
+                'estado' => $nuevoEstado,
+                'error' => $th->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Ha ocurrido un error al actualizar el horario',
+                'error' => $th->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function validarSesionesSinDatosPosteriores(int $idHorarioMateria, Carbon $nuevaFecha): ?JsonResponse
+    {
+        $sesiones = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
+            ->whereDate('fechaSesion', '>', $nuevaFecha->toDateString())
+            ->withCount(['asistencia', 'calificacionSesiones'])
+            ->get();
+
+        foreach ($sesiones as $sesion) {
+            $tieneDatos = ((int) $sesion->asistencia_count) > 0
+                || ((int) $sesion->calificacion_sesiones_count) > 0;
+
+            if ($tieneDatos) {
+                return response()->json([
+                    'message' => 'No se puede usar una fecha anterior a hoy: existen sesiones posteriores con asistencia o calificaciones registradas.',
+                ], 422);
+            }
+        }
+
+        return null;
     }
 
     public function getRapsEvaluarContrato(Request $request)
