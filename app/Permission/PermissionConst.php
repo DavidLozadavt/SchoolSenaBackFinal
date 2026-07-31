@@ -43,5 +43,8 @@ class PermissionConst
 
     /** Configuración de credenciales de Meta WhatsApp Cloud API (TelecomConfig) */
     const GESTION_TELECOM_CONFIG = 'GESTION_TELECOM_CONFIG';
+
+    /** Estadísticas de mensajes WhatsApp del módulo Seguimiento de Aspirantes (solo lectura). */
+    const GESTION_ESTADISTICAS_WHATSAPP_SENA = 'GESTION_ESTADISTICAS_WHATSAPP_SENA';
 }
 

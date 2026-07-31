@@ -542,6 +542,7 @@ class SeguimientoAspiranteController extends Controller
                         'errorEnvio'      => null,
                         'ultimo_envio'    => Carbon::now(),
                         'cantidad_envios' => DB::raw('cantidad_envios + 1'),
+                        'ultimaPlantilla' => self::PLANTILLA_OFICIAL,
                     ]);
                 } else {
                     $fallidos++;
