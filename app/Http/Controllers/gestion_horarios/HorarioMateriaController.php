@@ -1931,8 +1931,15 @@ class HorarioMateriaController extends Controller
     public function interrumpirRap(Request $request)
     {
         try {
-            $idGradoMateria = $request->input('idGradoMateria');
-            $idFicha = $request->input('idFicha');
+            $validated = $request->validate([
+                'idGradoMateria' => 'required',
+                'idFicha' => 'nullable',
+                'fechaFinal' => 'required|date',
+                'observacion' => 'nullable|string|max:2000',
+            ]);
+
+            $idGradoMateria = $validated['idGradoMateria'];
+            $idFicha = $validated['idFicha'] ?? $request->input('idFicha');
             $bloqueo = TrimestreActualFichaService::abortSiGradoMateriaNoActual(
                 (int) $idGradoMateria,
                 $idFicha ? (int) $idFicha : null
@@ -1940,19 +1947,101 @@ class HorarioMateriaController extends Controller
             if ($bloqueo) {
                 return $bloqueo;
             }
-            DB::beginTransaction();
+
+            $tz = config('app.timezone');
+            $nuevaFecha = Carbon::parse((string) $validated['fechaFinal'], $tz)->startOfDay();
+            $fechaFinalNueva = $nuevaFecha->toDateString();
+            $observacion = trim((string) ($validated['observacion'] ?? ''));
+
             $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
                 ->whereNotIn('estado', [EstadoHorarioMateria::EVALUADO, EstadoHorarioMateria::FINALIZADO])
                 ->get();
 
-            foreach ($horarios as $horario) {
-                $horario->estado = EstadoHorarioMateria::INTERRUMPIDO;
-                $horario->save();
+            if ($horarios->isEmpty()) {
+                return response()->json([
+                    'message' => 'No hay horarios pendientes de interrumpir para este RAP.',
+                ], 422);
             }
+
+            $fechaFinalActualRap = null;
+            $fechaInicialMinima = null;
+            foreach ($horarios as $horario) {
+                if ($horario->fechaFinal) {
+                    $fF = Carbon::parse((string) $horario->fechaFinal, $tz)->startOfDay();
+                    if ($fechaFinalActualRap === null || $fF->gt($fechaFinalActualRap)) {
+                        $fechaFinalActualRap = $fF;
+                    }
+                }
+                if ($horario->fechaInicial) {
+                    $fI = Carbon::parse((string) $horario->fechaInicial, $tz)->startOfDay();
+                    if ($fechaInicialMinima === null || $fI->lt($fechaInicialMinima)) {
+                        $fechaInicialMinima = $fI;
+                    }
+                }
+            }
+
+            if ($fechaInicialMinima && $nuevaFecha->lt($fechaInicialMinima)) {
+                return response()->json([
+                    'message' => 'La fecha no puede ser anterior a la fecha inicial del RAP.',
+                ], 422);
+            }
+
+            if ($fechaFinalActualRap && $nuevaFecha->gte($fechaFinalActualRap)) {
+                return response()->json([
+                    'message' => 'La fecha de interrupción debe ser menor que la fecha final actual del RAP.',
+                ], 422);
+            }
+
+            foreach ($horarios as $horario) {
+                $bloqueoSesiones = $this->validarSesionesSinDatosPosteriores((int) $horario->id, $nuevaFecha);
+                if ($bloqueoSesiones !== null) {
+                    return $bloqueoSesiones;
+                }
+            }
+
+            $idUsuario = auth()->id() ?? KeyUtil::user()?->id;
+
+            DB::beginTransaction();
+
+            foreach ($horarios as $horario) {
+                $fechaFinalAnterior = $horario->fechaFinal
+                    ? Carbon::parse((string) $horario->fechaFinal, $tz)->toDateString()
+                    : null;
+
+                $horario->fechaFinal = $fechaFinalNueva;
+                $horario->estado = EstadoHorarioMateria::INTERRUMPIDO;
+                if ($observacion !== '') {
+                    $prev = trim((string) ($horario->observacion ?? ''));
+                    $horario->observacion = trim($prev . "\n" . '[INTERRUPCIÓN] ' . $observacion);
+                }
+                $horario->save();
+
+                if ($idUsuario && Schema::hasTable('historialHorarioMateria')) {
+                    HistorialHorarioMateria::create([
+                        'idHorarioMateria' => $horario->id,
+                        'tipoAccion' => EstadoHorarioMateria::INTERRUMPIDO,
+                        'fechaFinalAnterior' => $fechaFinalAnterior,
+                        'fechaFinalNueva' => $fechaFinalNueva,
+                        'idUsuario' => (int) $idUsuario,
+                        'observacion' => $observacion !== '' ? $observacion : null,
+                    ]);
+                }
+
+                SesionMateria::where('idHorarioMateria', $horario->id)
+                    ->whereDate('fechaSesion', '>', $fechaFinalNueva)
+                    ->whereDoesntHave('asistencia')
+                    ->when(Schema::hasTable('calificacionSesiones'), function ($q) {
+                        $q->whereDoesntHave('calificacionSesiones');
+                    })
+                    ->delete();
+            }
+
             DB::commit();
             return response()->json([
                 'message' => 'Rap interrumpido correctamente'
             ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['message' => 'Datos inválidos', 'errors' => $e->errors()], 422);
         } catch (\Throwable $th) {
             DB::rollBack();
             return response()->json([
@@ -2073,7 +2162,9 @@ class HorarioMateriaController extends Controller
                 SesionMateria::where('idHorarioMateria', $horario->id)
                     ->whereDate('fechaSesion', '>', $nuevaFecha->toDateString())
                     ->whereDoesntHave('asistencia')
-                    ->whereDoesntHave('calificacionSesiones')
+                    ->when(Schema::hasTable('calificacionSesiones'), function ($q) {
+                        $q->whereDoesntHave('calificacionSesiones');
+                    })
                     ->delete();
             });
 
@@ -2110,18 +2201,25 @@ class HorarioMateriaController extends Controller
 
     private function validarSesionesSinDatosPosteriores(int $idHorarioMateria, Carbon $nuevaFecha): ?JsonResponse
     {
+        $withCount = ['asistencia'];
+        if (Schema::hasTable('calificacionSesiones')) {
+            $withCount[] = 'calificacionSesiones';
+        }
+
         $sesiones = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
             ->whereDate('fechaSesion', '>', $nuevaFecha->toDateString())
-            ->withCount(['asistencia', 'calificacionSesiones'])
+            ->withCount($withCount)
             ->get();
 
         foreach ($sesiones as $sesion) {
-            $tieneDatos = ((int) $sesion->asistencia_count) > 0
-                || ((int) $sesion->calificacion_sesiones_count) > 0;
+            $tieneDatos = ((int) $sesion->asistencia_count) > 0;
+            if (Schema::hasTable('calificacionSesiones')) {
+                $tieneDatos = $tieneDatos || ((int) $sesion->calificacion_sesiones_count) > 0;
+            }
 
             if ($tieneDatos) {
                 return response()->json([
-                    'message' => 'No se puede usar una fecha anterior a hoy: existen sesiones posteriores con asistencia o calificaciones registradas.',
+                    'message' => 'No se puede usar esa fecha: existen sesiones posteriores con asistencia o calificaciones registradas.',
                 ], 422);
             }
         }
