@@ -542,6 +542,20 @@ class SeguimientoAspiranteController extends Controller
                         'errorEnvio'      => null,
                         'ultimo_envio'    => Carbon::now(),
                         'cantidad_envios' => DB::raw('cantidad_envios + 1'),
+                        'ultimaPlantilla' => self::PLANTILLA_OFICIAL,
+                    ]);
+
+                    // Historial append-only para Estadísticas WhatsApp — no
+                    // reemplaza el snapshot de arriba, solo lo complementa.
+                    $telecomConfig = \App\Models\TelecomConfig::activa();
+                    \App\Models\WhatsappMensajeHistorial::create([
+                        'seguimientoAspiranteId' => $aspirante->id,
+                        'company_id'             => $telecomConfig?->businessAccountId,
+                        'phone_number_id'        => $telecomConfig?->phoneNumberId,
+                        'waMessageId'            => $resultado['id'] ?? null,
+                        'template'               => self::PLANTILLA_OFICIAL,
+                        'estado'                 => 'sent',
+                        'fecha_envio'            => Carbon::now(),
                     ]);
                 } else {
                     $fallidos++;
