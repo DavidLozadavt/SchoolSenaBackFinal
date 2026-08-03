@@ -30,6 +30,15 @@ class Actividad extends Model
         return $this->belongsTo(Materia::class, 'idMateria');
     }
 
+    /**
+     * RAP propietario (FK actividades.idMateria → materia.id del RAP).
+     * Una actividad pertenece únicamente a un RAP, nunca a una competencia.
+     */
+    public function rap()
+    {
+        return $this->belongsTo(Materia::class, 'idMateria');
+    }
+
     public function estado()
     {
         return $this->belongsTo(Status::class, 'idEstado');

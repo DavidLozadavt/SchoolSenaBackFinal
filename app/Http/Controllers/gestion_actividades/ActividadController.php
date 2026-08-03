@@ -17,6 +17,7 @@ use App\Models\MaterialApoyoRap;
 use App\Models\Pregunta;
 use App\Models\TipoPregunta;
 use App\Models\Respuesta;
+use App\Support\DiagnosticoActividadesRapHistoricas;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -502,9 +503,10 @@ class ActividadController extends Controller
 
             /**
              * Filtro por contexto de clase (ambiente virtual):
-             * - id_materia_clase: materia del horario (RAP). Se incluye la competencia (padre) y todos los RAP
-             *   hijos de esa competencia, para listar actividades creadas en cualquier RAP de la misma competencia.
+             * - id_materia_clase: identificador del RAP de la clase abierta (materia.id).
+             *   Filtra estrictamente por ese RAP; no incluye otros RAP de la misma competencia.
              * - id_programa: restringe a materias del programa vía gradoMateria / gradoPrograma.
+             * - idRap / idMateria: filtro estricto adicional (misma semántica: actividades.idMateria).
              */
             $idMateriaClase = $request->query('id_materia_clase');
             $idPrograma = $request->query('id_programa');
@@ -515,22 +517,9 @@ class ActividadController extends Controller
             if ($idMateriaClase !== null && $idMateriaClase !== '') {
                 $mc = (int) $idMateriaClase;
                 if ($mc > 0) {
-                    $mRow = Materia::query()->find($mc);
-                    if ($mRow) {
-                        $idCompetencia = ! empty($mRow->idMateriaPadre) ? (int) $mRow->idMateriaPadre : (int) $mRow->id;
-                        $materiaIdsFilter = Materia::query()
-                            ->where(function ($q) use ($idCompetencia) {
-                                $q->where('id', $idCompetencia)
-                                    ->orWhere('idMateriaPadre', $idCompetencia);
-                            })
-                            ->pluck('id')
-                            ->map(fn ($id) => (int) $id)
-                            ->unique()
-                            ->values()
-                            ->all();
-                    } else {
-                        $materiaIdsFilter = [];
-                    }
+                    $materiaIdsFilter = [$mc];
+                } else {
+                    $materiaIdsFilter = [];
                 }
             }
 
@@ -591,8 +580,7 @@ class ActividadController extends Controller
                 }
             }
 
-            // Filtro estricto por materia/RAP (si llega en el request).
-            // En este módulo el RAP se modela en materia.id (actividad.idMateria).
+            // Filtro estricto por RAP (actividades.idMateria = id del RAP).
             if ($idRapExacto > 0) {
                 $query->where('idMateria', $idRapExacto);
             } elseif ($idMateriaExacta > 0) {
@@ -600,6 +588,27 @@ class ActividadController extends Controller
             }
 
             $actividades = $query->orderBy('id', 'asc')->get();
+
+            // Compatibilidad histórica: si el listado queda vacío, diagnosticar RAP hermanos.
+            // No se añaden al listado; solo se registran logs de diagnóstico.
+            if ($actividades->isEmpty()) {
+                $idRapDiag = $idRapExacto > 0
+                    ? $idRapExacto
+                    : ($idMateriaExacta > 0
+                        ? $idMateriaExacta
+                        : (is_array($materiaIdsFilter) && count($materiaIdsFilter) === 1
+                            ? (int) $materiaIdsFilter[0]
+                            : 0));
+                if ($idRapDiag > 0) {
+                    DiagnosticoActividadesRapHistoricas::diagnosticarListadoVacio(
+                        $idRapDiag,
+                        (int) $idCompany,
+                        null,
+                        'GET actividades'
+                    );
+                }
+            }
+
             return response()->json($actividades);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -883,9 +892,15 @@ class ActividadController extends Controller
                     'codigoFicha' => $row->codigoFicha,
                     'idMateria' => (int) ($row->idMateria ?? 0),
                     'materiaNombre' => $row->competenciaNombre ?? $row->nombreMateria,
+                    'idCompetencia' => ! empty($row->idMateriaPadre) ? (int) $row->idMateriaPadre : null,
+                    'competenciaNombre' => $row->competenciaNombre ?? $row->nombreMateria,
                     'idRap' => $row->idRap ? (int) $row->idRap : (int) ($row->idMateria ?? 0),
                     'rapNombre' => $row->rapNombre ?? $row->nombreMateria,
                     'codigoRap' => $row->codigoRap,
+                    'numeroRap' => Materia::numeroOrdenRap(
+                        $row->codigoRap ?? $row->codigoMateria ?? null,
+                        $row->rapNombre ?? $row->nombreMateria ?? null
+                    ),
                     'fechaInicio' => $g['fechaInicial'],
                     'fechaLimite' => $fechaLimite,
                     'estadoGeneral' => $estadoGeneral,
@@ -978,13 +993,20 @@ class ActividadController extends Controller
                     return;
                 }
 
-                // Para los demás tipos, mantenemos la validación segura por "mimes" (sin sql).
+                $entregaMsg = 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, PNG, JPG, JPEG, ZIP, RAR, SQL.';
+
+                // Word: no usar mimes: (falla con octet-stream / ZIP / OLE detectados por finfo).
+                if ($this->assertWordFileByExtensionAndMime($v, $file, 'archivo', $entregaMsg)) {
+                    return;
+                }
+
+                // Para los demás tipos, mantenemos la validación segura por "mimes" (sin sql/doc/docx).
                 $secondary = Validator::make(['archivo' => $file], [
-                    'archivo' => 'mimes:pdf,doc,docx,png,jpg,jpeg,zip,rar',
+                    'archivo' => 'mimes:pdf,png,jpg,jpeg,zip,rar',
                 ]);
 
                 if ($secondary->fails()) {
-                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, PNG, JPG, JPEG, ZIP, RAR, SQL.');
+                    $v->errors()->add('archivo', $entregaMsg);
                 }
             });
 
@@ -1379,7 +1401,15 @@ class ActividadController extends Controller
                 $validated['idPersona'] = $user?->idpersona ?? null;
             }
 
+            $this->assertIdMateriaEsRap((int) $validated['idMateria']);
+
             $actividad = Actividad::create($validated);
+            DiagnosticoActividadesRapHistoricas::logCreacionActividad(
+                (int) $actividad->id,
+                (int) $actividad->idMateria,
+                'store'
+            );
+
             return response()->json($actividad, 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
@@ -1406,6 +1436,10 @@ class ActividadController extends Controller
                 'estrategia' => 'sometimes|required|string',
                 'entregables' => 'sometimes|required|string',
             ]);
+
+            if (array_key_exists('idMateria', $validated)) {
+                $this->assertIdMateriaEsRap((int) $validated['idMateria']);
+            }
 
             $actividad->update($validated);
             return response()->json($actividad);
@@ -1492,11 +1526,17 @@ class ActividadController extends Controller
     public function uploadDocumento(Request $request): JsonResponse
     {
         try {
-            $request->validate([
-                'documento' => 'required|file|mimes:pdf,doc,docx|max:51200',
+            $validator = Validator::make($request->all(), [
+                'documento' => 'required|file|max:51200',
             ], [
                 'documento.max' => 'El archivo no puede superar los 50 MB.',
             ]);
+
+            $validator->after(function ($v) use ($request) {
+                $this->assertActividadDocumentoFile($v, $request->file('documento'), 'documento');
+            });
+
+            $validator->validate();
 
             $file = $request->file('documento');
             $dir = 'actividades/documentos';
@@ -1521,11 +1561,17 @@ class ActividadController extends Controller
     {
         try {
             $actividad = Actividad::findOrFail($id);
-            $request->validate([
-                'documento' => 'required|file|mimes:pdf,doc,docx|max:51200',
+            $validator = Validator::make($request->all(), [
+                'documento' => 'required|file|max:51200',
             ], [
                 'documento.max' => 'El archivo no puede superar los 50 MB.',
             ]);
+
+            $validator->after(function ($v) use ($request) {
+                $this->assertActividadDocumentoFile($v, $request->file('documento'), 'documento');
+            });
+
+            $validator->validate();
 
             $file = $request->file('documento');
             $dir = "actividades/{$id}";
@@ -1640,30 +1686,20 @@ class ActividadController extends Controller
             }
 
             /**
-             * Si se envía id_materia_clase (RAP de la clase), limitar resultados a esa competencia y sus RAP hijos,
-             * para no mezclar actividades de otro RAP aunque compartan planeación o ficha.
+             * Si se envía id_materia_clase (RAP de la clase), limitar resultados exactamente a ese RAP.
+             * Fuente de verdad: actividades.idMateria (no el idMateria histórico de planeacionActividades).
              */
             $mcPlaneacion = $request->query('id_materia_clase');
             if ($items->isNotEmpty() && $mcPlaneacion !== null && $mcPlaneacion !== '' && (int) $mcPlaneacion > 0) {
-                $mRowP = Materia::query()->find((int) $mcPlaneacion);
-                if ($mRowP) {
-                    $idCompP = ! empty($mRowP->idMateriaPadre) ? (int) $mRowP->idMateriaPadre : (int) $mRowP->id;
-                    $idsMateriaRap = Materia::query()
-                        ->where(function ($q) use ($idCompP) {
-                            $q->where('id', $idCompP)
-                                ->orWhere('idMateriaPadre', $idCompP);
-                        })
-                        ->pluck('id')
-                        ->map(fn ($mid) => (int) $mid)
-                        ->unique()
-                        ->values()
-                        ->all();
-                    $items = $items->filter(function ($item) use ($idsMateriaRap) {
-                        $idM = (int) ($item->idMateria ?? (isset($item->actividad) ? ($item->actividad->idMateria ?? 0) : 0));
+                $idRapClase = (int) $mcPlaneacion;
+                $items = $items->filter(function ($item) use ($idRapClase) {
+                    $idM = (int) (
+                        (isset($item->actividad) ? ($item->actividad->idMateria ?? 0) : 0)
+                        ?: ($item->idMateria ?? 0)
+                    );
 
-                        return $idM > 0 && in_array($idM, $idsMateriaRap, true);
-                    })->values();
-                }
+                    return $idM > 0 && $idM === $idRapClase;
+                })->values();
             }
 
             // Filtro estricto por materia/RAP cuando el cliente lo envía explícitamente.
@@ -1672,7 +1708,11 @@ class ActividadController extends Controller
             if ($items->isNotEmpty() && ($idMateriaExacta > 0 || $idRapExacto > 0)) {
                 $idMateriaFiltro = $idRapExacto > 0 ? $idRapExacto : $idMateriaExacta;
                 $items = $items->filter(function ($item) use ($idMateriaFiltro) {
-                    $idM = (int) ($item->idMateria ?? (isset($item->actividad) ? ($item->actividad->idMateria ?? 0) : 0));
+                    $idM = (int) (
+                        (isset($item->actividad) ? ($item->actividad->idMateria ?? 0) : 0)
+                        ?: ($item->idMateria ?? 0)
+                    );
+
                     return $idM > 0 && $idM === $idMateriaFiltro;
                 })->values();
             }
@@ -1717,6 +1757,23 @@ class ActividadController extends Controller
                 }
             }
 
+            // Compatibilidad histórica: listado vacío → diagnosticar hermanos (solo logs; no altera el JSON).
+            if ($items->isEmpty()) {
+                $idRapDiag = $idRapExacto > 0
+                    ? $idRapExacto
+                    : ($idMateriaExacta > 0
+                        ? $idMateriaExacta
+                        : ((int) ($mcPlaneacion ?: 0)));
+                if ($idRapDiag > 0) {
+                    DiagnosticoActividadesRapHistoricas::diagnosticarListadoVacio(
+                        $idRapDiag,
+                        null,
+                        $idFicha,
+                        'GET planeacionactividades/ficha'
+                    );
+                }
+            }
+
             return response()->json($items);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -1736,6 +1793,14 @@ class ActividadController extends Controller
                 $idPlaneacion = $idPlaneacion['id'] ?? $idPlaneacion[0] ?? null;
             }
             $validated['idPlaneacion'] = (int) $idPlaneacion;
+
+            // Fuente de verdad: actividades.idMateria (RAP propietario). Evita desfase histórico.
+            $actividad = Actividad::query()->findOrFail((int) $validated['idActividad']);
+            $idMateriaRap = (int) ($actividad->idMateria ?? 0);
+            $this->assertIdMateriaEsRap($idMateriaRap);
+            if ((int) $validated['idMateria'] !== $idMateriaRap) {
+                $validated['idMateria'] = $idMateriaRap;
+            }
 
             $item = PlaneacionActividad::firstOrCreate([
                 'idActividad' => $validated['idActividad'],
@@ -1762,8 +1827,8 @@ class ActividadController extends Controller
     }
 
     /**
-     * Lista RAP/materías únicamente desde horarios de esta ficha (`horarioMateria.idFicha`).
-     * No incluye RAPs de otras fichas.
+     * Lista únicamente RAPs (no competencias) desde horarios de esta ficha.
+     * Ordenados por número de RAP (01, 02, …), nunca por id de BD.
      */
     public function rapsHorarioFicha(Request $request, int $idFicha): JsonResponse
     {
@@ -1777,20 +1842,40 @@ class ActividadController extends Controller
             $rows = DB::table('horarioMateria as hm')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
                 ->join('materia as m', 'gm.idMateria', '=', 'm.id')
+                ->leftJoin('materia as comp', 'm.idMateriaPadre', '=', 'comp.id')
                 ->where('hm.idFicha', $idFicha)
-                ->select('m.id', 'm.nombreMateria', 'm.codigo')
+                ->whereNotNull('m.idMateriaPadre')
+                ->where('m.idMateriaPadre', '>', 0)
+                ->select(
+                    'm.id',
+                    'm.nombreMateria',
+                    'm.codigo',
+                    'm.idMateriaPadre',
+                    'comp.nombreMateria as competenciaNombre',
+                    'comp.codigo as competenciaCodigo'
+                )
                 ->distinct()
-                ->orderBy('m.nombreMateria');
+                ->get();
 
-            return response()->json(
-                $rows->get()->map(static function ($r) {
-                    return [
-                        'id' => (int) $r->id,
-                        'nombreMateria' => $r->nombreMateria,
-                        'codigo' => $r->codigo,
-                    ];
-                })->values()
-            );
+            $mapped = $rows->map(static function ($r) {
+                $numero = Materia::numeroOrdenRap($r->codigo ?? null, $r->nombreMateria ?? null);
+
+                return [
+                    'id' => (int) $r->id,
+                    'nombreMateria' => $r->nombreMateria,
+                    'codigo' => $r->codigo,
+                    'idCompetencia' => $r->idMateriaPadre ? (int) $r->idMateriaPadre : null,
+                    'competenciaNombre' => $r->competenciaNombre,
+                    'competenciaCodigo' => $r->competenciaCodigo,
+                    'numeroRap' => $numero === PHP_INT_MAX ? null : $numero,
+                ];
+            })->sortBy([
+                fn ($r) => $r['numeroRap'] ?? PHP_INT_MAX,
+                fn ($r) => (string) ($r['codigo'] ?? ''),
+                fn ($r) => (string) ($r['nombreMateria'] ?? ''),
+            ])->values();
+
+            return response()->json($mapped);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -1802,6 +1887,9 @@ class ActividadController extends Controller
      */
     public function moverActividadRap(Request $request, int $idActividad): JsonResponse
     {
+        $idOrigen = 0;
+        $idMateriaDestino = 0;
+        $idFicha = 0;
         try {
             $validated = $request->validate([
                 'idFicha' => 'required|integer|exists:ficha,id',
@@ -1845,6 +1933,9 @@ class ActividadController extends Controller
                 return response()->json(['error' => self::ERROR_MOVER_RAP_FICHA_DISTINTA], 422);
             }
 
+            // Destino debe ser un RAP (hijo de competencia), nunca la competencia.
+            $this->assertIdMateriaEsRap($idMateriaDestino);
+
             $idPlaneacion = self::resolverIdPlaneacionPorFichaYHorario($idFicha, $idHm > 0 ? $idHm : null);
 
             $idOrigen = (int) ($actividad->idMateria ?? 0);
@@ -1855,44 +1946,104 @@ class ActividadController extends Controller
             }
 
             DB::transaction(function () use ($actividad, $idActividad, $idOrigen, $idMateriaDestino, $idPlaneacion) {
+                // Una actividad pertenece a un único RAP: actualizar la FK real.
                 $actividad->idMateria = $idMateriaDestino;
                 $actividad->save();
 
-                if (Schema::hasTable('planeacionActividades')) {
-                    $planeaciones = $idPlaneacion ? [$idPlaneacion] : PlaneacionActividad::query()
-                        ->where('idActividad', $idActividad)
-                        ->where('idMateria', $idOrigen)
-                        ->distinct()
-                        ->pluck('idPlaneacion')
-                        ->map(fn ($p) => (int) $p)
-                        ->filter(fn ($p) => $p > 0)
-                        ->values()
-                        ->all();
+                if (! Schema::hasTable('planeacionActividades')) {
+                    return;
+                }
 
-                    foreach ($planeaciones as $pid) {
-                        $rows = PlaneacionActividad::query()
-                            ->where('idActividad', $idActividad)
-                            ->where('idPlaneacion', $pid)
-                            ->get();
+                // Todas las filas de planeación de esta actividad deben apuntar al RAP destino (sin duplicar).
+                $queryPa = PlaneacionActividad::query()->where('idActividad', $idActividad);
+                if ($idPlaneacion) {
+                    $queryPa->where('idPlaneacion', $idPlaneacion);
+                }
 
-                        $withOld = $rows->filter(fn ($r) => (int) ($r->idMateria ?? 0) === $idOrigen)->values();
-                        $withNew = $rows->filter(fn ($r) => (int) ($r->idMateria ?? 0) === $idMateriaDestino)->values();
+                $rows = $queryPa->get();
+                if ($rows->isEmpty() && $idPlaneacion) {
+                    // Si hay planeación de la ficha pero aún no hay vínculo, no se crea uno nuevo aquí:
+                    // el movimiento solo reasigna; la asignación a aprendices es otro flujo.
+                    return;
+                }
 
-                        if ($withNew->isNotEmpty()) {
-                            foreach ($withOld as $stale) {
-                                $stale->delete();
-                            }
-                        } elseif ($withOld->isNotEmpty()) {
-                            $first = $withOld->first();
+                $byPlaneacion = $rows->groupBy(fn ($r) => (int) ($r->idPlaneacion ?? 0));
+                foreach ($byPlaneacion as $pid => $group) {
+                    if ((int) $pid <= 0) {
+                        continue;
+                    }
+
+                    $withNew = $group->filter(fn ($r) => (int) ($r->idMateria ?? 0) === $idMateriaDestino)->values();
+                    $withOld = $group->filter(fn ($r) => (int) ($r->idMateria ?? 0) === $idOrigen)->values();
+                    $others = $group->filter(function ($r) use ($idOrigen, $idMateriaDestino) {
+                        $m = (int) ($r->idMateria ?? 0);
+
+                        return $m !== $idOrigen && $m !== $idMateriaDestino;
+                    })->values();
+
+                    if ($withNew->isNotEmpty()) {
+                        // Ya existe vínculo al destino: eliminar origen y cualquier resto duplicado.
+                        foreach ($withOld as $stale) {
+                            $stale->delete();
+                        }
+                        foreach ($others as $stale) {
+                            $stale->delete();
+                        }
+                        foreach ($withNew->slice(1) as $dup) {
+                            $dup->delete();
+                        }
+                    } elseif ($withOld->isNotEmpty()) {
+                        $first = $withOld->first();
+                        $first->idMateria = $idMateriaDestino;
+                        $first->save();
+                        foreach ($withOld->slice(1) as $dup) {
+                            $dup->delete();
+                        }
+                        foreach ($others as $stale) {
+                            $stale->delete();
+                        }
+                    } else {
+                        // Filas con otro idMateria: reasignar la primera y limpiar el resto.
+                        $first = $group->first();
+                        if ($first) {
                             $first->idMateria = $idMateriaDestino;
                             $first->save();
-                            foreach ($withOld->slice(1) as $dup) {
+                            foreach ($group->slice(1) as $dup) {
                                 $dup->delete();
                             }
                         }
                     }
                 }
+
+                // Seguridad: cualquier fila residual de esta actividad fuera del destino se actualiza o elimina.
+                PlaneacionActividad::query()
+                    ->where('idActividad', $idActividad)
+                    ->when($idPlaneacion, fn ($q) => $q->where('idPlaneacion', $idPlaneacion))
+                    ->where('idMateria', '!=', $idMateriaDestino)
+                    ->update(['idMateria' => $idMateriaDestino]);
+
+                // Deduplicar (idActividad, idPlaneacion, idMateria) tras el UPDATE masivo.
+                $dedupe = PlaneacionActividad::query()
+                    ->where('idActividad', $idActividad)
+                    ->when($idPlaneacion, fn ($q) => $q->where('idPlaneacion', $idPlaneacion))
+                    ->orderBy('id')
+                    ->get()
+                    ->groupBy(fn ($r) => (int) ($r->idPlaneacion ?? 0).'-'.(int) ($r->idMateria ?? 0));
+
+                foreach ($dedupe as $group) {
+                    foreach ($group->slice(1) as $dup) {
+                        $dup->delete();
+                    }
+                }
             });
+
+            DiagnosticoActividadesRapHistoricas::logMovimientoRap(
+                $idActividad,
+                $idOrigen,
+                $idMateriaDestino,
+                $idFicha,
+                true
+            );
 
             return response()->json([
                 'message' => 'Actividad movida correctamente al RAP seleccionado.',
@@ -1902,6 +2053,14 @@ class ActividadController extends Controller
         } catch (ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
+            DiagnosticoActividadesRapHistoricas::logMovimientoRap(
+                $idActividad,
+                $idOrigen,
+                $idMateriaDestino,
+                $idFicha,
+                false,
+                $e->getMessage()
+            );
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
@@ -2009,6 +2168,33 @@ class ActividadController extends Controller
             ->where('hm.idFicha', $idFicha)
             ->where('gm.idMateria', $idMateria)
             ->exists();
+    }
+
+    /**
+     * Garantiza que idMateria sea un RAP (tiene competencia padre).
+     * Las actividades no pueden asociarse directamente a una competencia.
+     */
+    private function assertIdMateriaEsRap(int $idMateria): void
+    {
+        if ($idMateria <= 0) {
+            throw ValidationException::withMessages([
+                'idMateria' => ['Debe indicar un RAP válido.'],
+            ]);
+        }
+
+        $materia = Materia::query()->find($idMateria);
+        if (! $materia) {
+            throw ValidationException::withMessages([
+                'idMateria' => ['El RAP indicado no existe.'],
+            ]);
+        }
+
+        if (! $materia->esRap()) {
+            throw ValidationException::withMessages([
+                'idMateria' => ['Las actividades pertenecen a un RAP, no a una competencia. Seleccione un RAP.'],
+                'idRapDestino' => ['El destino debe ser un RAP, no una competencia.'],
+            ]);
+        }
     }
 
     /** Replica la detección de planeación en `planeacionActividadesPorFicha`. */
@@ -2199,6 +2385,8 @@ class ActividadController extends Controller
             $user = KeyUtil::user();
             $idCompany = KeyUtil::idCompany();
 
+            $this->assertIdMateriaEsRap((int) $request->idMateria);
+
             $actividad = Actividad::create([
                 'tituloActividad' => $request->titulo,
                 'descripcionActividad' => $request->descripcion ?? null,
@@ -2213,6 +2401,12 @@ class ActividadController extends Controller
                 'estrategia' => 'Cuestionario',
                 'entregables' => 'Respuestas al cuestionario',
             ]);
+
+            DiagnosticoActividadesRapHistoricas::logCreacionActividad(
+                (int) $actividad->id,
+                (int) $actividad->idMateria,
+                'storeCuestionario'
+            );
 
             $tiposPregunta = TipoPregunta::pluck('id', 'tipoPregunta')->toArray();
             if (empty($tiposPregunta)) {
