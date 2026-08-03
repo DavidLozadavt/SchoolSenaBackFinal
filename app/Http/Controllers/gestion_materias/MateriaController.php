@@ -532,7 +532,24 @@ class MateriaController extends Controller
 
             $finalizadoPorHoras = $horasRequeridas > 0 && $horasActuales >= $horasRequeridas;
 
-            $estaFinalizado = $finalizadoPorMatricula || $finalizadoPorHoras;
+            // Finalización explícita (botón Finalizar RAP): estado de gradoMateria
+            // o todos los horarios DE ESTE RAP (idGradoMateria) en FINALIZADO/EVALUADO.
+            // No usar todosLosHorariosFicha por idMateria: puede mezclar trimestres.
+            $estadoGrado = strtoupper((string) ($gradoMateria->estado ?? ''));
+            $horariosEsteRap = $gradoMateria->horarioMateria;
+            $finalizadoPorEstado = $estadoGrado === EstadoHorarioMateria::FINALIZADO
+                || (
+                    $horariosEsteRap->isNotEmpty()
+                    && $horariosEsteRap->every(function ($h) {
+                        return in_array(
+                            strtoupper((string) ($h->estado ?? '')),
+                            [EstadoHorarioMateria::FINALIZADO, EstadoHorarioMateria::EVALUADO],
+                            true
+                        );
+                    })
+                );
+
+            $estaFinalizado = $finalizadoPorMatricula || $finalizadoPorHoras || $finalizadoPorEstado;
 
             return [
                 'id' => $gradoMateria->id,
