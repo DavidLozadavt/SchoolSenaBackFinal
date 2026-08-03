@@ -234,5 +234,40 @@ class WhatsappWebhookController extends Controller
         }
 
         $aspirante->update($datos);
+
+        $this->actualizarHistorial($messageId, $estado, $status);
+    }
+
+    /**
+     * Actualiza (nunca inserta) el registro de historial correspondiente a
+     * este waMessageId. Aditivo para Estadísticas WhatsApp: no reemplaza la
+     * actualización de seguimientoAspirantes de arriba.
+     */
+    private function actualizarHistorial(string $messageId, string $estado, array $status): void
+    {
+        $registro = \App\Models\WhatsappMensajeHistorial::where('waMessageId', $messageId)
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$registro) {
+            return;
+        }
+
+        $datos = [
+            'estado' => $estado,
+            'conversationId' => $status['conversation']['id'] ?? $registro->conversationId,
+        ];
+
+        if ($estado === 'delivered') {
+            $datos['fecha_entregado'] = now();
+        } elseif ($estado === 'read') {
+            $datos['fecha_leido'] = now();
+        } elseif ($estado === 'failed') {
+            $datos['fecha_error'] = now();
+            $datos['errorDetalle'] = $status['errors'][0]['title']
+                ?? ($status['errors'][0]['message'] ?? 'Error de entrega');
+        }
+
+        $registro->update($datos);
     }
 }
