@@ -1442,6 +1442,8 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
     Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
+    Route::put('horarios/materia/{id}/interrumpir', [HorarioMateriaController::class, 'interrumpirHorario']);
+    Route::put('horarios/materia/{id}/finalizar', [HorarioMateriaController::class, 'finalizarHorario']);
     Route::delete('horarios/materia/{id}', [HorarioMateriaController::class, 'destroy']); //eliminar horario
 });
 
@@ -1773,6 +1775,19 @@ Route::middleware('auth:api')->group(function () {
         Route::post('solicitudes-inscripcion/{id}/aprobar', [App\Http\Controllers\SolicitudInscripcionController::class, 'aprobar']);
         Route::post('solicitudes-inscripcion/{id}/rechazar', [App\Http\Controllers\SolicitudInscripcionController::class, 'rechazar']);
     });
+
+    // Estadísticas de Mensajes WhatsApp - SENA. Solo lectura sobre datos
+    // existentes de Seguimiento de Aspirantes; permiso propio, no reutiliza
+    // GESTION_SEGUIMIENTO_ASPIRANTES a propósito (rol distinto: Administrador).
+    Route::prefix('sena/message-statistics')
+        ->middleware('permission:' . PermissionConst::GESTION_ESTADISTICAS_WHATSAPP_SENA)
+        ->group(function () {
+            Route::get('/', [App\Http\Controllers\MessageStatisticsController::class, 'index']);
+            Route::get('dashboard', [App\Http\Controllers\MessageStatisticsController::class, 'dashboard']);
+            Route::get('report', [App\Http\Controllers\MessageStatisticsController::class, 'report']);
+            Route::get('export/excel', [App\Http\Controllers\MessageStatisticsController::class, 'exportExcel']);
+            Route::get('export/pdf', [App\Http\Controllers\MessageStatisticsController::class, 'exportPdf']);
+        });
 
     // Configuración local de WhatsApp Cloud API (Meta) — CRUD autónomo.
     // Protegido por el permiso GESTION_TELECOM_CONFIG (mismo middleware que el resto del proyecto).
