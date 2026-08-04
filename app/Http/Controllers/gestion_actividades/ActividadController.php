@@ -87,6 +87,7 @@ class ActividadController extends Controller
             $idFicha = (int) $request->query('idFicha', 0);
             $idMateria = (int) $request->query('idMateria', 0);
             $idRap = (int) $request->query('idRap', 0);
+            $idCompetencia = (int) $request->query('idCompetencia', 0);
 
             if ($idFicha > 0) {
                 $query->where('mar.idFicha', $idFicha);
@@ -96,6 +97,19 @@ class ActividadController extends Controller
             }
             if ($idRap > 0) {
                 $query->where('mar.idRap', $idRap);
+            }
+            if ($idCompetencia > 0) {
+                // Competencia = padre del RAP (mismo criterio que Mis Actividades).
+                $query->where(function ($q) use ($idCompetencia) {
+                    $q->where('rap.idMateriaPadre', $idCompetencia)
+                        ->orWhere(function ($q2) use ($idCompetencia) {
+                            $q2->whereNull('rap.idMateriaPadre')
+                                ->where(function ($q3) use ($idCompetencia) {
+                                    $q3->where('mat.idMateriaPadre', $idCompetencia)
+                                        ->orWhere('mat.id', $idCompetencia);
+                                });
+                        });
+                });
             }
 
             $selectCols = [
@@ -110,7 +124,9 @@ class ActividadController extends Controller
                 'mar.idPersona',
                 'mar.created_at',
                 'mat.nombreMateria as materiaNombre',
+                'mat.idMateriaPadre as idCompetenciaMat',
                 'rap.nombreMateria as rapNombre',
+                'rap.idMateriaPadre as idCompetenciaRap',
                 'f.codigo as fichaCodigo',
                 'creador.nombre1 as creadorNombre1',
                 'creador.nombre2 as creadorNombre2',
@@ -123,6 +139,9 @@ class ActividadController extends Controller
             if (Schema::hasColumn($tablaMaterial, 'urlVideo')) {
                 $selectCols[] = 'mar.urlVideo';
             }
+            if (Schema::hasColumn($tablaMaterial, 'tipoMaterial')) {
+                $selectCols[] = 'mar.tipoMaterial';
+            }
 
             $rows = $query
                 ->select($selectCols)
@@ -130,10 +149,19 @@ class ActividadController extends Controller
                 ->get();
 
             $tieneColVideo = Schema::hasColumn($tablaMaterial, 'urlVideo');
+            $tieneColTipo = Schema::hasColumn($tablaMaterial, 'tipoMaterial');
 
-            $data = $rows->map(function ($row) use ($tieneColVideo) {
+            $data = $rows->map(function ($row) use ($tieneColVideo, $tieneColTipo) {
                 $idRapResolved = (int) $row->idRap;
                 $urlVideo = $tieneColVideo ? ($row->urlVideo ?? null) : null;
+                $tipoMaterial = $tieneColTipo ? ($row->tipoMaterial ?? null) : null;
+                $idCompetenciaResolved = (int) ($row->idCompetenciaRap ?? 0);
+                if ($idCompetenciaResolved <= 0) {
+                    $idCompetenciaResolved = (int) ($row->idCompetenciaMat ?? 0);
+                }
+                if ($idCompetenciaResolved <= 0 && ! empty($row->idMateria)) {
+                    $idCompetenciaResolved = (int) $row->idMateria;
+                }
 
                 $nombreCreador = trim(implode(' ', array_filter([
                     $row->creadorNombre1 ?? '',
@@ -157,6 +185,7 @@ class ActividadController extends Controller
                     'id' => (int) $row->id,
                     'titulo' => $row->titulo,
                     'descripcion' => $row->descripcion,
+                    'tipoMaterial' => $tipoMaterial,
                     'urlDocumento' => $row->urlDocumento,
                     'urlDocumentoUrl' => $this->publicUrl($row->urlDocumento),
                     'urlAdicional' => $row->urlAdicional,
@@ -165,6 +194,7 @@ class ActividadController extends Controller
                     'idMateria' => (int) $row->idMateria,
                     'materiaNombre' => $row->materiaNombre,
                     'competenciaNombre' => $row->competenciaNombre,
+                    'idCompetencia' => $idCompetenciaResolved > 0 ? $idCompetenciaResolved : null,
                     'idFicha' => (int) $row->idFicha,
                     'fichaCodigo' => $row->fichaCodigo,
                     'idRap' => $idRapResolved > 0 ? $idRapResolved : null,
