@@ -47,9 +47,36 @@ class WompiService
         return $this->llave('publicKey');
     }
 
+    /** Cache por request de la fila de configuración. */
+    private ?ConfiguracionWompi $configCache = null;
+
+    /**
+     * Moneda efectiva: la de la tabla; si está vacía, la del .env; si no, COP.
+     */
     public function moneda(): string
     {
-        return config('services.wompi.currency', 'COP');
+        return $this->configuracion()->moneda
+            ?: config('services.wompi.currency', 'COP');
+    }
+
+    /**
+     * Porcentaje de IVA efectivo (incluido en el precio del plan).
+     */
+    public function ivaPorcentaje(): float
+    {
+        $configuracion = $this->configuracion();
+
+        return $configuracion->ivaPorcentaje !== null
+            ? (float) $configuracion->ivaPorcentaje
+            : (float) config('services.wompi.iva_porcentaje', 0);
+    }
+
+    /**
+     * URL a la que Wompi devuelve al usuario tras pagar.
+     */
+    public function urlRetorno(): ?string
+    {
+        return $this->configuracion()->urlRetorno ?: config('services.wompi.redirect_url');
     }
 
     public function checkoutUrl(): string
@@ -91,7 +118,7 @@ class WompiService
             'amountInCents'  => $amountInCents,
             'currency'       => $currency,
             'signature'      => $this->firmaIntegridad($reference, $amountInCents, $currency),
-            'redirectUrl'    => config('services.wompi.redirect_url'),
+            'redirectUrl'    => $this->urlRetorno(),
             'customerEmail'  => $email,
         ];
     }
@@ -230,7 +257,17 @@ class WompiService
 
     private function baseUrl(): string
     {
-        return rtrim(config('services.wompi.base_url', 'https://sandbox.wompi.co/v1'), '/');
+        // El .env manda solo si define explícitamente la URL; si no, la deriva
+        // del `modo` guardado en la tabla de configuración.
+        $desdeEnv = config('services.wompi.base_url');
+
+        if (!empty($desdeEnv)) {
+            return rtrim($desdeEnv, '/');
+        }
+
+        return $this->configuracion()->esProduccion()
+            ? 'https://production.wompi.co/v1'
+            : 'https://sandbox.wompi.co/v1';
     }
 
     // -------------------------------------------------------------------------
@@ -243,7 +280,7 @@ class WompiService
 
     public function configuracion(): ConfiguracionWompi
     {
-        return ConfiguracionWompi::vigente();
+        return $this->configCache ??= ConfiguracionWompi::vigente();
     }
 
     /**
@@ -301,12 +338,12 @@ class WompiService
         return [
             'modo'                  => $configuracion->modo,
             'proveedor'             => $configuracion->proveedor,
-            'moneda'                => $configuracion->moneda,
-            'ivaPorcentaje'         => (float) $configuracion->ivaPorcentaje,
+            'moneda'                => $this->moneda(),
+            'ivaPorcentaje'         => $this->ivaPorcentaje(),
             'mensajesGratuitos'     => $configuracion->mensajesGratuitos,
             'sistemaActivo'         => $configuracion->activo,
             'horasMaxAprobacion'    => $configuracion->horasMaxAprobacion,
-            'urlRetorno'            => $configuracion->urlRetorno ?: config('services.wompi.redirect_url'),
+            'urlRetorno'            => $this->urlRetorno(),
             'urlWebhook'            => $configuracion->urlWebhook ?: url('/api/webhooks/wompi'),
             'origenLlaves'          => $llaves['origen'],
             'variables'             => $variables,
@@ -314,7 +351,7 @@ class WompiService
             'configuracionCompleta' => empty($faltantes),
             'modoCoherente'         => $modoCoherente,
             'webhookConfigurado'    => !empty($llaves['eventsSecret']),
-            'baseApi'               => config('services.wompi.base_url'),
+            'baseApi'               => $this->baseUrl(),
         ];
     }
 
