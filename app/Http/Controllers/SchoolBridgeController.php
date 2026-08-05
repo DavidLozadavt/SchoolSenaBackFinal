@@ -38,6 +38,7 @@ class SchoolBridgeController extends Controller
             'nit' => 'required|string|max:45',
             'telefono' => 'nullable|string|max:45',
             'direccion' => 'nullable|string|max:255',
+            'contrasena_hash' => 'nullable|string',
         ]);
 
         try {
@@ -62,6 +63,7 @@ class SchoolBridgeController extends Controller
                 'email' => $request->email,
                 'digitoVerificacion' => 0,
                 'idCiudad' => 1, // Default o primera ciudad
+                'rutaLogo' => Company::RUTA_LOGO_DEFAULT,
             ]);
 
             // 4. Crear el registro en tabla 'persona' para el representante
@@ -80,16 +82,22 @@ class SchoolBridgeController extends Controller
                 'idTipoIdentificacion' => 1, // CC
                 'celular' => $request->telefono ?? '0000000',
                 'idCiudadUbicacion' => 1,
+                'perfil' => 'Representante',
+                'sexo' => 'M',
             ]);
 
             // 5. Crear el registro en tabla 'usuario' (Credenciales por defecto)
-            // Se le genera una contraseña inicial por defecto: 'VirtualT2026!'
-            $tempPassword = 'VirtualT2026!';
             $user = new User();
             $user->idpersona = $person->id;
             $user->email = $request->email;
-            $user->contrasena = bcrypt($tempPassword); // Columna principal de contraseña
-            $user->password = bcrypt($tempPassword);   // Laravel compatible
+            
+            $tempPassword = null;
+            if ($request->filled('contrasena_hash')) {
+                $user->contrasena = $request->contrasena_hash;
+            } else {
+                $tempPassword = 'VirtualT2026!';
+                $user->contrasena = bcrypt($tempPassword); // Columna principal de contraseña
+            }
             $user->save();
 
             // 6. Vincular el usuario a la empresa mediante 'activation_company_users'
@@ -105,12 +113,10 @@ class SchoolBridgeController extends Controller
             // 7. Crear el rol de 'Admin' asignado a este tenant y asignárselo
             $role = Role::firstOrCreate([
                 'name' => 'Admin',
-                'company_id' => $company->id,
-            ], [
                 'guard_name' => 'web',
             ]);
 
-            // Sincronizar permisos estándar de administración
+            // Sincronizar permisos estándar de administración (filtrando solo los que existen en la BD)
             $permissions = [
                 'GESTION_ROLES',
                 'GESTION_ROL_PERMISOS',
@@ -126,7 +132,12 @@ class SchoolBridgeController extends Controller
                 'GESTION_LABORAL',
                 'GESTION_CHAT',
             ];
-            $role->syncPermissions($permissions);
+            $existingPermissions = DB::table('permissions')
+                ->whereIn('name', $permissions)
+                ->pluck('name')
+                ->toArray();
+
+            $role->syncPermissions($existingPermissions);
 
             // Asignar el rol
             $activation->assignRole($role);
