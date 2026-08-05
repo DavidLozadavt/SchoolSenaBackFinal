@@ -499,6 +499,37 @@ class SeguimientoAspiranteController extends Controller
 
             $aspirantes = SeguimientoAspirante::whereIn('id', $ids)->get();
 
+            // --- Planes de mensajes (aditivo) -----------------------------
+            // Único punto de modificación del flujo existente, exigido por el
+            // requisito: el envío se permite SOLO si el usuario tiene saldo para
+            // TODOS los destinatarios. Aquí únicamente se VALIDA; el descuento se
+            // hace al terminar, por la cantidad realmente enviada (ver más abajo).
+            $saldoService = new \App\Services\Mensajes\SaldoMensajesService();
+            $usuarioId    = auth()->id();
+            $requeridos   = $aspirantes->count();
+
+            if ($usuarioId && $requeridos > 0) {
+                $resumenSaldo = $saldoService->resumen($usuarioId);
+
+                if ($resumenSaldo['mensajesDisponibles'] < $requeridos) {
+                    // Notificación in-app (aditiva): no altera la respuesta ni el flujo.
+                    (new \App\Services\Mensajes\NotificacionesPlanesService())->saldoInsuficiente(
+                        $usuarioId,
+                        $requeridos,
+                        (int) $resumenSaldo['mensajesDisponibles']
+                    );
+
+                    // No se envía nada y no se descuenta ningún mensaje.
+                    return response()->json([
+                        'error'               => 'No dispone del saldo suficiente de mensajes para esta campaña.',
+                        'saldoInsuficiente'   => true,
+                        'mensajesRequeridos'  => $requeridos,
+                        'mensajesDisponibles' => $resumenSaldo['mensajesDisponibles'],
+                    ], 402);
+                }
+            }
+            // --- Fin planes de mensajes -----------------------------------
+
             $enviados = 0;
             $fallidos = 0;
             $errores  = [];
@@ -563,11 +594,23 @@ class SeguimientoAspiranteController extends Controller
                 }
             }
 
+            // Descuento final: exactamente la cantidad de mensajes ENVIADOS.
+            // Genera automáticamente el movimiento de tipo CONSUMO en el historial.
+            if ($usuarioId && $enviados > 0) {
+                $saldoService->consumir(
+                    $usuarioId,
+                    $enviados,
+                    "Campaña de WhatsApp: {$enviados} mensajes enviados.",
+                    'campania:' . now()->format('YmdHis')
+                );
+            }
+
             return response()->json([
                 'message'  => "Campaña procesada. Enviados: {$enviados}, Fallidos: {$fallidos}.",
                 'enviados' => $enviados,
                 'fallidos' => $fallidos,
                 'errores'  => $errores,
+                'saldo'    => $usuarioId ? $saldoService->resumen($usuarioId) : null,
             ], 200);
         } catch (\Exception $e) {
             Log::error('Error al procesar el envío de WhatsApp: ' . $e->getMessage());

@@ -134,6 +134,11 @@ use App\Http\Controllers\SeguimientoAspiranteController;
 use App\Http\Controllers\WhatsappPlantillaController;
 use App\Http\Controllers\TelecomConfigController;
 use App\Http\Controllers\WhatsappWebhookController;
+use App\Http\Controllers\WhatsappPlantillaMetaController;
+use App\Http\Controllers\MensajesPlanController;
+use App\Http\Controllers\SolicitudPlanMensajeController;
+use App\Http\Controllers\NotificacionPlanController;
+use App\Http\Controllers\DashboardPlanesController;
 use App\Permission\PermissionConst;
 
 use App\Http\Controllers\gestion_programas_academicos\NivelesProgramaController;
@@ -196,6 +201,11 @@ Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 
 // NO requiere autenticación: Meta llama directamente a estas URLs.
 Route::get('webhooks/meta', [WhatsappWebhookController::class, 'verify']);   // Validación (hub.challenge)
 Route::post('webhooks/meta', [WhatsappWebhookController::class, 'receive']); // Recepción de mensajes/estados
+
+// Webhook público de la pasarela de pagos Wompi — compra de planes de mensajes.
+// NO requiere autenticación: Wompi llama directamente. La firma del evento se
+// valida con WOMPI_EVENTS_SECRET dentro del controlador.
+Route::post('webhooks/wompi', [WompiController::class, 'webhookPlan']);
 
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
@@ -1794,5 +1804,87 @@ Route::middleware('auth:api')->group(function () {
         Route::post('telecom-config/probar', [TelecomConfigController::class, 'probar']);
         Route::apiResource('telecom-config', TelecomConfigController::class)
             ->parameters(['telecom-config' => 'id']);
+    });
+
+    // ---------------------------------------------------------------------
+    // MÓDULO: Planes de mensajes por usuario (aditivo).
+    // El plan pertenece al USUARIO: consultar saldo, ver planes y solicitar
+    // una compra NO requiere permiso especial, solo estar autenticado.
+    // ---------------------------------------------------------------------
+    Route::get('mensajes/mi-saldo', [MensajesPlanController::class, 'miSaldo']);
+    Route::get('mensajes/planes', [MensajesPlanController::class, 'index']);
+    Route::get('mensajes/mis-movimientos', [MensajesPlanController::class, 'misMovimientos']);
+    Route::post('mensajes/solicitudes', [SolicitudPlanMensajeController::class, 'store']);
+    Route::get('mensajes/mis-solicitudes', [SolicitudPlanMensajeController::class, 'misSolicitudes']);
+    Route::get('mensajes/mis-notificaciones', [SolicitudPlanMensajeController::class, 'misNotificaciones']);
+
+    // Compra de planes con la pasarela oficial de Wompi (flujo principal).
+    Route::get('mensajes/wompi/resumen/{planId}', [WompiController::class, 'resumenPlan']);
+    Route::post('mensajes/wompi/checkout', [WompiController::class, 'checkoutPlan']);
+    Route::post('mensajes/wompi/confirmar', [WompiController::class, 'confirmarPlan']);
+    Route::get('mensajes/wompi/mis-transacciones', [WompiController::class, 'misTransaccionesPlan']);
+
+    // Notificaciones in-app del módulo de planes. Cada usuario ve solo las suyas.
+    Route::get('mensajes/notificaciones', [NotificacionPlanController::class, 'index']);
+    Route::get('mensajes/notificaciones/no-leidas', [NotificacionPlanController::class, 'noLeidas']);
+    Route::post('mensajes/notificaciones/{id}/leer', [NotificacionPlanController::class, 'marcarLeida']);
+    Route::post('mensajes/notificaciones/leer-todas', [NotificacionPlanController::class, 'marcarTodasLeidas']);
+
+    // Historial de Facturación (Administrador VT). Solo lectura sobre datos ya
+    // existentes: no crea, modifica ni elimina compras.
+    Route::middleware('permission:' . PermissionConst::GESTION_HISTORIAL_FACTURACION)->group(function () {
+        Route::get('facturacion/historial', [SolicitudPlanMensajeController::class, 'historial']);
+        Route::get('facturacion/historial/opciones', [SolicitudPlanMensajeController::class, 'historialOpciones']);
+        Route::get('facturacion/historial/export/excel', [SolicitudPlanMensajeController::class, 'historialExportExcel']);
+        Route::get('facturacion/historial/export/pdf', [SolicitudPlanMensajeController::class, 'historialExportPdf']);
+    });
+
+    // Configuración General de Pagos (Administrador VT). Las llaves nunca se
+    // devuelven: solo se informa si están presentes.
+    Route::middleware('permission:' . PermissionConst::GESTION_CONFIGURACION_PAGOS)->group(function () {
+        Route::get('pagos/configuracion', [MensajesPlanController::class, 'configuracion']);
+        Route::get('pagos/configuracion/diagnostico', [MensajesPlanController::class, 'diagnosticoConfiguracion']);
+        Route::post('pagos/configuracion/verificar', [MensajesPlanController::class, 'verificarConfiguracion']);
+        Route::put('pagos/configuracion', [MensajesPlanController::class, 'actualizarConfiguracion']);
+    });
+
+    // Dashboard del Administrador VT (solo lectura).
+    Route::middleware('permission:' . PermissionConst::GESTION_DASHBOARD_PLANES)->group(function () {
+        Route::get('mensajes/dashboard', [DashboardPlanesController::class, 'resumen']);
+    });
+
+    // CRUD completo del catálogo de planes (módulo "Planes de Mensajes").
+    Route::middleware('permission:' . PermissionConst::GESTION_PLANES_MENSAJES)->group(function () {
+        Route::get('mensajes/planes-admin', [MensajesPlanController::class, 'index']);
+        Route::post('mensajes/planes-admin', [MensajesPlanController::class, 'store']);
+        Route::put('mensajes/planes-admin/{id}', [MensajesPlanController::class, 'update']);
+        Route::delete('mensajes/planes-admin/{id}', [MensajesPlanController::class, 'destroy']);
+    });
+
+    // Administrador VT: aprobación de solicitudes y catálogo de planes.
+    Route::middleware('permission:' . PermissionConst::GESTION_SOLICITUDES_PLANES)->group(function () {
+        Route::get('mensajes/solicitudes', [SolicitudPlanMensajeController::class, 'index']);
+        Route::get('mensajes/solicitudes/{id}/comprobante', [SolicitudPlanMensajeController::class, 'comprobante']);
+        Route::post('mensajes/solicitudes/{id}/aprobar', [SolicitudPlanMensajeController::class, 'aprobar']);
+        Route::post('mensajes/solicitudes/{id}/rechazar', [SolicitudPlanMensajeController::class, 'rechazar']);
+
+        Route::get('mensajes/wompi/transacciones/{id}', [WompiController::class, 'detalleTransaccionPlan']);
+
+        Route::post('mensajes/planes', [MensajesPlanController::class, 'store']);
+        Route::put('mensajes/planes/{id}', [MensajesPlanController::class, 'update']);
+        Route::delete('mensajes/planes/{id}', [MensajesPlanController::class, 'destroy']);
+    });
+
+    // ---------------------------------------------------------------------
+    // MÓDULO: Plantillas de Meta (aditivo). No sustituye a `whatsapp-plantillas`,
+    // que sigue sirviendo la plantilla oficial del envío de campañas.
+    // ---------------------------------------------------------------------
+    Route::middleware('permission:' . PermissionConst::GESTION_SEGUIMIENTO_ASPIRANTES)->group(function () {
+        Route::get('whatsapp-plantillas-meta', [WhatsappPlantillaMetaController::class, 'index']);
+        Route::post('whatsapp-plantillas-meta', [WhatsappPlantillaMetaController::class, 'store']);
+        Route::post('whatsapp-plantillas-meta/sincronizar', [WhatsappPlantillaMetaController::class, 'sincronizar']);
+        Route::post('whatsapp-plantillas-meta/{id}/sincronizar', [WhatsappPlantillaMetaController::class, 'sincronizarUna']);
+        Route::get('whatsapp-plantillas-meta/{id}', [WhatsappPlantillaMetaController::class, 'show']);
+        Route::delete('whatsapp-plantillas-meta/{id}', [WhatsappPlantillaMetaController::class, 'destroy']);
     });
 });

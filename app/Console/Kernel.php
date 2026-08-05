@@ -27,6 +27,7 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\SendNotificationSupport::class,
         \App\Console\Commands\SendNotificationVacacionNomina::class,
         \App\Console\Commands\StorePagoAdministracion::class,
+        \App\Console\Commands\WompiSyncPending::class,
     ];
 
     /**
@@ -58,6 +59,10 @@ class Kernel extends ConsoleKernel
 
         // Registrar inasistencias automáticas para clases que ya terminaron
         $schedule->command('asistencia:registrar-inasistencias')->everyThirtyMinutes()->withoutOverlapping();
+
+        // Sincroniza en Wompi los pagos que siguen en estado PENDING. Actúa como
+        // respaldo del webhook: si Wompi no notifica, el estado se actualiza igual.
+        $schedule->command('wompi:sync-pending')->everyTenMinutes()->withoutOverlapping();
 
         //crear copia local de la base de datos
         $schedule->command('backup:run --only-db --disable-notifications')
