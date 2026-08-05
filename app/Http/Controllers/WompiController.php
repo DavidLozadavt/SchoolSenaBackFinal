@@ -2,8 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ConfiguracionWompi;
+use App\Models\AuditoriaPlanMensaje;
+use App\Models\MensajesPlan;
+use App\Models\SolicitudPlanMensaje;
+use App\Models\WompiTransaccion;
+use App\Services\Mensajes\AuditoriaPlanesService;
+use App\Services\Mensajes\NotificacionesPlanesService;
+use App\Services\Pagos\WompiService;
 use App\Util\KeyUtil;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Http\Request;
 use Bancolombia\Wompi;
 use Carbon\Carbon;
@@ -344,4 +352,479 @@ class WompiController extends Controller
    *
    * @return array|null
    */
+
+  // ===========================================================================
+  // COMPRA DE PLANES DE MENSAJES (Checkout Web de Wompi)
+  //
+  // Métodos migrados desde el antiguo WompiPagoController para que este sea el
+  // ÚNICO controlador del dominio Wompi. No alteran el constructor, el SDK
+  // Bancolombia\Wompi ni el flujo PSE de arriba: resuelven sus dependencias con
+  // app() y usan exclusivamente WompiService.
+  // ===========================================================================
+
+  /**
+   * Resumen previo al checkout: plan, mensajes, valor, descripción, usuario y empresa.
+   */
+  public function resumenPlan($planId): JsonResponse
+  {
+    try {
+      $wompiService = app(WompiService::class);
+      $plan = MensajesPlan::findOrFail($planId);
+
+      if (!$plan->activo) {
+        return response()->json(['error' => 'El plan seleccionado no está activo.'], 422);
+      }
+
+      $usuario   = auth()->user();
+      $companyId = $this->resolverCompanyIdPlan((int) $usuario->id);
+      $empresa   = $companyId ? DB::table('empresa')->where('id', $companyId)->value('razonSocial') : null;
+
+      $metodos = $wompiService->metodosDisponibles();
+
+      return response()->json([
+        'plan' => [
+          'id'               => $plan->id,
+          'nombre'           => $plan->nombre,
+          'cantidadMensajes' => $plan->cantidadMensajes,
+          'precio'           => $plan->precio,
+          'descripcion'      => $plan->descripcion,
+        ],
+        'usuario' => [
+          'id'     => $usuario->id,
+          'nombre' => $usuario->name ?: $usuario->email,
+          'email'  => $usuario->email,
+        ],
+        'empresa' => [
+          'id'     => $companyId,
+          'nombre' => $empresa,
+        ],
+        'importes'         => $this->desglosarImportesPlan((float) $plan->precio),
+        'moneda'           => $wompiService->moneda(),
+        'wompiConfigurado' => $wompiService->estaConfigurado(),
+        'metodosPago'      => $metodos['ok'] ? $metodos['metodos'] : [],
+      ], 200);
+    } catch (\Exception $e) {
+      return response()->json(['error' => 'Error al obtener el resumen de compra: ' . $e->getMessage()], 500);
+    }
+  }
+
+  /**
+   * Crea la transacción local y devuelve los datos firmados del Checkout Wompi.
+   * El frontend solo envía `planId`: importe, moneda y cantidad salen de la BD.
+   */
+  public function checkoutPlan(Request $request): JsonResponse
+  {
+    try {
+      $wompiService = app(WompiService::class);
+
+      $data = $request->validate([
+        'planId' => ['required', 'integer', 'exists:mensajesPlanes,id'],
+      ]);
+
+      if (!$wompiService->estaConfigurado()) {
+        return response()->json([
+          'error' => 'La pasarela de pagos Wompi no está configurada en este backend.',
+        ], 422);
+      }
+
+      $plan = MensajesPlan::findOrFail($data['planId']);
+
+      if (!$plan->activo) {
+        return response()->json(['error' => 'El plan seleccionado no está activo.'], 422);
+      }
+
+      $usuario       = auth()->user();
+      $amountInCents = (int) round(((float) $plan->precio) * 100);
+
+      if ($amountInCents <= 0) {
+        return response()->json(['error' => 'El plan no tiene un precio válido para cobrar.'], 422);
+      }
+
+      $reference = $wompiService->generarReferencia((int) $usuario->id, (int) $plan->id);
+
+      $transaccion = WompiTransaccion::create([
+        'reference'           => $reference,
+        'userId'              => $usuario->id,
+        'companyId'           => $this->resolverCompanyIdPlan((int) $usuario->id),
+        'planId'              => $plan->id,
+        'amountInCents'       => $amountInCents,
+        'amount'              => $plan->precio,
+        'currency'            => $wompiService->moneda(),
+        'status'              => WompiTransaccion::PENDING,
+        'customerEmail'       => $usuario->email,
+        'origenActualizacion' => 'CHECKOUT',
+      ]);
+
+      return response()->json([
+        'message'     => 'Transacción creada. Continúe en el checkout de Wompi.',
+        'transaccion' => $transaccion,
+        'checkout'    => $wompiService->datosCheckout($reference, $amountInCents, $usuario->email),
+      ], 201);
+    } catch (\Illuminate\Validation\ValidationException $e) {
+      return response()->json(['error' => $e->validator->errors()->first()], 400);
+    } catch (\Exception $e) {
+      Log::error('Error al crear la transacción de Wompi: ' . $e->getMessage());
+
+      return response()->json(['error' => 'Error al crear la transacción: ' . $e->getMessage()], 500);
+    }
+  }
+
+  /**
+   * Consulta el estado real en Wompi al regresar del checkout y lo sincroniza.
+   */
+  public function confirmarPlan(Request $request): JsonResponse
+  {
+    try {
+      $wompiService  = app(WompiService::class);
+      $transactionId = $request->get('id');
+      $reference     = $request->get('reference');
+
+      if (!$transactionId && !$reference) {
+        return response()->json(['error' => 'Debe indicar el id de la transacción o la referencia.'], 400);
+      }
+
+      $resultado = $transactionId
+        ? $wompiService->consultarTransaccion($transactionId)
+        : $wompiService->consultarPorReferencia($reference);
+
+      if (!$resultado['ok']) {
+        return response()->json(['error' => $resultado['error']], 422);
+      }
+
+      $datos       = $resultado['data'];
+      $transaccion = WompiTransaccion::where('reference', $datos['reference'] ?? $reference)->first();
+
+      if (!$transaccion) {
+        return response()->json(['error' => 'La transacción no existe en el sistema.'], 404);
+      }
+
+      if ((int) $transaccion->userId !== (int) auth()->id()) {
+        return response()->json(['error' => 'No tiene acceso a esta transacción.'], 403);
+      }
+
+      $this->sincronizarTransaccionWompi($transaccion, $datos, 'CONSULTA');
+
+      $transaccion->refresh();
+
+      return response()->json([
+        'message'     => 'Estado de la transacción actualizado.',
+        'transaccion' => $transaccion,
+        'solicitud'   => $transaccion->solicitudId
+          ? SolicitudPlanMensaje::find($transaccion->solicitudId)
+          : null,
+      ], 200);
+    } catch (\Exception $e) {
+      Log::error('Error al confirmar el pago de Wompi: ' . $e->getMessage());
+
+      return response()->json(['error' => 'Error al confirmar el pago: ' . $e->getMessage()], 500);
+    }
+  }
+
+  /**
+   * Transacciones del usuario autenticado.
+   */
+  public function misTransaccionesPlan(): JsonResponse
+  {
+    try {
+      return response()->json(
+        WompiTransaccion::where('userId', auth()->id())->orderByDesc('id')->get(),
+        200
+      );
+    } catch (\Exception $e) {
+      return response()->json(['error' => 'Error al obtener las transacciones: ' . $e->getMessage()], 500);
+    }
+  }
+
+  /**
+   * Detalle completo de una transacción (Administrador VT).
+   */
+  public function detalleTransaccionPlan($id): JsonResponse
+  {
+    try {
+      return response()->json(WompiTransaccion::findOrFail($id), 200);
+    } catch (\Exception $e) {
+      return response()->json(['error' => 'Transacción no encontrada.'], 404);
+    }
+  }
+
+  /**
+   * Webhook oficial de Wompi (ruta pública). Valida la firma del evento.
+   */
+  public function webhookPlan(Request $request): JsonResponse
+  {
+    try {
+      $wompiService = app(WompiService::class);
+      $payload      = $request->all();
+
+      if (!$wompiService->verificarFirmaEvento($payload)) {
+        Log::warning('Webhook Wompi: firma inválida.', ['evento' => $payload['event'] ?? null]);
+
+        return response()->json(['error' => 'Firma inválida.'], 401);
+      }
+
+      $datos     = $payload['data']['transaction'] ?? [];
+      $reference = $datos['reference'] ?? null;
+
+      if (!$reference) {
+        return response()->json(['message' => 'Evento sin referencia, ignorado.'], 200);
+      }
+
+      $transaccion = WompiTransaccion::where('reference', $reference)->first();
+
+      if (!$transaccion) {
+        Log::info('Webhook Wompi: referencia desconocida.', ['reference' => $reference]);
+
+        return response()->json(['message' => 'Referencia no registrada.'], 200);
+      }
+
+      $this->sincronizarTransaccionWompi($transaccion, $datos, 'WEBHOOK');
+
+      return response()->json(['message' => 'Evento procesado.'], 200);
+    } catch (\Exception $e) {
+      Log::error('Error al procesar el webhook de Wompi: ' . $e->getMessage());
+
+      return response()->json(['error' => 'Error al procesar el evento.'], 500);
+    }
+  }
+
+  /**
+   * Punto de entrada del comando `wompi:sync-pending`.
+   */
+  public function sincronizarDesdeComando(WompiTransaccion $transaccion, array $datos, string $origen): void
+  {
+    $this->sincronizarTransaccionWompi($transaccion, $datos, $origen);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers de compra de planes
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Actualiza la transacción con lo reportado por Wompi y, si el pago supera
+   * TODAS las validaciones, crea UNA SOLA VEZ la solicitud para el
+   * Administrador VT. El plan NO se activa aquí.
+   */
+  private function sincronizarTransaccionWompi(WompiTransaccion $transaccion, array $datos, string $origen): void
+  {
+    $wompiService  = app(WompiService::class);
+    $auditoria     = app(AuditoriaPlanesService::class);
+    $notificaciones = app(NotificacionesPlanesService::class);
+
+    $estadoAnterior = $transaccion->status;
+    $estado         = $wompiService->normalizarEstado($datos['status'] ?? null);
+
+    $transaccion->update([
+      'transactionId'       => $datos['id'] ?? $transaccion->transactionId,
+      'paymentMethod'       => $datos['payment_method_type'] ?? $transaccion->paymentMethod,
+      'paymentMethodType'   => $datos['payment_method_type'] ?? $transaccion->paymentMethodType,
+      'status'              => $estado,
+      'statusMessage'       => $datos['status_message'] ?? null,
+      'customerEmail'       => $datos['customer_email'] ?? $transaccion->customerEmail,
+      'fechaPago'           => $datos['finalized_at'] ?? $datos['created_at'] ?? $transaccion->fechaPago,
+      'respuestaWompi'      => $datos,
+      'origenActualizacion' => $origen,
+    ]);
+
+    $transaccion->refresh();
+
+    if ($estadoAnterior !== $estado) {
+      $auditoria->registrar(AuditoriaPlanMensaje::PAGO_ESTADO_ACTUALIZADO, (int) $transaccion->userId, [
+        'descripcion'    => "Estado del pago actualizado por {$origen}.",
+        'referenciaPago' => $transaccion->reference,
+        'transactionId'  => $transaccion->transactionId,
+        'estadoAnterior' => $estadoAnterior,
+        'estadoNuevo'    => $estado,
+        'fechaPago'      => $transaccion->fechaPago,
+        'planId'         => $transaccion->planId,
+      ]);
+    }
+
+    // Idempotencia: transacción ya procesada => solo se refleja el estado.
+    if ($transaccion->solicitudId || $transaccion->yaProcesada()) {
+      if ($transaccion->solicitudId) {
+        SolicitudPlanMensaje::where('id', $transaccion->solicitudId)->update(['estadoPago' => $estado]);
+      }
+
+      return;
+    }
+
+    $motivo = $this->validarPagoAprobadoWompi($transaccion, $datos, $estado);
+
+    if ($motivo !== null) {
+      $transaccion->update([
+        'validacionFallida' => true,
+        'motivoValidacion'  => $motivo,
+      ]);
+
+      $auditoria->incidentePago((int) $transaccion->userId, $motivo, [
+        'descripcion'    => 'El pago no superó las validaciones de seguridad; la solicitud NO fue creada.',
+        'referenciaPago' => $transaccion->reference,
+        'transactionId'  => $transaccion->transactionId,
+        'estadoAnterior' => $estadoAnterior,
+        'estadoNuevo'    => $estado,
+        'planId'         => $transaccion->planId,
+        'detalle'        => [
+          'amountInCentsRecibido' => $datos['amount_in_cents'] ?? null,
+          'currencyRecibida'      => $datos['currency'] ?? null,
+          'statusRecibido'        => $datos['status'] ?? null,
+        ],
+      ]);
+
+      return;
+    }
+
+    DB::transaction(function () use ($transaccion, $origen, $auditoria, $notificaciones) {
+      // Bloqueo de la fila: dos webhooks simultáneos se serializan aquí.
+      $bloqueada = WompiTransaccion::lockForUpdate()->find($transaccion->id);
+
+      if (!$bloqueada || $bloqueada->solicitudId || $bloqueada->yaProcesada()) {
+        return;
+      }
+
+      $plan = MensajesPlan::find($bloqueada->planId);
+
+      $solicitud = SolicitudPlanMensaje::create([
+        'userId'             => $bloqueada->userId,
+        'companyId'          => $bloqueada->companyId,
+        'planId'             => $bloqueada->planId,
+        'planNombre'         => $plan->nombre,
+        'cantidadMensajes'   => $plan->cantidadMensajes,
+        'valor'              => $plan->precio,
+        'metodoPago'         => 'Wompi - ' . ($bloqueada->paymentMethodType ?? 'No informado'),
+        'estado'             => SolicitudPlanMensaje::PAGO_REALIZADO,
+        'wompiTransaccionId' => $bloqueada->id,
+        'estadoPago'         => WompiTransaccion::APPROVED,
+        'referenciaPago'     => $bloqueada->reference,
+      ]);
+
+      $bloqueada->update([
+        'solicitudId'       => $solicitud->id,
+        'procesadaEn'       => now(),
+        'validacionFallida' => false,
+        'motivoValidacion'  => null,
+      ]);
+
+      $auditoria->registrar(AuditoriaPlanMensaje::SOLICITUD_CREADA, (int) $bloqueada->userId, [
+        'solicitudId'      => $solicitud->id,
+        'descripcion'      => "Pago aprobado en Wompi (ref. {$bloqueada->reference}). Pendiente de aprobación del Administrador VT.",
+        'planId'           => $plan->id,
+        'planNombre'       => $plan->nombre,
+        'cantidadMensajes' => $plan->cantidadMensajes,
+        'referenciaPago'   => $bloqueada->reference,
+        'transactionId'    => $bloqueada->transactionId,
+        'estadoNuevo'      => SolicitudPlanMensaje::PAGO_REALIZADO,
+        'fechaPago'        => $bloqueada->fechaPago,
+        'observaciones'    => "Origen de la confirmación: {$origen}.",
+        'detalle'          => [
+          'transactionId'     => $bloqueada->transactionId,
+          'reference'         => $bloqueada->reference,
+          'paymentMethodType' => $bloqueada->paymentMethodType,
+          'amount'            => $bloqueada->amount,
+          'currency'          => $bloqueada->currency,
+        ],
+      ]);
+
+      $notificaciones->pagoAprobado(
+        (int) $bloqueada->userId,
+        $bloqueada->reference,
+        $bloqueada->amount,
+        ['solicitudId' => $solicitud->id, 'transaccionId' => $bloqueada->id]
+      );
+    });
+  }
+
+  /**
+   * Validaciones obligatorias antes de dar por bueno un pago.
+   * Devuelve el motivo del rechazo, o null si todo es correcto.
+   */
+  private function validarPagoAprobadoWompi(WompiTransaccion $transaccion, array $datos, string $estado): ?string
+  {
+    if ($estado !== WompiTransaccion::APPROVED) {
+      return "El estado recibido es {$estado}, no APPROVED.";
+    }
+
+    if (empty($transaccion->reference)) {
+      return 'La transacción no tiene referencia registrada.';
+    }
+
+    if (empty($transaccion->userId)) {
+      return 'La transacción no está asociada a ningún usuario.';
+    }
+
+    $plan = MensajesPlan::find($transaccion->planId);
+
+    if (!$plan) {
+      return "El plan {$transaccion->planId} no existe.";
+    }
+
+    // El importe autoritativo es el de la BD, no el que llega en la petición.
+    $esperadoEnCentavos = (int) round(((float) $plan->precio) * 100);
+    $recibidoEnCentavos = (int) ($datos['amount_in_cents'] ?? $transaccion->amountInCents);
+
+    if ($recibidoEnCentavos !== $esperadoEnCentavos) {
+      return "El monto pagado ({$recibidoEnCentavos}) no coincide con el valor del plan ({$esperadoEnCentavos}).";
+    }
+
+    $monedaEsperada = strtoupper((string) config('services.wompi.currency', 'COP'));
+    $monedaRecibida = strtoupper((string) ($datos['currency'] ?? $transaccion->currency));
+
+    if ($monedaRecibida !== $monedaEsperada) {
+      return "La moneda recibida ({$monedaRecibida}) no es la configurada ({$monedaEsperada}).";
+    }
+
+    $existente = SolicitudPlanMensaje::where('referenciaPago', $transaccion->reference)->first();
+
+    if ($existente) {
+      return "La referencia {$transaccion->reference} ya generó la solicitud {$existente->id}.";
+    }
+
+    if ($transaccion->yaProcesada()) {
+      return 'La transacción ya fue procesada anteriormente.';
+    }
+
+    return null;
+  }
+
+  /**
+   * Desglose subtotal / IVA / total a partir del precio del plan (IVA incluido).
+   */
+  private function desglosarImportesPlan(float $total): array
+  {
+    $porcentaje = (float) config('services.wompi.iva_porcentaje', 0);
+
+    if ($porcentaje <= 0) {
+      return [
+        'subtotal'      => round($total, 2),
+        'ivaPorcentaje' => 0,
+        'iva'           => 0,
+        'total'         => round($total, 2),
+      ];
+    }
+
+    $subtotal = $total / (1 + ($porcentaje / 100));
+
+    return [
+      'subtotal'      => round($subtotal, 2),
+      'ivaPorcentaje' => $porcentaje,
+      'iva'           => round($total - $subtotal, 2),
+      'total'         => round($total, 2),
+    ];
+  }
+
+  /**
+   * Empresa del usuario (informativo para el listado del administrador).
+   */
+  private function resolverCompanyIdPlan(int $userId): ?int
+  {
+    try {
+      $companyId = DB::table('activation_company_users')
+        ->where('user_id', $userId)
+        ->orderByDesc('id')
+        ->value('company_id');
+
+      return $companyId ? (int) $companyId : null;
+    } catch (\Throwable $e) {
+      return null;
+    }
+  }
 }

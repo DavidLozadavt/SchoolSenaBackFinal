@@ -38,5 +38,26 @@ return [
         'timeout' => env('FACTUS_TIMEOUT', 10),
         ],
 
+    /*
+    | Pasarela de pagos Wompi — compra de planes de mensajes de WhatsApp.
+    | Sandbox:    https://sandbox.wompi.co/v1     (llaves pub_test_ / prv_test_)
+    | Producción: https://production.wompi.co/v1  (llaves pub_prod_ / prv_prod_)
+    */
+    'wompi' => [
+        'base_url'         => env('WOMPI_BASE_URL', 'https://sandbox.wompi.co/v1'),
+        'checkout_url'     => env('WOMPI_CHECKOUT_URL', 'https://checkout.wompi.co/p/'),
+        'public_key'       => env('WOMPI_PUBLIC_KEY'),
+        'private_key'      => env('WOMPI_PRIVATE_KEY'),
+        'integrity_secret' => env('WOMPI_INTEGRITY_SECRET'),
+        'events_secret'    => env('WOMPI_EVENTS_SECRET'),
+        'currency'         => env('WOMPI_CURRENCY', 'COP'),
+        // IVA incluido en el precio del plan (0 = sin IVA). Solo afecta al
+        // desglose que se muestra al usuario: el total cobrado sigue siendo
+        // exactamente el precio del plan almacenado en la base de datos.
+        'iva_porcentaje'   => (float) env('WOMPI_IVA_PORCENTAJE', 0),
+        // URL del frontend a la que Wompi devuelve al usuario tras pagar.
+        'redirect_url'     => env('WOMPI_REDIRECT_URL'),
+    ],
+
 
 ];
