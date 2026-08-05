@@ -44,7 +44,8 @@ return [
     | Producción: https://production.wompi.co/v1  (llaves pub_prod_ / prv_prod_)
     */
     'wompi' => [
-        'base_url'         => env('WOMPI_BASE_URL', 'https://sandbox.wompi.co/v1'),
+        // Sin default: si no se define, WompiService la deriva del `modo` de la tabla.
+        'base_url'         => env('WOMPI_BASE_URL'),
         'checkout_url'     => env('WOMPI_CHECKOUT_URL', 'https://checkout.wompi.co/p/'),
         'public_key'       => env('WOMPI_PUBLIC_KEY'),
         'private_key'      => env('WOMPI_PRIVATE_KEY'),

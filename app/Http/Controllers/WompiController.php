@@ -765,7 +765,7 @@ class WompiController extends Controller
       return "El monto pagado ({$recibidoEnCentavos}) no coincide con el valor del plan ({$esperadoEnCentavos}).";
     }
 
-    $monedaEsperada = strtoupper((string) config('services.wompi.currency', 'COP'));
+    $monedaEsperada = strtoupper((string) app(WompiService::class)->moneda());
     $monedaRecibida = strtoupper((string) ($datos['currency'] ?? $transaccion->currency));
 
     if ($monedaRecibida !== $monedaEsperada) {
@@ -790,7 +790,7 @@ class WompiController extends Controller
    */
   private function desglosarImportesPlan(float $total): array
   {
-    $porcentaje = (float) config('services.wompi.iva_porcentaje', 0);
+    $porcentaje = app(WompiService::class)->ivaPorcentaje();
 
     if ($porcentaje <= 0) {
       return [
