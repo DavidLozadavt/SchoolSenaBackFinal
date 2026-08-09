@@ -1832,7 +1832,7 @@ Route::middleware('auth:api')->group(function () {
 
     // Historial de Facturación (Administrador VT). Solo lectura sobre datos ya
     // existentes: no crea, modifica ni elimina compras.
-    Route::middleware('permission:' . PermissionConst::GESTION_HISTORIAL_FACTURACION)->group(function () {
+    Route::middleware('permission:' . PermissionConst::GESTION_SOLICITUDES_PLANES)->group(function () {
         Route::get('facturacion/historial', [SolicitudPlanMensajeController::class, 'historial']);
         Route::get('facturacion/historial/opciones', [SolicitudPlanMensajeController::class, 'historialOpciones']);
         Route::get('facturacion/historial/export/excel', [SolicitudPlanMensajeController::class, 'historialExportExcel']);
@@ -1841,7 +1841,7 @@ Route::middleware('auth:api')->group(function () {
 
     // Configuración General de Pagos (Administrador VT). Las llaves nunca se
     // devuelven: solo se informa si están presentes.
-    Route::middleware('permission:' . PermissionConst::GESTION_CONFIGURACION_PAGOS)->group(function () {
+    Route::middleware('permission:' . PermissionConst::GESTION_SOLICITUDES_PLANES)->group(function () {
         Route::get('pagos/configuracion', [MensajesPlanController::class, 'configuracion']);
         Route::get('pagos/configuracion/diagnostico', [MensajesPlanController::class, 'diagnosticoConfiguracion']);
         Route::post('pagos/configuracion/verificar', [MensajesPlanController::class, 'verificarConfiguracion']);
@@ -1849,16 +1849,8 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // Dashboard del Administrador VT (solo lectura).
-    Route::middleware('permission:' . PermissionConst::GESTION_DASHBOARD_PLANES)->group(function () {
+    Route::middleware('permission:' . PermissionConst::GESTION_SOLICITUDES_PLANES)->group(function () {
         Route::get('mensajes/dashboard', [DashboardPlanesController::class, 'resumen']);
-    });
-
-    // CRUD completo del catálogo de planes (módulo "Planes de Mensajes").
-    Route::middleware('permission:' . PermissionConst::GESTION_PLANES_MENSAJES)->group(function () {
-        Route::get('mensajes/planes-admin', [MensajesPlanController::class, 'index']);
-        Route::post('mensajes/planes-admin', [MensajesPlanController::class, 'store']);
-        Route::put('mensajes/planes-admin/{id}', [MensajesPlanController::class, 'update']);
-        Route::delete('mensajes/planes-admin/{id}', [MensajesPlanController::class, 'destroy']);
     });
 
     // Administrador VT: aprobación de solicitudes y catálogo de planes.

@@ -47,19 +47,12 @@ class PermissionConst
     /** Estadísticas de mensajes WhatsApp del módulo Seguimiento de Aspirantes (solo lectura). */
     const GESTION_ESTADISTICAS_WHATSAPP_SENA = 'GESTION_ESTADISTICAS_WHATSAPP_SENA';
 
-    /** Administración de planes de mensajes y aprobación de solicitudes (Administrador VT). */
+    /**
+     * Módulo administrativo de Planes de Mensajes (Administrador VT).
+     * Permiso ÚNICO del módulo: cubre sus cinco pestañas —Solicitudes,
+     * Administración de Planes, Dashboard, Historial de Facturación y
+     * Configuración de Pagos—. Quien tiene el módulo, lo tiene entero.
+     */
     const GESTION_SOLICITUDES_PLANES = 'GESTION_SOLICITUDES_PLANES';
-
-    /** CRUD del catálogo de planes de mensajes (Administrador VT). */
-    const GESTION_PLANES_MENSAJES = 'GESTION_PLANES_MENSAJES';
-
-    /** Dashboard de ventas y consumo de planes (solo lectura, Administrador VT). */
-    const GESTION_DASHBOARD_PLANES = 'GESTION_DASHBOARD_PLANES';
-
-    /** Historial de Facturación: consulta de todas las compras (Administrador VT). */
-    const GESTION_HISTORIAL_FACTURACION = 'GESTION_HISTORIAL_FACTURACION';
-
-    /** Configuración global del sistema de pagos (Administrador VT). */
-    const GESTION_CONFIGURACION_PAGOS = 'GESTION_CONFIGURACION_PAGOS';
 }
 
