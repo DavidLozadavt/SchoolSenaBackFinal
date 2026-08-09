@@ -1452,6 +1452,8 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
     Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
+    Route::put('horarios/materia/{id}/interrumpir', [HorarioMateriaController::class, 'interrumpirHorario']);
+    Route::put('horarios/materia/{id}/finalizar', [HorarioMateriaController::class, 'finalizarHorario']);
     Route::delete('horarios/materia/{id}', [HorarioMateriaController::class, 'destroy']); //eliminar horario
 });
 

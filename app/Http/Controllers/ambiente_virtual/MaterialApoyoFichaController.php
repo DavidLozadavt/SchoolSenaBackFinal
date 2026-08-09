@@ -71,12 +71,25 @@ class MaterialApoyoFichaController extends Controller
     {
         try {
             Ficha::findOrFail($idFicha);
-            if (! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
+            $tabla = (new MaterialApoyoRap())->getTable();
+            if (! Schema::hasTable($tabla)) {
                 return response()->json([]);
             }
 
             $fichaIds = $this->fichaIdsMismoPrograma($idFicha);
             $query = MaterialApoyoRap::query()->whereIn('idFicha', $fichaIds);
+
+            // Filtros opcionales (misma semántica que Actividades: competencia + RAP).
+            $idCompetencia = (int) request()->query('idCompetencia', 0);
+            $idRap = (int) request()->query('idRap', 0);
+            if ($idRap > 0) {
+                $query->where('idRap', $idRap);
+            }
+            if ($idCompetencia > 0) {
+                $query->whereHas('rap', function ($q) use ($idCompetencia) {
+                    $q->where('idMateriaPadre', $idCompetencia);
+                });
+            }
 
             $rows = $query->orderByDesc('id')->get();
 
@@ -136,6 +149,7 @@ class MaterialApoyoFichaController extends Controller
                 'idRap' => 'required|integer|exists:materia,id',
                 'titulo' => 'required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
+                'tipoMaterial' => 'nullable|string|in:'.implode(',', MaterialApoyoRap::TIPOS_MATERIAL),
                 'urlAdicional' => 'nullable|string|max:500',
                 'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
                 'urlVideo' => 'nullable|string|max:500',
@@ -186,6 +200,11 @@ class MaterialApoyoFichaController extends Controller
                 'idPersona' => $idPersonaCreador,
             ];
 
+            $tabla = (new MaterialApoyoRap())->getTable();
+            if (Schema::hasColumn($tabla, 'tipoMaterial') && $request->filled('tipoMaterial')) {
+                $payloadCreate['tipoMaterial'] = (string) $request->tipoMaterial;
+            }
+
             $material = MaterialApoyoRap::create($payloadCreate);
 
             return response()->json($this->toResource($material), 201);
@@ -212,6 +231,7 @@ class MaterialApoyoFichaController extends Controller
             $validator = Validator::make($request->all(), array_merge([
                 'titulo' => 'sometimes|required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
+                'tipoMaterial' => 'nullable|string|in:'.implode(',', MaterialApoyoRap::TIPOS_MATERIAL),
                 'urlAdicional' => 'nullable|string|max:500',
                 'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
                 'urlVideo' => 'nullable|string|max:500',
@@ -232,6 +252,13 @@ class MaterialApoyoFichaController extends Controller
             }
             if ($request->has('descripcion')) {
                 $material->descripcion = $request->descripcion;
+            }
+            $tabla = (new MaterialApoyoRap())->getTable();
+            if (Schema::hasColumn($tabla, 'tipoMaterial') && $request->has('tipoMaterial')) {
+                $rawTipo = $request->input('tipoMaterial');
+                $material->tipoMaterial = ($rawTipo === null || $rawTipo === '')
+                    ? null
+                    : (string) $rawTipo;
             }
             if ($request->has('urlAdicional')) {
                 $material->urlAdicional = $request->urlAdicional ? trim((string) $request->urlAdicional) : null;
@@ -310,22 +337,26 @@ class MaterialApoyoFichaController extends Controller
     {
         $rapModel = Materia::query()->select(['id', 'nombreMateria', 'idMateriaPadre'])->find($m->idRap);
         $rap = null;
+        $idCompetencia = 0;
         if ($rapModel) {
+            $idCompetencia = (int) ($rapModel->idMateriaPadre ?? 0);
             $rap = [
                 'id' => (int) $rapModel->id,
                 'nombre' => $rapModel->nombreMateria,
-                'idCompetencia' => (int) ($rapModel->idMateriaPadre ?? 0),
+                'idCompetencia' => $idCompetencia,
             ];
         }
 
         $matModel = Materia::query()->select(['id', 'nombreMateria', 'idMateriaPadre'])->find($m->idMateria);
         $materiaNombre = $matModel?->nombreMateria;
-        $competenciaNombre = null;
-        if ($matModel && $matModel->idMateriaPadre) {
-            $competenciaNombre = Materia::query()->whereKey($matModel->idMateriaPadre)->value('nombreMateria');
-        } else {
-            $competenciaNombre = $materiaNombre;
+        if ($idCompetencia <= 0 && $matModel) {
+            $idCompetencia = ! empty($matModel->idMateriaPadre)
+                ? (int) $matModel->idMateriaPadre
+                : (int) $matModel->id;
         }
+        $competenciaNombre = $idCompetencia > 0
+            ? Materia::query()->whereKey($idCompetencia)->value('nombreMateria')
+            : $materiaNombre;
 
         $creador = null;
         if ($m->idPersona) {
@@ -341,10 +372,16 @@ class MaterialApoyoFichaController extends Controller
             }
         }
 
+        $tabla = (new MaterialApoyoRap())->getTable();
+        $tipoMaterial = Schema::hasColumn($tabla, 'tipoMaterial')
+            ? ($m->tipoMaterial ?? null)
+            : null;
+
         $out = [
             'id' => $m->id,
             'titulo' => $m->titulo,
             'descripcion' => $m->descripcion,
+            'tipoMaterial' => $tipoMaterial,
             'urlDocumento' => $m->urlDocumento,
             'urlDocumentoUrl' => $this->publicUrl($m->urlDocumento),
             'urlAdicional' => $m->urlAdicional,
@@ -354,6 +391,7 @@ class MaterialApoyoFichaController extends Controller
             'idMateria' => $m->idMateria,
             'idRap' => $m->idRap,
             'idPersona' => $m->idPersona,
+            'idCompetencia' => $idCompetencia > 0 ? $idCompetencia : null,
             'materiaNombre' => $materiaNombre,
             'competenciaNombre' => $competenciaNombre,
             'rap' => $rap,

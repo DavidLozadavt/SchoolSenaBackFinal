@@ -15,10 +15,18 @@ class MaterialApoyoRap extends Model
         'idPersona',
         'descripcion',
         'titulo',
+        'tipoMaterial',
         'urlDocumento',
         'urlAdicional',
         'urlVideo',
         'activo',
+    ];
+
+    /** Valores admitidos en tipoMaterial (nullable para registros antiguos). */
+    public const TIPOS_MATERIAL = [
+        'GUIA_APRENDIZAJE',
+        'MATERIAL_FORMACION',
+        'TUTORIAL',
     ];
 
     protected $casts = [

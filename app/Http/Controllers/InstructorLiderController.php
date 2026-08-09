@@ -11,6 +11,7 @@ use App\Jobs\SendBasicEmail;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 class InstructorLiderController extends Controller
@@ -129,19 +130,36 @@ class InstructorLiderController extends Controller
                     ]);
                 }
 
-                $email = $usuario ? $persona->email : $usuario->email;
-                if ($email) {
-                    $nombre = trim($persona->nombre1 . ' ' . $persona->apellido1);
-                    $asunto = 'Actualización de Estado de Matrícula';
-                    $mensaje = "Estimado(a) $nombre,\n\n"
-                        . "Le informamos que el estado de su matrícula ha sido actualizado a: " . $request->nuevoEstado . ".\n\n"
-                        . ($request->observacion ? "Observación: " . $request->observacion . "\n\n" : "")
-                        . "Si tiene alguna inquietud, puede comunicarse con el equipo administrativo.\n\n"
-                        . "Atentamente,\n"
-                        . "Equipo Administrativo\n"
-                        . "Sistema de Gestión Académica";
+                // Correo opcional: nunca debe tumbar el cambio de estado ni la novedad.
+                try {
+                    $email = trim((string) ($persona->email ?? ''));
+                    if ($email === '' && $usuario) {
+                        $email = trim((string) ($usuario->email ?? ''));
+                    }
 
-                    SendBasicEmail::dispatch($email, $asunto, $mensaje);
+                    if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                        $nombre = trim($persona->nombre1 . ' ' . $persona->apellido1);
+                        $asunto = 'Actualización de Estado de Matrícula';
+                        $mensaje = "Estimado(a) $nombre,\n\n"
+                            . "Le informamos que el estado de su matrícula ha sido actualizado a: " . $request->nuevoEstado . ".\n\n"
+                            . ($request->observacion ? "Observación: " . $request->observacion . "\n\n" : "")
+                            . "Si tiene alguna inquietud, puede comunicarse con el equipo administrativo.\n\n"
+                            . "Atentamente,\n"
+                            . "Equipo Administrativo\n"
+                            . "Sistema de Gestión Académica";
+
+                        SendBasicEmail::dispatch($email, $asunto, $mensaje);
+                    } else {
+                        Log::info('Cambio de estado de aprendiz sin correo válido; se omite el envío', [
+                            'idMatricula' => $matricula->id,
+                            'idPersona' => $persona->id ?? null,
+                        ]);
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Fallo al enviar correo de cambio de estado de aprendiz; el estado ya fue guardado', [
+                        'idMatricula' => $matricula->id,
+                        'error' => $e->getMessage(),
+                    ]);
                 }
             }
 

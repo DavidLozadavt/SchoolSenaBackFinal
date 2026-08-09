@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\ambiente_virtual;
 
 use App\Http\Controllers\Controller;
+use App\Mail\MailService;
 use App\Models\NotificacionSistema;
 use App\Models\TipoNotificacion;
 use App\Util\KeyUtil;
@@ -10,6 +11,8 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -296,7 +299,7 @@ class CalificacionActividadController extends Controller
     /**
      * Instructor: amplía solo `fechaFinal` del registro de calificación de un aprendiz (sin tocar otros asignados).
      * No marca corrección en `ComentarioDocente`. No usa el endpoint masivo `ampliar()`.
-     * No envía notificación al aprendiz (solo habilita plazo; distinto de solicitar corrección).
+     * Tras guardar exitosamente, notifica al aprendiz (plataforma + correo).
      */
     public function ampliarPlazoIndividual(Request $request): JsonResponse
     {
@@ -375,6 +378,13 @@ class CalificacionActividadController extends Controller
                     ]);
                 }
             });
+
+            if ($fechaCambiada) {
+                $this->notificarAmpliacionActividad(
+                    [(int) $validated['idCalificacionActividad']],
+                    $nuevaFecha
+                );
+            }
 
             return response()->json([
                 'message' => 'Plazo individual actualizado correctamente.',
@@ -604,6 +614,7 @@ class CalificacionActividadController extends Controller
     /**
      * Ampliar actividad: actualizar SOLO fechaFinal en las calificaciones de esta actividad para esta ficha.
      * No afecta otras actividades. El estado se calcula por fecha inicio, fecha límite y hora actual.
+     * Tras guardar exitosamente, notifica a todos los aprendices asignados (plataforma + correo).
      */
     public function ampliar(Request $request): JsonResponse
     {
@@ -632,7 +643,8 @@ class CalificacionActividadController extends Controller
                 return response()->json(['error' => 'No hay asignaciones para esta actividad en esta ficha'], 404);
             }
 
-            $fechaFin = \Carbon\Carbon::parse($validated['fechaFinal'])->endOfDay();
+            $tz = config('app.timezone');
+            $fechaFin = Carbon::parse((string) $validated['fechaFinal'], $tz);
             $observacion = \Illuminate\Support\Str::limit($validated['descripcionExtension'] ?? '', 250);
 
             DB::transaction(function () use ($idsCa, $fechaFin, $observacion) {
@@ -657,6 +669,8 @@ class CalificacionActividadController extends Controller
                 }
             });
 
+            $this->notificarAmpliacionActividad($idsCa->map(fn ($id) => (int) $id)->all(), $fechaFin);
+
             return response()->json([
                 'message' => 'Actividad ampliada correctamente',
                 'registrosActualizados' => $idsCa->count(),
@@ -665,6 +679,128 @@ class CalificacionActividadController extends Controller
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Notifica ampliación de plazo (in-app + correo) a los aprendices de las calificaciones dadas.
+     * Se invoca solo después de persistir la ampliación. Deduplica por usuario receptor.
+     *
+     * @param  array<int>  $idsCalificacionActividad
+     */
+    private function notificarAmpliacionActividad(array $idsCalificacionActividad, Carbon $nuevaFecha): void
+    {
+        $idsCalificacionActividad = array_values(array_unique(array_filter(array_map('intval', $idsCalificacionActividad))));
+        if ($idsCalificacionActividad === []) {
+            return;
+        }
+
+        $idRemitente = auth()->id();
+        if (! $idRemitente) {
+            return;
+        }
+
+        $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
+        if (! Schema::hasTable($tableMa) || ! Schema::hasTable('matricula') || ! Schema::hasTable('usuario')) {
+            return;
+        }
+
+        $destinatarios = DB::table('calificacionActividad as ca')
+            ->join('actividades as a', 'ca.idActividad', '=', 'a.id')
+            ->join($tableMa . ' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+            ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
+            ->join('persona as p', 'm.idPersona', '=', 'p.id')
+            ->join('usuario as u', 'u.idpersona', '=', 'm.idPersona')
+            ->leftJoin('materia as mat', 'a.idMateria', '=', 'mat.id')
+            ->leftJoin('persona as p_inst', 'ca.idPersona', '=', 'p_inst.id')
+            ->whereIn('ca.id', $idsCalificacionActividad)
+            ->select([
+                'u.id as idUsuario',
+                'p.email',
+                'p.nombre1',
+                'p.apellido1',
+                'a.tituloActividad',
+                'mat.nombreMateria',
+                DB::raw("TRIM(CONCAT(COALESCE(p_inst.nombre1,''), ' ', COALESCE(p_inst.apellido1,''))) as nombreInstructor"),
+            ])
+            ->get();
+
+        $fechaLegible = $this->formatearFechaAmpliacion($nuevaFecha);
+        $idEmpresa = KeyUtil::idCompany();
+        $yaNotificados = [];
+
+        foreach ($destinatarios as $dest) {
+            $idUsuario = (int) ($dest->idUsuario ?? 0);
+            if ($idUsuario <= 0 || isset($yaNotificados[$idUsuario])) {
+                continue;
+            }
+            $yaNotificados[$idUsuario] = true;
+
+            $titulo = trim((string) ($dest->tituloActividad ?? 'Actividad')) ?: 'Actividad';
+            $curso = trim((string) ($dest->nombreMateria ?? ''));
+            $instructor = trim((string) ($dest->nombreInstructor ?? ''));
+            $nombreEstudiante = trim(
+                trim((string) ($dest->nombre1 ?? '')) . ' ' . trim((string) ($dest->apellido1 ?? ''))
+            ) ?: 'estudiante';
+
+            $msgNotif = 'La fecha de entrega de la actividad "' . $titulo . '" ha sido ampliada. Nueva fecha de entrega: ' . $fechaLegible . '.';
+            if ($curso !== '') {
+                $msgNotif .= ' Curso: ' . $curso . '.';
+            }
+
+            try {
+                NotificacionSistema::create([
+                    'fecha' => now()->toDateString(),
+                    'hora' => now()->toTimeString(),
+                    'asunto' => 'Actividad ampliada',
+                    'mensaje' => $msgNotif,
+                    'estado_id' => 1,
+                    'idUsuarioReceptor' => $idUsuario,
+                    'idUsuarioRemitente' => (int) $idRemitente,
+                    'idTipoNotificacion' => TipoNotificacion::ID_ACTIVO,
+                    'idEmpresa' => $idEmpresa,
+                    'route' => '/ambiente-virtual/actividades',
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('No se pudo crear notificación de ampliación', [
+                    'idUsuario' => $idUsuario,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            $email = trim((string) ($dest->email ?? ''));
+            if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+
+            $mensajeCorreo = "Hola, {$nombreEstudiante}.\n\n";
+            $mensajeCorreo .= "Te informamos que la fecha de entrega de la siguiente actividad ha sido ampliada.\n\n";
+            $mensajeCorreo .= "Actividad\n{$titulo}\n\n";
+            if ($instructor !== '') {
+                $mensajeCorreo .= "Instructor\n{$instructor}\n\n";
+            }
+            $mensajeCorreo .= "Nueva fecha de entrega\n{$fechaLegible}\n\n";
+            $mensajeCorreo .= "Ahora dispones de tiempo adicional para realizar la entrega.\n\n";
+            $mensajeCorreo .= "Ingresa a la plataforma para revisar la actividad.";
+
+            try {
+                Mail::to($email)->send(new MailService('Tu actividad ha sido ampliada', $mensajeCorreo));
+            } catch (\Throwable $e) {
+                Log::warning('No se pudo enviar correo de ampliación', [
+                    'email' => $email,
+                    'idUsuario' => $idUsuario,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function formatearFechaAmpliacion(Carbon $fecha): string
+    {
+        try {
+            return $fecha->copy()->locale('es')->isoFormat('D [de] MMMM [de] YYYY - h:mm a');
+        } catch (\Throwable $e) {
+            return $fecha->format('d/m/Y H:i');
         }
     }
 }
