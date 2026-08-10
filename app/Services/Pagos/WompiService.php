@@ -71,12 +71,90 @@ class WompiService
             : (float) config('services.wompi.iva_porcentaje', 0);
     }
 
+
     /**
-     * URL a la que Wompi devuelve al usuario tras pagar.
+     * URL del webhook, detectada automáticamente según el backend donde corra.
+     *
+     * Prioridad:
+     *  1. El valor guardado en la configuración, si el administrador lo fijó a mano.
+     *  2. El host de la petición en curso: así cada entorno (local, pre, producción)
+     *     muestra su propia URL sin configurar nada.
+     *  3. APP_URL, para contextos sin petición HTTP (comandos de consola).
+     */
+    public function urlWebhook(): string
+    {
+        $manual = $this->configuracion()->urlWebhook;
+
+        if (!empty($manual)) {
+            return $manual;
+        }
+
+        $request = request();
+
+        if ($request && $request->getHttpHost()) {
+            return $request->getSchemeAndHttpHost() . '/api/webhooks/wompi';
+        }
+
+        return url('/api/webhooks/wompi');
+    }
+
+    /**
+     * URL de retorno del checkout, detectada igual que el webhook cuando no se
+     * ha configurado a mano.
      */
     public function urlRetorno(): ?string
     {
-        return $this->configuracion()->urlRetorno ?: config('services.wompi.redirect_url');
+        $manual = $this->configuracion()->urlRetorno;
+
+        if (!empty($manual)) {
+            return $manual;
+        }
+
+        // Detección automática: la URL de retorno apunta al FRONTEND, así que se
+        // deduce del origen de la petición (el navegador que abre el checkout).
+        // Así cada frontend —local, preproducción o producción— vuelve a sí mismo
+        // sin configurar nada, sea cual sea el backend al que apunte su
+        // VITE_APP_API_URL.
+        $origen = $this->origenFrontend();
+
+        if ($origen) {
+            return $origen . '/pago-plan/resultado';
+        }
+
+        return config('services.wompi.redirect_url');
+    }
+
+    /**
+     * Esquema + host del frontend que originó la petición (cabecera Origin y,
+     * si falta, Referer). Devuelve null en consola o si no viene ninguna.
+     */
+    private function origenFrontend(): ?string
+    {
+        $request = request();
+
+        if (!$request) {
+            return null;
+        }
+
+        $origin = $request->headers->get('Origin');
+
+        if (!empty($origin)) {
+            return rtrim($origin, '/');
+        }
+
+        $referer = $request->headers->get('Referer');
+
+        if (!empty($referer)) {
+            $partes = parse_url($referer);
+
+            if (!empty($partes['scheme']) && !empty($partes['host'])) {
+                $puerto = isset($partes['port']) ? ':' . $partes['port'] : '';
+
+                return $partes['scheme'] . '://' . $partes['host'] . $puerto;
+            }
+        }
+
+        return null;
     }
 
     public function checkoutUrl(): string
@@ -344,13 +422,14 @@ class WompiService
             'sistemaActivo'         => $configuracion->activo,
             'horasMaxAprobacion'    => $configuracion->horasMaxAprobacion,
             'urlRetorno'            => $this->urlRetorno(),
-            'urlWebhook'            => $configuracion->urlWebhook ?: url('/api/webhooks/wompi'),
+            'urlWebhook'            => $this->urlWebhook(),
             'origenLlaves'          => $llaves['origen'],
             'variables'             => $variables,
             'variablesFaltantes'    => $faltantes,
             'configuracionCompleta' => empty($faltantes),
             'modoCoherente'         => $modoCoherente,
             'webhookConfigurado'    => !empty($llaves['eventsSecret']),
+            'urlWebhookAutomatica'  => empty($configuracion->urlWebhook),
             'baseApi'               => $this->baseUrl(),
         ];
     }
