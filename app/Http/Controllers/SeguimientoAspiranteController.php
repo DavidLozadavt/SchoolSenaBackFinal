@@ -26,6 +26,26 @@ class SeguimientoAspiranteController extends Controller
     /**
      * Import applicants from an Excel (.xlsx) file.
      */
+    /**
+     * ¿El usuario actual puede ver los aspirantes de TODOS los usuarios?
+     *
+     * Solo el Administrador VT. El resto ve únicamente lo que importó. Los
+     * aspirantes anteriores a esta funcionalidad no tienen dueño y quedan
+     * visibles solo para él.
+     */
+    private function puedeVerTodos(): bool
+    {
+        return SeguimientoAspirante::puedeVerTodos();
+    }
+
+    /**
+     * Aplica el filtro de propiedad a cualquier consulta de aspirantes.
+     */
+    private function soloMisAspirantes($query)
+    {
+        return $query->visibles();
+    }
+
     public function importar(Request $request)
     {
         try {
@@ -141,6 +161,8 @@ class SeguimientoAspiranteController extends Controller
 
                 try {
                     SeguimientoAspirante::create([
+                        // Dueño del registro: cada usuario ve solo lo que importó.
+                        'importadoPorUserId' => auth()->id(),
                         'tokenPublico' => (string) \Illuminate\Support\Str::uuid(),
                         'nombre' => $nombre,
                         'apellido' => $apellido,
@@ -186,7 +208,7 @@ class SeguimientoAspiranteController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = SeguimientoAspirante::query();
+            $query = $this->soloMisAspirantes(SeguimientoAspirante::query());
 
             // Filter by Programa
             if ($request->filled('programa')) {
@@ -251,7 +273,7 @@ class SeguimientoAspiranteController extends Controller
     {
         $formato = $request->get('formato', 'excel'); // 'pdf' | 'excel'
 
-        $query = SeguimientoAspirante::query();
+        $query = $this->soloMisAspirantes(SeguimientoAspirante::query());
 
         if ($request->filled('programa')) {
             $query->where('programa', $request->programa);
@@ -384,7 +406,7 @@ class SeguimientoAspiranteController extends Controller
     public function getProgramas()
     {
         try {
-            $programas = SeguimientoAspirante::select('programa')
+            $programas = $this->soloMisAspirantes(SeguimientoAspirante::query())->select('programa')
                 ->distinct()
                 ->whereNotNull('programa')
                 ->where('programa', '!=', '')
@@ -403,7 +425,7 @@ class SeguimientoAspiranteController extends Controller
     public function getCentros()
     {
         try {
-            $centros = SeguimientoAspirante::select('centro_formacion')
+            $centros = $this->soloMisAspirantes(SeguimientoAspirante::query())->select('centro_formacion')
                 ->distinct()
                 ->whereNotNull('centro_formacion')
                 ->where('centro_formacion', '!=', '')
@@ -422,7 +444,7 @@ class SeguimientoAspiranteController extends Controller
     public function getFichas()
     {
         try {
-            $fichas = SeguimientoAspirante::select('ficha')
+            $fichas = $this->soloMisAspirantes(SeguimientoAspirante::query())->select('ficha')
                 ->distinct()
                 ->whereNotNull('ficha')
                 ->where('ficha', '!=', '')
@@ -446,9 +468,20 @@ class SeguimientoAspiranteController extends Controller
                 return response()->json(['error' => 'Debe proporcionar una lista de identificadores válida.'], 400);
             }
 
-            SeguimientoAspirante::whereIn('id', $ids)->delete();
+            // Solo se borran los aspirantes del propio usuario: los ids ajenos
+            // se ignoran aunque lleguen en la petición.
+            $eliminados = $this->soloMisAspirantes(SeguimientoAspirante::whereIn('id', $ids))->delete();
 
-            return response()->json(['message' => 'Registros seleccionados eliminados correctamente.'], 200);
+            if ($eliminados === 0) {
+                return response()->json([
+                    'error' => 'No se eliminó ningún registro: verifique que los seleccionados le pertenezcan.',
+                ], 422);
+            }
+
+            return response()->json([
+                'message'    => "Registros seleccionados eliminados correctamente ({$eliminados}).",
+                'eliminados' => $eliminados,
+            ], 200);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Error al eliminar los registros: ' . $e->getMessage()], 500);
         }
@@ -460,8 +493,14 @@ class SeguimientoAspiranteController extends Controller
     public function eliminarTodos()
     {
         try {
-            SeguimientoAspirante::truncate();
-            return response()->json(['message' => 'Toda la información importada ha sido eliminada.'], 200);
+            // NUNCA truncate: borraría los aspirantes de todos los usuarios.
+            // Cada usuario elimina solo lo que importó; el Administrador VT, todo.
+            $eliminados = $this->soloMisAspirantes(SeguimientoAspirante::query())->delete();
+
+            return response()->json([
+                'message'    => "Se eliminaron {$eliminados} aspirantes importados por usted.",
+                'eliminados' => $eliminados,
+            ], 200);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Error al eliminar todos los registros: ' . $e->getMessage()], 500);
         }
@@ -497,7 +536,15 @@ class SeguimientoAspiranteController extends Controller
                 ], 422);
             }
 
-            $aspirantes = SeguimientoAspirante::whereIn('id', $ids)->get();
+            // Solo se envía a aspirantes del propio usuario: si llegan ids ajenos
+            // simplemente no se incluyen en la campaña.
+            $aspirantes = $this->soloMisAspirantes(SeguimientoAspirante::whereIn('id', $ids))->get();
+
+            if ($aspirantes->isEmpty()) {
+                return response()->json([
+                    'error' => 'No hay aspirantes válidos para enviar: verifique que los seleccionados le pertenezcan.',
+                ], 422);
+            }
 
             // --- Planes de mensajes (aditivo) -----------------------------
             // Único punto de modificación del flujo existente, exigido por el

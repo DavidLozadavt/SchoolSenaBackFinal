@@ -138,10 +138,23 @@ class MensajesPlanController extends Controller
             $modoAnterior  = $configuracion->modo;
 
             // Nunca sobrescribir una llave existente con un valor vacío.
+            $llavesRecibidas = false;
+
             foreach (['publicKey', 'privateKey', 'integritySecret', 'eventsSecret'] as $llave) {
                 if (!array_key_exists($llave, $data) || trim((string) $data[$llave]) === '') {
                     unset($data[$llave]);
+                    continue;
                 }
+
+                $llavesRecibidas = true;
+            }
+
+            // Si se cargan llaves desde el sistema es porque se quieren usar, así
+            // que `usarLlavesPropias` se activa solo. Sin esto las llaves quedaban
+            // guardadas pero el sistema seguía leyendo del .env, y el diagnóstico
+            // las mostraba como «no configurada».
+            if ($llavesRecibidas) {
+                $data['usarLlavesPropias'] = true;
             }
 
             $data['actualizadoPor'] = auth()->id();
