@@ -389,11 +389,11 @@ class SolicitudPlanMensajeController extends Controller
     }
 
     // -------------------------------------------------------------------------
-    // HISTORIAL DE FACTURACIÓN (Administrador VT)
+    // HISTORIAL DE FACTURACIÃ“N (Administrador VT)
     //
-    // Fusionado aquí desde el antiguo HistorialFacturacionController y su
+    // Fusionado aquÃ­ desde el antiguo HistorialFacturacionController y su
     // servicio: mismo dominio (solicitudes de planes). SOLO LECTURA por JOINs
-    // sobre tablas existentes; no crea tablas ni duplica información.
+    // sobre tablas existentes; no crea tablas ni duplica informaciÃ³n.
     // -------------------------------------------------------------------------
 
     public function historial(Request $request)
