@@ -34,7 +34,9 @@ class SolicitudInscripcionController extends Controller
 
     public function index(Request $request)
     {
-        $query = SeguimientoAspirante::whereIn('estadoDocumental', self::ESTADOS_VISIBLES);
+        // Cada usuario ve solo las solicitudes de los aspirantes que importó.
+        $query = SeguimientoAspirante::visibles()
+            ->whereIn('estadoDocumental', self::ESTADOS_VISIBLES);
 
         if ($request->filled('estadoDocumental')) {
             $query->where('estadoDocumental', $request->input('estadoDocumental'));
@@ -56,7 +58,7 @@ class SolicitudInscripcionController extends Controller
 
     public function show(int $id)
     {
-        $aspirante = SeguimientoAspirante::findOrFail($id);
+        $aspirante = SeguimientoAspirante::visibles()->findOrFail($id);
 
         $config = TelecomConfig::activa();
         $respuesta = null;
@@ -81,7 +83,7 @@ class SolicitudInscripcionController extends Controller
 
     public function aprobar(int $id)
     {
-        $aspirante = SeguimientoAspirante::findOrFail($id);
+        $aspirante = SeguimientoAspirante::visibles()->findOrFail($id);
         $usuario = Auth::user() ?: Auth::guard('api')->user();
 
         DB::transaction(function () use ($aspirante, $usuario) {
@@ -106,7 +108,7 @@ class SolicitudInscripcionController extends Controller
     {
         $request->validate(['motivo' => 'required|string|min:5']);
 
-        $aspirante = SeguimientoAspirante::findOrFail($id);
+        $aspirante = SeguimientoAspirante::visibles()->findOrFail($id);
         $usuario = Auth::user() ?: Auth::guard('api')->user();
         $motivo = $request->input('motivo');
 
