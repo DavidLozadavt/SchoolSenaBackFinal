@@ -35,11 +35,7 @@ class SeguimientoAspiranteController extends Controller
      */
     private function puedeVerTodos(): bool
     {
-        try {
-            return (bool) auth()->user()?->hasRole('ADMINISTRADOR VT');
-        } catch (\Throwable $e) {
-            return false;
-        }
+        return SeguimientoAspirante::puedeVerTodos();
     }
 
     /**
@@ -47,7 +43,7 @@ class SeguimientoAspiranteController extends Controller
      */
     private function soloMisAspirantes($query)
     {
-        return $query->delUsuario(auth()->id(), $this->puedeVerTodos());
+        return $query->visibles();
     }
 
     public function importar(Request $request)
