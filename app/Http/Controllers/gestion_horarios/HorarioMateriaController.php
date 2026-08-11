@@ -1914,8 +1914,9 @@ class HorarioMateriaController extends Controller
                     ? Carbon::parse((string) $horario->fechaFinal, $tz)->toDateString()
                     : null;
 
+                // Conservar el estado histórico del horario (PENDIENTE, ASIGNADO, INTERRUMPIDO, etc.).
+                // Finalizar el RAP no debe sobrescribir estados de clases/horarios anteriores.
                 $horario->fechaFinal = $fechaFinalNueva;
-                $horario->estado = EstadoHorarioMateria::FINALIZADO;
                 if ($observacion !== '') {
                     $prev = trim((string) ($horario->observacion ?? ''));
                     $horario->observacion = trim($prev . "\n" . '[FINALIZACIÓN] ' . $observacion);
@@ -2108,8 +2109,10 @@ class HorarioMateriaController extends Controller
                     ? Carbon::parse((string) $horario->fechaFinal, $tz)->toDateString()
                     : null;
 
+                // La fecha seleccionada es el límite inclusivo de la programación.
+                // Conservar el estado histórico del horario; la interrupción se registra
+                // en el historial y solo deja fuera las sesiones posteriores al límite.
                 $horario->fechaFinal = $fechaFinalNueva;
-                $horario->estado = EstadoHorarioMateria::INTERRUMPIDO;
                 if ($observacion !== '') {
                     $prev = trim((string) ($horario->observacion ?? ''));
                     $horario->observacion = trim($prev . "\n" . '[INTERRUPCIÓN] ' . $observacion);
