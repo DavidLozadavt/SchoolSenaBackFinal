@@ -2208,8 +2208,13 @@ class PagoController extends Controller
 
         $respuestaObj = null;
 
+        // 0. Estrategia directa: usar idFormularioRespuesta almacenado en la factura (más confiable)
+        if ($factura && !empty($factura->idFormularioRespuesta)) {
+            $respuestaObj = \App\Models\FormularioRespuesta::find($factura->idFormularioRespuesta);
+        }
+
         // 1. Intentar resolver usando FormResponseID guardado en la matricula
-        if ($factura) {
+        if (!$respuestaObj && $factura) {
             $matricula = $this->resolverMatriculaEstudiante($factura->tercero, $idCompany, $factura);
             if ($matricula && $matricula->observacion && strpos($matricula->observacion, 'FormResponseID:') === 0) {
                 $respId = (int) str_replace('FormResponseID:', '', $matricula->observacion);
@@ -2221,36 +2226,45 @@ class PagoController extends Controller
             }
         }
 
-        // 2. Fallback: Buscar por documento (si no es '0' y no está vacío)
-        if (!$respuestaObj && !empty($documento) && $documento !== '0') {
-            $respuestas = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)->get();
-            foreach ($respuestas as $resp) {
-                $listaResp = $resp->respuestas;
-                if (is_array($listaResp)) {
-                    foreach ($listaResp as $r) {
-                        $valorResp = $r['valor'] ?? '';
-                        if (is_array($valorResp)) {
-                            $valorResp = implode(', ', $valorResp);
+        // 2. Fallback: buscar por documento o email del tercero en las respuestas
+        if (!$respuestaObj) {
+            $docBuscar = trim((string) ($documento !== '0' ? $documento : ''));
+            $emailBuscar = mb_strtolower(trim((string) ($factura?->tercero?->email ?? '')));
+            if ($docBuscar !== '' || $emailBuscar !== '') {
+                $todasRespuestas = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)->get();
+                foreach ($todasRespuestas as $resp) {
+                    $datos = $this->extraerDatosAspiranteDesdeRespuesta($resp);
+                    $docResp = trim((string) ($datos['documento'] ?? ''));
+                    $emailResp = mb_strtolower(trim((string) ($datos['email'] ?? '')));
+                    if (($docBuscar !== '' && $docResp === $docBuscar) ||
+                        ($emailBuscar !== '' && $emailResp === $emailBuscar)) {
+                        $respuestaObj = $resp;
+                        // Retroactively store the direct link for future lookups
+                        if ($factura && !$factura->idFormularioRespuesta) {
+                            $factura->idFormularioRespuesta = $resp->id;
+                            $factura->save();
                         }
-                        if ($documento !== '' && (string) $valorResp === (string) $documento) {
-                            $respuestaObj = $resp;
-                            break 2;
-                        }
+                        break;
                     }
                 }
             }
         }
 
-        // 3. Fallback: Para registros de prueba existentes, buscar por coincidencia de fecha/hora de creación (margen de 5 segundos)
+        // 3. Fallback por timestamp (margen de 60 segundos)
         if (!$respuestaObj && $factura) {
             $createdAt = $factura->created_at;
             if ($createdAt) {
                 $respuestaObj = \App\Models\FormularioRespuesta::where('idFormulario', $company->idFormularioInscripcion)
                     ->whereBetween('created_at', [
-                        $createdAt->copy()->subSeconds(5),
-                        $createdAt->copy()->addSeconds(5)
+                        $createdAt->copy()->subSeconds(60),
+                        $createdAt->copy()->addSeconds(60)
                     ])
                     ->first();
+                // Retroactively store the direct link for future lookups
+                if ($respuestaObj && $factura && !$factura->idFormularioRespuesta) {
+                    $factura->idFormularioRespuesta = $respuestaObj->id;
+                    $factura->save();
+                }
             }
         }
 
@@ -2266,11 +2280,28 @@ class PagoController extends Controller
 
         $respuestaObj = $this->resolverRespuestaFormularioObj($documento, $idCompany, $factura);
 
-        // 4. Formatear la respuesta si se encontró
+        // 4. Formatear la respuesta mostrando TODAS las preguntas del formulario
+        $formulario = \App\Models\Formulario::with('preguntas')->find($company->idFormularioInscripcion);
+        $todasPreguntas = $formulario?->preguntas ?? collect();
+
         if ($respuestaObj) {
-            $listaResp = $respuestaObj->respuestas;
+            // Build a map of answered questions: idPregunta => valor
+            $listaResp = is_array($respuestaObj->respuestas) ? $respuestaObj->respuestas : [];
+            $respuestasMap = [];
+            foreach ($listaResp as $rInner) {
+                $respuestasMap[(int)($rInner['idPregunta'] ?? 0)] = $rInner['valor'] ?? '';
+            }
+
             $result = [];
-            if (is_array($listaResp)) {
+            if ($todasPreguntas->isNotEmpty()) {
+                foreach ($todasPreguntas as $pregunta) {
+                    $result[] = [
+                        'pregunta' => $pregunta->titulo,
+                        'respuesta' => $respuestasMap[$pregunta->id] ?? ''
+                    ];
+                }
+            } else {
+                // Fallback: show only answered questions if form has no questions loaded
                 foreach ($listaResp as $rInner) {
                     $preg = \App\Models\FormularioPregunta::find($rInner['idPregunta'] ?? 0);
                     $result[] = [
@@ -2279,8 +2310,9 @@ class PagoController extends Controller
                     ];
                 }
             }
+
             return [
-                'formulario' => \App\Models\Formulario::where('id', $company->idFormularioInscripcion)->value('titulo'),
+                'formulario' => $formulario?->titulo ?? '',
                 'respuestas' => $result
             ];
         }
@@ -2300,22 +2332,36 @@ class PagoController extends Controller
             })
             ->orderBy('id', 'desc');
 
+        $tieneColumnaFormResp = Schema::hasColumn('factura', 'idFormularioRespuesta');
+
         if ($tieneColumnaIdConfig) {
-            $query->whereHas('detalles', function ($q) {
-                $q->whereNotNull('idConfiguracionPago');
+            $query->where(function ($q) use ($tieneColumnaFormResp) {
+                $q->whereHas('detalles', function ($inner) {
+                    $inner->whereNotNull('idConfiguracionPago');
+                });
+                if ($tieneColumnaFormResp) {
+                    $q->orWhereNotNull('idFormularioRespuesta');
+                }
             });
         } else {
             $idsConfig = ConfiguracionPago::where('idCompany', $idCompany)->pluck('id');
-            if ($idsConfig->isEmpty()) {
-                return $query->whereRaw('1 = 0');
-            }
             $titulos = ConfiguracionPago::whereIn('id', $idsConfig)->pluck('titulo')->filter();
-            $query->whereHas('detalles', function ($q) use ($titulos) {
-                $q->where(function ($inner) use ($titulos) {
-                    foreach ($titulos as $titulo) {
-                        $inner->orWhere('detalle', $titulo);
-                    }
-                });
+            $query->where(function ($q) use ($titulos, $tieneColumnaFormResp) {
+                if ($titulos->isNotEmpty()) {
+                    $q->whereHas('detalles', function ($inner) use ($titulos) {
+                        $inner->where(function ($or) use ($titulos) {
+                            foreach ($titulos as $titulo) {
+                                $or->orWhere('detalle', $titulo);
+                            }
+                        });
+                    });
+                }
+                if ($tieneColumnaFormResp) {
+                    $q->orWhereNotNull('idFormularioRespuesta');
+                }
+                if ($titulos->isEmpty() && !$tieneColumnaFormResp) {
+                    $q->whereRaw('1 = 0');
+                }
             });
         }
 
@@ -2392,6 +2438,7 @@ class PagoController extends Controller
             'fechaSolicitud' => $factura->fecha
                 ? Carbon::parse($factura->fecha)->toDateString()
                 : ($factura->created_at?->toDateString() ?? Carbon::today()->toDateString()),
+            'creadoEn' => $factura->created_at?->toIso8601String() ?? now()->toIso8601String(),
             'estado' => $estadoSolicitud,
             'validacionCompletada' => $validacionAprobada || $estadoSolicitud === 'APROBADA',
             'estadoFactura' => $estadoFactura,
@@ -2735,5 +2782,33 @@ class PagoController extends Controller
     private function solicitudValidacionAprobadaDesdePago(Pago $pago): bool
     {
         return str_contains((string) ($pago->observacion ?? ''), self::MARCA_VALIDACION_INSCRIPCION);
+    }
+
+    public function deleteSolicitudInscripcion(int $idFactura)
+    {
+        $idCompany = (int) KeyUtil::idCompany();
+        $factura = $this->queryFacturasAcademicas($idCompany)
+            ->where('id', $idFactura)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Solicitud no encontrada.'], 404);
+        }
+
+        $proceso = $this->inferirProcesoFacturaAcademica($factura);
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
+        $estado = strtoupper((string) ($facturaPayload['estado'] ?? 'PENDIENTE'));
+
+        if (in_array($estado, ['PAGADO', 'PAGADA', 'APROBADO'], true) || $this->solicitudValidacionAprobada($factura)) {
+            return response()->json([
+                'error' => 'No se puede eliminar una solicitud ya aprobada o con pago registrado.',
+            ], 422);
+        }
+
+        $factura->transacciones()->detach();
+        $factura->detalles()->delete();
+        $factura->delete();
+
+        return response()->json(['message' => 'Solicitud eliminada correctamente.']);
     }
 }

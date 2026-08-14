@@ -183,11 +183,18 @@ Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
 // Integración con ERP
 Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
+Route::post('integration/sync-password', [ForgotPasswordController::class, 'syncPassword']);
 
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
 Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
+
+// Inscripción pública a eventos (sin auth de School, para usuarios de NexiService)
+Route::post('eventos-multimedia/{id}/register-public', [App\Http\Controllers\EventoController::class, 'registerPublic']);
+Route::get('eventos-multimedia/{id}/check-registration-public', [App\Http\Controllers\EventoController::class, 'checkRegistrationPublic']);
+Route::get('eventos-multimedia/{id}/inscripciones', [App\Http\Controllers\EventoController::class, 'inscripciones']);
+Route::delete('eventos-multimedia/{id}/inscripciones/{respuestaId}', [App\Http\Controllers\EventoController::class, 'eliminarInscripcion']);
 
 Route::group([
     'middleware' => 'api',
@@ -778,6 +785,7 @@ Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesIns
 Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
 Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
 Route::post('solicitudes_inscripcion/{idFactura}/notificar_recepcion', [PagoController::class, 'notificarRecepcionSolicitudInscripcion']);
+Route::delete('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'deleteSolicitudInscripcion']);
 // Ruta pública para el portal del aspirante (sin autenticación requerida)
 Route::get('portal-aspirante/{token}', [PagoController::class, 'getPortalAspirante']);
 Route::post('portal-aspirante/{token}/comprobante', [PagoController::class, 'subirComprobantePortalAspirante']);
@@ -1650,6 +1658,8 @@ Route::middleware('auth:api')->group(function () {
     Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update']);
     Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy']);
     Route::get('formularios/{id}/respuestas', [App\Http\Controllers\FormularioController::class, 'respuestas']);
+    Route::delete('formularios/{id}/respuestas/{respuestaId}', [App\Http\Controllers\FormularioController::class, 'destroyRespuesta']);
+
 });
 
 // Rutas para Actas
