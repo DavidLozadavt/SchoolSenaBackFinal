@@ -289,14 +289,32 @@ class UserController extends Controller
 
     public function asignation(Request $request)
     {
-
         DB::table('model_has_roles')
             ->where('model_id', $request->idActivation)
             ->delete();
         $user = ActivationCompanyUser::find($request->input('idActivation'));
-        $user->assignRole($request->input('roles', []));
+
+        if (!$user) {
+            return response()->json(['error' => 'Activación no encontrada'], 404);
+        }
+
+        $rolesInput = $request->input('roles', []);
+        $rolesToAssign = [];
+        foreach ($rolesInput as $r) {
+            if (is_string($r) && !is_numeric($r)) {
+                $roleObj = \Spatie\Permission\Models\Role::firstOrCreate([
+                    'name' => $r,
+                    'guard_name' => 'web'
+                ]);
+                $rolesToAssign[] = $roleObj->id;
+            } else {
+                $rolesToAssign[] = (int) $r;
+            }
+        }
+
+        $user->assignRole($rolesToAssign);
         $user->load('roles');
-        return $user;
+        return response()->json($user);
     }
 
 

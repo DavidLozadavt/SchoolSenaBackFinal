@@ -165,6 +165,8 @@ use App\Http\Controllers\AnexoActaController;
 use App\Http\Controllers\gestion_solicitudes_instructor\SolicitudMateriaController;
 use App\Http\Controllers\InstructorLiderController;
 use App\Http\Controllers\ReunionesTemporalesController;
+use App\Http\Controllers\BoletinController;
+use App\Http\Controllers\CarpetasViajerasController;
 
 /*
 |--------------------------------------------------------------------------
@@ -226,7 +228,6 @@ Route::middleware('auth:api')->group(function () {
     // Endpoint to create a permission (used by frontend)
     Route::post('permisos/crear', [PermissionHierarchyController::class, 'store']);
     Route::match(['put', 'post'], 'permisos/{id}', [PermissionHierarchyController::class, 'update'])->whereNumber('id');
-
 });
 
 // jerarquía de permisos
@@ -1451,7 +1452,6 @@ Route::middleware('auth:api')->group(function () {
     Route::put('red/{id}', [RedController::class, 'update']);
     Route::delete('red/{id}', [RedController::class, 'destroy']);
     Route::get('materias-by-contrato', [HorarioMateriaController::class, 'getMateriasByContrato']);
-
 });
 
 Route::get('estadisticas-asistencia', [AsistenciaController::class, 'getEstadisticasAsistencia']);
@@ -1480,11 +1480,11 @@ Route::post('sanciones', [SancionesController::class, 'store']);
 // asistencia e inasistencia
 Route::apiResource('asistencia', AsistenciaController::class);
 Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
-Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica',[AsistenciaController::class, 'getAllAssistance']);
-Route::put('update_assistance',[AsistenciaController::class, 'updateAssistance']);
-Route::post('update_assistance',[AsistenciaController::class, 'updateAssistance']);
-Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
-Route::get('justificaciones-inasistencia/{id}/soporte',[AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
+Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
+Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);
+Route::post('update_assistance', [AsistenciaController::class, 'updateAssistance']);
+Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
+Route::get('justificaciones-inasistencia/{id}/soporte', [AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
 Route::post('solicitar-justificacion-asistencia', [AsistenciaController::class, 'solicitarJustificacionAsistencia']);
 Route::post('solicitar-justificacion-asistencia-rango', [AsistenciaController::class, 'solicitarJustificacionAsistenciaRango']);
 Route::get('justificaciones-pendientes-instructor', [AsistenciaController::class, 'justificacionesPendientesInstructor']);
@@ -1630,14 +1630,14 @@ Route::middleware('auth:api')->group(function () {
     // Deezer
     Route::get('deezer/search', [MultimediaHistoriasController::class, 'searchTrack']);
     Route::get('deezer/search/{id}', [MultimediaHistoriasController::class, 'getTrack']);
-    
+
     // --- EVENTOS ---
     Route::get('eventos-multimedia', [EventoController::class, 'index']);
     Route::get('eventos-multimedia/{id}', [EventoController::class, 'show']);
     Route::post('eventos-multimedia', [EventoController::class, 'store']);
     Route::post('eventos-multimedia/{id}', [EventoController::class, 'update']);
     Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy']);
-    
+
     // Rutas de inscripción
     Route::get('eventos-multimedia/{id}/check-registration', [EventoController::class, 'checkRegistration']);
     Route::post('eventos-multimedia/{id}/register', [EventoController::class, 'register']);
@@ -1650,7 +1650,6 @@ Route::middleware('auth:api')->group(function () {
     Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update']);
     Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy']);
     Route::get('formularios/{id}/respuestas', [App\Http\Controllers\FormularioController::class, 'respuestas']);
-
 });
 
 // Rutas para Actas
@@ -1666,7 +1665,6 @@ Route::middleware('auth:api')->group(function () {
     Route::delete('actas/anexos/{id}', [AnexoActaController::class, 'destroy']);
     Route::post('actas/{id}/documento', [ActaController::class, 'uploadDocumento']);
     Route::apiResource('actas', ActaController::class);
-
 });
 
 Route::middleware('auth:api')->group(function () {
@@ -1698,7 +1696,7 @@ Route::prefix('invitado')->group(function () {
     Route::get('/stats', [GestionEventoHermanoController::class, 'stats']);
     Route::get('/export-csv', [GestionEventoHermanoController::class, 'exportCsv']);
     Route::get('/historial-scan', [GestionEventoHermanoController::class, 'historialScan']);
-    Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']); 
+    Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']);
     Route::get('/', [GestionEventoHermanoController::class, 'index']);
     Route::get('/token/{token}', [GestionEventoHermanoController::class, 'getByToken']);
     Route::get('/token/{token}/items', [GestionEventoHermanoController::class, 'getItemsByToken']);
@@ -1708,7 +1706,7 @@ Route::prefix('invitado')->group(function () {
     Route::post('/generar-qrs', [GestionEventoHermanoController::class, 'generarQrs']);
     Route::post('/{id}/qr', [GestionEventoHermanoController::class, 'guardarQrImagen']);
     Route::post('/token/{token}/item/{itemId}/toggle', [GestionEventoHermanoController::class, 'toggleItem']);
-    Route::get('/{id}', [GestionEventoHermanoController::class, 'show']); 
+    Route::get('/{id}', [GestionEventoHermanoController::class, 'show']);
     Route::put('/{id}', [GestionEventoHermanoController::class, 'update']);
     Route::delete('/{id}', [GestionEventoHermanoController::class, 'destroy']);
 });
@@ -1718,7 +1716,7 @@ Route::prefix('invitado')->group(function () {
 Route::middleware('auth:api')->group(function () {
     Route::get('aperturarprograma/disponibles', [AperturarProgramaController::class, 'aperturasDisponibles']);
     Route::get('aperturaPrograma/grados', [AperturarProgramaController::class, 'indexTipoGrado']);
-    
+
     Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
     Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
     Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
@@ -1728,4 +1726,34 @@ Route::middleware('auth:api')->group(function () {
 Route::middleware('auth:api')->group(function () {
     Route::apiResource('reuniones_temporales', ReunionesTemporalesController::class);
     Route::post('reuniones_temporales/{reunion}/extend', [ReunionesTemporalesController::class, 'extend']);
+});
+
+// Rutas para boletines (coordinador/administrativo)
+Route::middleware('auth:api')->group(function () {
+    Route::group(['prefix' => 'coordinador/boletines'], function () {
+        Route::get('/', [BoletinController::class, 'getBoletinesGenerales']);
+        Route::get('/exportar', [BoletinController::class, 'exportarBoletinesGenerales']);
+        Route::get('/{id}', [BoletinController::class, 'getBoletinDetalle']);
+        Route::get('/{id}/pdf', [BoletinController::class, 'descargarPdfBoletin']);
+        Route::post('/ficha/{idFicha}/enviar', [BoletinController::class, 'enviarBoletinesFicha']);
+    });
+});
+
+// ─── Carpetas Viajeras (CIADET) ───────────────────────────────────────────────
+Route::middleware('auth:api')->group(function () {
+    // CRUD carpetas
+    Route::get('carpetas-viajeras', [CarpetasViajerasController::class, 'index']);
+    Route::post('carpetas-viajeras', [CarpetasViajerasController::class, 'store']);
+    Route::get('carpetas-viajeras/{id}', [CarpetasViajerasController::class, 'show']);
+    Route::put('carpetas-viajeras/{id}', [CarpetasViajerasController::class, 'update']);
+    Route::patch('carpetas-viajeras/{id}', [CarpetasViajerasController::class, 'update']);
+    Route::delete('carpetas-viajeras/{id}', [CarpetasViajerasController::class, 'destroy']);
+
+    // routes/api.php, junto a las demás rutas de carpetas-viajeras
+    Route::get('carpetas-viajeras/{id}/archivos/{archivoId}/ver', [CarpetasViajerasController::class, 'verArchivo']);
+
+    // Sub-recurso: archivos de una carpeta
+    Route::post('carpetas-viajeras/{id}/archivos', [CarpetasViajerasController::class, 'storeArchivo']);
+    Route::put('carpetas-viajeras/{id}/archivos/{archivoId}', [CarpetasViajerasController::class, 'updateArchivo']);
+    Route::delete('carpetas-viajeras/{id}/archivos/{archivoId}', [CarpetasViajerasController::class, 'destroyArchivo']);
 });
