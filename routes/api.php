@@ -1320,6 +1320,7 @@ Route::middleware('auth:api')->group(function () {
     Route::get('actividades/{id}/materiales-apoyo', [ActividadController::class, 'materialesApoyo']);
     Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
     Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
+    Route::post('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}/mover-biblioteca', [ActividadController::class, 'moverMaterialApoyoBiblioteca']);
     Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
     Route::get('ambiente-virtual/instructor/mis-actividades', [ActividadController::class, 'misActividadesInstructor']);
     Route::get('ambiente-virtual/material-apoyo', [ActividadController::class, 'materialApoyoAprendiz']);

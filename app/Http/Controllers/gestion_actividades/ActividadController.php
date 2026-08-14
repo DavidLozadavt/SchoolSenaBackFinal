@@ -13,6 +13,7 @@ use App\Models\Materia;
 use App\Models\Status;
 use App\Models\AsignacionMaterialApoyoActividad;
 use App\Models\MaterialApoyoActividad;
+use App\Models\Ficha;
 use App\Models\MaterialApoyoRap;
 use App\Models\Pregunta;
 use App\Models\TipoPregunta;
@@ -2263,14 +2264,17 @@ class ActividadController extends Controller
         return $planeacion ? (int) $planeacion->id : null;
     }
 
-    public function materialesApoyo(int $idActividad): JsonResponse
+    public function materialesApoyo(Request $request, int $idActividad): JsonResponse
     {
         try {
             if (! Schema::hasTable('asignacionMaterialApoyoActividad')) {
                 return response()->json([]);
             }
 
-            Actividad::findOrFail($idActividad);
+            $actividad = Actividad::findOrFail($idActividad);
+            $idFicha = $request->query('idFicha') ? (int) $request->query('idFicha') : null;
+            $idRap = (int) $actividad->idMateria;
+            $puedeMarcarBiblioteca = $idFicha > 0 && $idRap > 0 && Schema::hasTable((new MaterialApoyoRap())->getTable());
 
             $asigs = AsignacionMaterialApoyoActividad::query()
                 ->where('idActividad', $idActividad)
@@ -2281,7 +2285,7 @@ class ActividadController extends Controller
             foreach ($asigs as $a) {
                 $m = MaterialApoyoActividad::find($a->idMaterialApoyo);
                 if ($m) {
-                    $out[] = [
+                    $item = [
                         'id' => (int) $m->id,
                         'titulo' => $m->titulo,
                         'descripcion' => $m->descripcion,
@@ -2289,6 +2293,10 @@ class ActividadController extends Controller
                         'urlDocumentoUrl' => $this->publicUrl($m->urlDocumento),
                         'urlAdicional' => $m->urlAdicional,
                     ];
+                    if ($puedeMarcarBiblioteca) {
+                        $item['enBiblioteca'] = $this->materialActividadYaEnBiblioteca($m, $idFicha, $idRap);
+                    }
+                    $out[] = $item;
                 }
             }
 
@@ -2394,6 +2402,181 @@ class ActividadController extends Controller
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Agrega un material de apoyo de actividad a la Biblioteca del Conocimiento (materialApoyoRap).
+     * El material permanece en la actividad; se crea una copia/registro en biblioteca.
+     */
+    public function moverMaterialApoyoBiblioteca(Request $request, int $idActividad, int $idMaterialApoyo): JsonResponse
+    {
+        try {
+            if (! Schema::hasTable('asignacionMaterialApoyoActividad')
+                || ! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
+                return response()->json(['error' => 'Biblioteca de conocimiento no disponible.'], 503);
+            }
+
+            $validated = Validator::make($request->all(), [
+                'idFicha' => 'required|integer|exists:ficha,id',
+            ])->validate();
+
+            $idFicha = (int) $validated['idFicha'];
+            Ficha::findOrFail($idFicha);
+
+            $actividad = Actividad::findOrFail($idActividad);
+            $idRap = (int) $actividad->idMateria;
+            if ($idRap <= 0) {
+                return response()->json(['error' => 'La actividad no tiene un RAP asociado.'], 422);
+            }
+
+            Materia::findOrFail($idRap);
+
+            AsignacionMaterialApoyoActividad::query()
+                ->where('idActividad', $idActividad)
+                ->where('idMaterialApoyo', $idMaterialApoyo)
+                ->firstOrFail();
+
+            $material = MaterialApoyoActividad::findOrFail($idMaterialApoyo);
+
+            if (! $material->urlDocumento && empty($material->urlAdicional)) {
+                return response()->json(['error' => 'El material no tiene documento ni enlace para agregar a biblioteca.'], 422);
+            }
+
+            if ($this->materialActividadYaEnBiblioteca($material, $idFicha, $idRap)) {
+                return response()->json([
+                    'error' => 'Este material ya se encuentra en la Biblioteca del Conocimiento.',
+                ], 409);
+            }
+
+            $user = KeyUtil::user();
+            $idPersonaCreador = $user?->idpersona ? (int) $user->idpersona : null;
+
+            DB::beginTransaction();
+
+            $urlDocumentoBiblioteca = $this->copiarArchivoMaterialActividadABiblioteca($material->urlDocumento);
+
+            $payloadBiblioteca = [
+                'titulo' => $material->titulo,
+                'descripcion' => $material->descripcion,
+                'urlDocumento' => $urlDocumentoBiblioteca,
+                'urlAdicional' => $material->urlAdicional ? trim((string) $material->urlAdicional) : null,
+                'urlVideo' => null,
+                'idFicha' => $idFicha,
+                'idMateria' => $idRap,
+                'idRap' => $idRap,
+                'idPersona' => $idPersonaCreador,
+            ];
+
+            $tablaRap = (new MaterialApoyoRap())->getTable();
+            if (Schema::hasColumn($tablaRap, 'activo')) {
+                $payloadBiblioteca['activo'] = true;
+            }
+
+            $materialBiblioteca = MaterialApoyoRap::create($payloadBiblioteca);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Material agregado correctamente a la Biblioteca del Conocimiento.',
+                'data' => [
+                    'idBiblioteca' => (int) $materialBiblioteca->id,
+                    'idActividad' => $idActividad,
+                    'idMaterialActividad' => (int) $material->id,
+                    'idRap' => $idRap,
+                    'idFicha' => $idFicha,
+                    'enBiblioteca' => true,
+                ],
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            DB::rollBack();
+
+            return response()->json(['error' => 'Material o actividad no encontrado'], 404);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Determina si un material de actividad ya fue agregado a biblioteca (misma ficha + RAP + metadatos).
+     */
+    private function materialActividadYaEnBiblioteca(MaterialApoyoActividad $material, int $idFicha, int $idRap): bool
+    {
+        $query = MaterialApoyoRap::query()
+            ->where('idFicha', $idFicha)
+            ->where('idRap', $idRap)
+            ->where('titulo', $material->titulo);
+
+        $descripcion = $material->descripcion;
+        if ($descripcion === null || trim((string) $descripcion) === '') {
+            $query->where(function ($q) {
+                $q->whereNull('descripcion')->orWhere('descripcion', '');
+            });
+        } else {
+            $query->where('descripcion', $descripcion);
+        }
+
+        $urlAdicional = $material->urlAdicional ? trim((string) $material->urlAdicional) : null;
+        if ($urlAdicional) {
+            $query->where('urlAdicional', $urlAdicional);
+        } else {
+            $query->where(function ($q) {
+                $q->whereNull('urlAdicional')->orWhere('urlAdicional', '');
+            });
+        }
+
+        if ($material->urlDocumento) {
+            $path = (string) $material->urlDocumento;
+            if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+                $query->where('urlDocumento', $path);
+            } else {
+                $basename = basename($path);
+                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $basename);
+                $query->where('urlDocumento', 'like', '%' . $escaped);
+            }
+        } else {
+            $query->where(function ($q) {
+                $q->whereNull('urlDocumento')->orWhere('urlDocumento', '');
+            });
+        }
+
+        return $query->exists();
+    }
+
+    /**
+     * Copia un archivo local de actividad al directorio de biblioteca; URLs externas se conservan.
+     * El archivo original en actividades/{id}/material-apoyo/ no se elimina.
+     */
+    private function copiarArchivoMaterialActividadABiblioteca(?string $path): ?string
+    {
+        if (! $path) {
+            return null;
+        }
+
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        if (! Storage::disk('public')->exists($path)) {
+            return $path;
+        }
+
+        $dir = 'material-apoyo-rap/documentos';
+        if (! Storage::disk('public')->exists($dir)) {
+            Storage::disk('public')->makeDirectory($dir, 0755, true);
+        }
+
+        $basename = basename($path);
+        $newPath = $dir . '/' . time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $basename);
+
+        Storage::disk('public')->copy($path, $newPath);
+
+        return $newPath;
     }
 
     public function storeCuestionario(Request $request): JsonResponse
