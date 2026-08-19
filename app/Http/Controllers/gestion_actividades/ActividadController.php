@@ -19,6 +19,7 @@ use App\Models\Pregunta;
 use App\Models\TipoPregunta;
 use App\Models\Respuesta;
 use App\Support\DiagnosticoActividadesRapHistoricas;
+use App\Util\CuestionarioAsignacionUtil;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -356,7 +357,7 @@ class ActividadController extends Controller
                                 'id' => $r->id,
                                 'descripcionRespuesta' => $r->descripcionRespuesta,
                             ])->values() : [],
-                        ])->values();
+                        ])->values()->all();
                     }
                 }
             }
@@ -368,6 +369,10 @@ class ActividadController extends Controller
                 if ($idsCalifCuestionarios->isNotEmpty()) {
                     $cuestionariosConRespuestas = DB::table($tblRc)
                         ->whereIn('idCalificacion', $idsCalifCuestionarios->all())
+                        ->where(function ($q) {
+                            $q->whereNotNull('idRespuesta')
+                                ->orWhereRaw("TRIM(COALESCE(respuesta, '')) <> ''");
+                        })
                         ->select('idCalificacion')
                         ->distinct()
                         ->pluck('idCalificacion');
@@ -498,7 +503,13 @@ class ActividadController extends Controller
                     'esGrupal' => !empty($row->idGrupo),
                     'idGrupo' => $row->idGrupo,
                     'tieneRespuestasCuestionario' => $tieneRespuestasCuestionario,
-                    'preguntas' => ($row->tipoActividad ?? '') === 'cuestionario' ? ($preguntasPorActividad[$row->idActividad] ?? []) : null,
+                    'preguntas' => ($row->tipoActividad ?? '') === 'cuestionario'
+                        ? CuestionarioAsignacionUtil::filtrarPreguntasPayload(
+                            $preguntasPorActividad[$row->idActividad] ?? [],
+                            (int) $row->idCalificacionActividad,
+                            (int) $row->idActividad
+                        )
+                        : null,
                 ];
             })->values();
 
@@ -820,6 +831,10 @@ class ActividadController extends Controller
             if ($tblRc && $idsCalifCuestionarios->isNotEmpty()) {
                 $cuestionariosConRespuestas = DB::table($tblRc)
                     ->whereIn('idCalificacion', $idsCalifCuestionarios->all())
+                    ->where(function ($q) {
+                        $q->whereNotNull('idRespuesta')
+                            ->orWhereRaw("TRIM(COALESCE(respuesta, '')) <> ''");
+                    })
                     ->select('idCalificacion')
                     ->distinct()
                     ->pluck('idCalificacion');
@@ -1169,26 +1184,32 @@ class ActividadController extends Controller
                 'respuestas.*.respuesta' => 'nullable|string|max:5000',
             ]);
 
+            $idsPermitidos = CuestionarioAsignacionUtil::idsParaCalificacion($idCalificacionActividad);
+
             $tblRc = Schema::hasTable('respuestaCuestionarios') ? 'respuestaCuestionarios' : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
             if (!$tblRc) {
                 return response()->json(['error' => 'Tabla de respuestas de cuestionario no disponible'], 500);
             }
 
             foreach ($validated['respuestas'] as $r) {
+                if ($idsPermitidos !== null && !in_array((int) $r['idPregunta'], $idsPermitidos, true)) {
+                    continue;
+                }
                 $idRespuesta = isset($r['idRespuesta']) && $r['idRespuesta'] ? (int) $r['idRespuesta'] : null;
                 $respuestaTexto = trim($r['respuesta'] ?? '');
                 if ($idRespuesta === null && $respuestaTexto === '') {
                     continue;
                 }
 
-                $existe = DB::table($tblRc)
+                $filasPregunta = DB::table($tblRc)
                     ->where('idCalificacion', $idCalificacionActividad)
                     ->where('idPregunta', $r['idPregunta'])
-                    ->exists();
-                if ($existe) {
+                    ->get();
+                $filaRespuesta = $filasPregunta->first(fn ($row) => !CuestionarioAsignacionUtil::esMarcador($row));
+
+                if ($filaRespuesta) {
                     DB::table($tblRc)
-                        ->where('idCalificacion', $idCalificacionActividad)
-                        ->where('idPregunta', $r['idPregunta'])
+                        ->where('id', $filaRespuesta->id)
                         ->update(['idRespuesta' => $idRespuesta, 'respuesta' => $respuestaTexto ?: null]);
                 } else {
                     DB::table($tblRc)->insert([
@@ -1269,19 +1290,29 @@ class ActividadController extends Controller
             $respuestasAlumno = DB::table($tblRc)
                 ->where('idCalificacion', $idCalificacionActividad)
                 ->get()
+                ->filter(fn ($row) => !CuestionarioAsignacionUtil::esMarcador($row))
                 ->keyBy('idPregunta');
 
             if ($respuestasAlumno->isEmpty()) {
                 return response()->json(['error' => 'Aún no hay un intento respondido para este cuestionario'], 404);
             }
 
+            $idsAsignados = CuestionarioAsignacionUtil::idsParaCalificacion($idCalificacionActividad);
+
             // Tras haber respondido, se muestran las correctas (no existe flag de configuración en el modelo).
             $mostrarRespuestasCorrectas = true;
 
-            $preguntas = Pregunta::with(['tipoPregunta', 'respuestas'])
+            $preguntasQuery = Pregunta::with(['tipoPregunta', 'respuestas'])
                 ->where('idActividad', $ca->idActividad)
-                ->orderBy('id')
-                ->get();
+                ->orderBy('id');
+            if ($idsAsignados !== null) {
+                $preguntasQuery->whereIn('id', $idsAsignados);
+            }
+            $preguntas = CuestionarioAsignacionUtil::ordenarColeccionPreguntas(
+                $preguntasQuery->get(),
+                $idCalificacionActividad,
+                (int) $ca->idActividad
+            );
 
             $correctas = 0;
             $incorrectas = 0;
@@ -1481,12 +1512,28 @@ class ActividadController extends Controller
         }
     }
 
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
         try {
             $actividad = Actividad::with(['materia', 'estado', 'clasificacion', 'persona'])->findOrFail($id);
             if ($actividad->tipoActividad === 'cuestionario') {
                 $actividad->load(['preguntas.tipoPregunta', 'preguntas.respuestas']);
+                $idCalif = $request->query('idCalificacionActividad');
+                if ($idCalif) {
+                    $preguntas = $actividad->preguntas;
+                    $ids = CuestionarioAsignacionUtil::idsParaCalificacion((int) $idCalif);
+                    if ($ids !== null) {
+                        $preguntas = $preguntas->whereIn('id', $ids);
+                    }
+                    $actividad->setRelation(
+                        'preguntas',
+                        CuestionarioAsignacionUtil::ordenarColeccionPreguntas(
+                            $preguntas,
+                            (int) $idCalif,
+                            (int) $actividad->id
+                        )
+                    );
+                }
             }
             return response()->json($actividad);
         } catch (\Throwable $e) {
@@ -2866,6 +2913,12 @@ class ActividadController extends Controller
             ->whereRaw("LOWER(TRIM(tp.tipoPregunta)) = 'varias opciones'")
             ->pluck('p.id');
 
+        $idsAsignados = CuestionarioAsignacionUtil::idsParaCalificacion($idCalificacionActividad);
+        if ($idsAsignados !== null) {
+            $setAsignados = array_flip($idsAsignados);
+            $preguntasVariasOpciones = $preguntasVariasOpciones->filter(fn ($id) => isset($setAsignados[(int) $id]))->values();
+        }
+
         if ($preguntasVariasOpciones->isEmpty()) {
             return;
         }
@@ -2875,6 +2928,7 @@ class ActividadController extends Controller
             ->where('idCalificacion', $idCalificacionActividad)
             ->whereIn('idPregunta', $preguntasVariasOpciones->all())
             ->get()
+            ->filter(fn ($row) => !CuestionarioAsignacionUtil::esMarcador($row))
             ->keyBy('idPregunta');
 
         $correctas = 0;
@@ -2901,8 +2955,7 @@ class ActividadController extends Controller
                 ? round(5 / $totalPreguntas, 2)
                 : 0;
             DB::table($tblRc)
-                ->where('idCalificacion', $idCalificacionActividad)
-                ->where('idPregunta', $idPregunta)
+                ->where('id', $resp->id)
                 ->update([
                     'calificado' => true,
                     'puntaje' => $puntajePregunta,

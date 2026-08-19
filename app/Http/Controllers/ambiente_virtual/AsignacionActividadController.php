@@ -8,6 +8,7 @@ use App\Models\Actividad;
 use App\Models\GrupoFicha;
 use App\Models\PlaneacionActividad;
 use App\Models\Status;
+use App\Util\CuestionarioAsignacionUtil;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -361,6 +362,9 @@ class AsignacionActividadController extends Controller
                 'grupos' => 'nullable',    // array de idGrupo o "todos"
                 'fechaInicial' => 'nullable|date',
                 'fechaFinal' => 'nullable|date|after_or_equal:fechaInicial',
+                'configCuestionarios' => 'nullable|array',
+                'configCuestionarios.*.idsPreguntas' => 'required|array|min:1',
+                'configCuestionarios.*.idsPreguntas.*' => 'integer|exists:preguntas,id',
             ]);
 
             $ficha = \App\Models\Ficha::findOrFail($idFicha);
@@ -376,6 +380,7 @@ class AsignacionActividadController extends Controller
                 : ($ficha->asignacion?->fechaFinalClases ?? $fecha->copy()->addMonths(3));
 
             $actividades = $validated['actividades'];
+            $configCuestionarios = $validated['configCuestionarios'] ?? [];
             $exitosas = 0;
             $omitidas = 0;
             $omitidosDetalle = [];
@@ -499,6 +504,8 @@ class AsignacionActividadController extends Controller
                     $idGrupo = is_array($idGrupo) ? ($idGrupo[0] ?? null) : $idGrupo;
                     $idGrupo = $idGrupo !== null ? (int) $idGrupo : null;
 
+                    $idsPreguntas = $this->resolverIdsPreguntasAsignacion((int) $idActividad, $configCuestionarios);
+
                     $insertado = $this->crearCalificacionActividad(
                         (int) $idActividad,
                         $idMa,
@@ -506,7 +513,8 @@ class AsignacionActividadController extends Controller
                         $idPersona,
                         $idCorte,
                         $fecha,
-                        $fechaFin
+                        $fechaFin,
+                        $idsPreguntas
                     );
                     if ($insertado) {
                         $exitosas++;
@@ -522,7 +530,7 @@ class AsignacionActividadController extends Controller
                             ->where('idGrupo', $idGrupo)
                             ->exists();
                         if (!$yaExiste) {
-                            DB::table('asignacionActividadGrupo')->insert([
+                            $rowGrupo = [
                                 'idActividad' => $idActividad,
                                 'idGrupo' => $idGrupo,
                                 'fechaInicial' => $fecha,
@@ -530,7 +538,8 @@ class AsignacionActividadController extends Controller
                                 'idPersona' => $idPersona,
                                 'created_at' => now(),
                                 'updated_at' => now(),
-                            ]);
+                            ];
+                            DB::table('asignacionActividadGrupo')->insert($rowGrupo);
                             $exitosas++;
                         }
                     }
@@ -727,6 +736,34 @@ class AsignacionActividadController extends Controller
         return $corte ? (int) $corte->id : 1;
     }
 
+    private function resolverIdsPreguntasAsignacion(int $idActividad, array $configCuestionarios): ?array
+    {
+        $actividad = Actividad::find($idActividad);
+        if (!$actividad || ($actividad->tipoActividad ?? '') !== 'cuestionario') {
+            return null;
+        }
+
+        $cfg = $configCuestionarios[(string) $idActividad] ?? $configCuestionarios[$idActividad] ?? null;
+        if (!$cfg || empty($cfg['idsPreguntas']) || !is_array($cfg['idsPreguntas'])) {
+            return null;
+        }
+
+        $idsSolicitados = collect($cfg['idsPreguntas'])->map(fn ($id) => (int) $id)->filter(fn ($id) => $id > 0)->unique()->values();
+        if ($idsSolicitados->isEmpty()) {
+            return null;
+        }
+
+        $validos = DB::table('preguntas')
+            ->where('idActividad', $idActividad)
+            ->whereIn('id', $idsSolicitados->all())
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+
+        return $validos ?: null;
+    }
+
     private function crearCalificacionActividad(
         int $idActividad,
         int $idMatriculaAcademica,
@@ -734,7 +771,8 @@ class AsignacionActividadController extends Controller
         int $idPersona,
         int $idCorte,
         $fecha,
-        $fechaFin
+        $fechaFin,
+        ?array $idsPreguntas = null
     ): bool {
         if (!Schema::hasTable('calificacionActividad')) return false;
         try {
@@ -753,8 +791,12 @@ class AsignacionActividadController extends Controller
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            DB::table('calificacionActividad')->insert($data);
-            return true;
+            $idCalificacion = (int) DB::table('calificacionActividad')->insertGetId($data);
+            if ($idCalificacion > 0 && !empty($idsPreguntas)) {
+                CuestionarioAsignacionUtil::guardarMarcadores($idCalificacion, $idsPreguntas);
+            }
+
+            return $idCalificacion > 0;
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('AsignacionActividad: fallo al crear calificacionActividad', [
                 'error' => $e->getMessage(),

@@ -7,6 +7,7 @@ use App\Models\GrupoFicha;
 use App\Models\Ficha;
 use App\Models\HorarioMateria;
 use App\Models\TipoGrupo;
+use App\Util\CuestionarioAsignacionUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -448,7 +449,7 @@ class GruposFichaController extends Controller
             $fechaIni = $a->fechaInicial ? \Carbon\Carbon::parse($a->fechaInicial) : now();
             $fechaFin = $a->fechaFinal ? \Carbon\Carbon::parse($a->fechaFinal) : now()->addMonths(3);
 
-            \Illuminate\Support\Facades\DB::table('calificacionActividad')->insert([
+            $insertData = [
                 'idActividad' => $a->idActividad,
                 'idAMartriculaAcademica' => $ma->id,
                 'idGrupo' => $idGrupo,
@@ -459,7 +460,16 @@ class GruposFichaController extends Controller
                 'fechaFinal' => $fechaFin->format('Y-m-d H:i:s'),
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
+            ];
+
+            $idCalificacion = (int) \Illuminate\Support\Facades\DB::table('calificacionActividad')->insertGetId($insertData);
+            if ($idCalificacion > 0) {
+                CuestionarioAsignacionUtil::copiarMarcadoresDesdeHermanoGrupo(
+                    (int) $a->idActividad,
+                    $idGrupo,
+                    $idCalificacion
+                );
+            }
         }
     }
 
