@@ -180,6 +180,7 @@ use App\Http\Controllers\SancionesController;
 use App\Http\Controllers\AnexoActaController;
 use App\Http\Controllers\gestion_solicitudes_instructor\SolicitudMateriaController;
 use App\Http\Controllers\InstructorLiderController;
+use App\Http\Controllers\SeguimientoAprendizController;
 
 /*
 |--------------------------------------------------------------------------
@@ -265,10 +266,13 @@ Route::middleware('auth:api')->group(function () {
 
 });
 
+
 // jerarquía de permisos
-Route::get('permisos_jerarquia', [PermissionHierarchyController::class, 'index']);
-Route::post('permissions/{id}/set-parent', [PermissionHierarchyController::class, 'setParent'])->whereNumber('id');
-Route::get('menu/dynamic', [PermissionHierarchyController::class, 'getAllPermissionsHierarchy']);
+Route::middleware('auth:api')->group(function () {
+    Route::get('permisos_jerarquia', [PermissionHierarchyController::class, 'index']);
+    Route::post('permissions/{id}/set-parent', [PermissionHierarchyController::class, 'setParent'])->whereNumber('id');
+    Route::get('menu/dynamic', [PermissionHierarchyController::class, 'getAllPermissionsHierarchy']);
+});
 
 // notificaciones
 Route::resource('notificaciones', NotificacionController::class);
@@ -1714,6 +1718,18 @@ Route::middleware('auth:api')->group(function () {
     Route::get('instructor-lider', [InstructorLiderController::class, 'getFichasLider']);
     Route::get('instructor-lider/ficha/{idFicha}/aprendices', [InstructorLiderController::class, 'getAprendicesFicha']);
     Route::post('instructor-lider/cambiar-estado-aprendiz', [InstructorLiderController::class, 'cambiarEstadoAprendiz']);
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::get('seguimientos/buscar', [SeguimientoAprendizController::class, 'porAprendiz']);
+    Route::get('seguimientos/instructores', [SeguimientoAprendizController::class, 'instructores']);
+    Route::get('seguimientos/por-instructor', [SeguimientoAprendizController::class, 'porInstructor']);
+    Route::apiResource('seguimientos', SeguimientoAprendizController::class);
+    Route::get('seguimientos/{seguimiento}/documentos', [SeguimientoAprendizController::class, 'documentosIndex']);
+    Route::post('seguimientos/{seguimiento}/documentos', [SeguimientoAprendizController::class, 'documentosStore']);
+    Route::post('documentos/{documento}', [SeguimientoAprendizController::class, 'documentosUpdate']);
+    Route::patch('documentos/{documento}/estado', [SeguimientoAprendizController::class, 'documentosCambiarEstado']);
+    Route::delete('documentos/{documento}', [SeguimientoAprendizController::class, 'documentosDestroy']);
 });
 
 // Solicitud de Instructores trasversales
