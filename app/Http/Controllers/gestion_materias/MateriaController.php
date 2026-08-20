@@ -152,6 +152,8 @@ class MateriaController extends Controller
                 }
 
                 $estaFinalizada = ($rapsFinalizados >= $totalRaps);
+                //Para pruebas: 
+                //$estaFinalizada = true;
                 if ($totalRaps === 0) $estaFinalizada = false;
 
                 $idCat = $materia->idCategoriaFormacion;
