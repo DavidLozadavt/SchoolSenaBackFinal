@@ -1399,12 +1399,18 @@ class ActividadController extends Controller
                     }
                 }
 
+                $explicacionTxt = trim((string) ($pregunta->explicacionRespuesta ?? ''));
+                $explicacionRespuesta = ($mostrarRespuestasCorrectas && $explicacionTxt !== '')
+                    ? $explicacionTxt
+                    : null;
+
                 return [
                     'id' => (int) $pregunta->id,
                     'descripcion' => $pregunta->descripcion,
                     'tipoPregunta' => $tipo,
                     'urlDocumento' => $pregunta->urlDocumento,
                     'urlDocumentoUrl' => $this->publicUrl($pregunta->urlDocumento),
+                    'explicacionRespuesta' => $explicacionRespuesta,
                     'estado' => $estado,
                     'puntaje' => $puntaje,
                     'retroalimentacion' => $retroalimentacion,
@@ -1525,6 +1531,8 @@ class ActividadController extends Controller
                     if ($ids !== null) {
                         $preguntas = $preguntas->whereIn('id', $ids);
                     }
+                    // Intento activo: no revelar la explicación de la respuesta correcta.
+                    $preguntas->each(fn ($p) => $p->makeHidden(['explicacionRespuesta']));
                     $actividad->setRelation(
                         'preguntas',
                         CuestionarioAsignacionUtil::ordenarColeccionPreguntas(
@@ -2640,6 +2648,7 @@ class ActividadController extends Controller
                 'preguntas' => 'required|array|min:1',
                 'preguntas.*.tipo' => 'required|in:Párrafo,Varias opciones',
                 'preguntas.*.titulo' => 'required|string|max:1000',
+                'preguntas.*.explicacionRespuesta' => 'nullable|string',
             ]);
 
             $user = KeyUtil::user();
@@ -2693,8 +2702,11 @@ class ActividadController extends Controller
                     $urlDoc = $file->storeAs($dir, $filename, 'public');
                 }
 
+                $explicacion = trim((string) ($p['explicacionRespuesta'] ?? ''));
+
                 $pregunta = Pregunta::create([
                     'descripcion' => $p['titulo'],
+                    'explicacionRespuesta' => $explicacion !== '' ? $explicacion : null,
                     'puntaje' => 1,
                     'idTipoPregunta' => $idTipo,
                     'idActividad' => $actividad->id,
@@ -2742,6 +2754,7 @@ class ActividadController extends Controller
                 'preguntas' => 'required|array|min:1',
                 'preguntas.*.tipo' => 'required|in:Párrafo,Varias opciones',
                 'preguntas.*.titulo' => 'required|string|max:1000',
+                'preguntas.*.explicacionRespuesta' => 'nullable|string',
             ]);
 
             $actividad->update([
@@ -2785,8 +2798,11 @@ class ActividadController extends Controller
                     $urlDoc = $file->storeAs($dir, $filename, 'public');
                 }
 
+                $explicacion = trim((string) ($p['explicacionRespuesta'] ?? ''));
+
                 $pregunta = Pregunta::create([
                     'descripcion' => $p['titulo'],
+                    'explicacionRespuesta' => $explicacion !== '' ? $explicacion : null,
                     'puntaje' => 1,
                     'idTipoPregunta' => $idTipo,
                     'idActividad' => $actividad->id,
