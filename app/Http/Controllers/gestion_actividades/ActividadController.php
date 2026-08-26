@@ -293,9 +293,7 @@ class ActividadController extends Controller
 
             $total = (clone $query)->count();
 
-            $registros = (clone $query)
-                ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
-                ->select([
+            $selectCampos = [
                     'ca.id as idCalificacionActividad',
                     'ca.idActividad',
                     'ca.archivo as archivoEntrega',
@@ -328,7 +326,17 @@ class ActividadController extends Controller
                     'p.rutaFoto as autorRutaFoto',
                     'p_inst.rutaFoto as instructorPersonaRutaFoto',
                     DB::raw($colFicha ? ('ma.' . $colFicha . ' as idFichaContext') : 'NULL as idFichaContext'),
-                ])
+            ];
+            if (Schema::hasColumn('actividades', 'preguntasMinimasAprobar')) {
+                $selectCampos[] = 'a.preguntasMinimasAprobar';
+            }
+            if (Schema::hasColumn('actividades', 'intervaloReintento')) {
+                $selectCampos[] = 'a.intervaloReintento';
+            }
+
+            $registros = (clone $query)
+                ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
+                ->select($selectCampos)
                 ->orderByDesc('ca.id')
                 ->offset(($page - 1) * $perPage)
                 ->limit($perPage)
@@ -450,6 +458,62 @@ class ActividadController extends Controller
                     }
                 }
 
+                $metaIntento = CuestionarioAsignacionUtil::leerMetaIntentoCuestionario($row->calificacionEstandart ?? null);
+                $intervaloReintentoCfg = isset($row->intervaloReintento) && $row->intervaloReintento !== null
+                    ? (int) $row->intervaloReintento
+                    : null;
+                $preguntasMinimasCfg = isset($row->preguntasMinimasAprobar) && $row->preguntasMinimasAprobar !== null
+                    ? (int) $row->preguntasMinimasAprobar
+                    : null;
+                $cumpleMinimoCuestionario = $metaIntento['cumpleMinimo'];
+                $esCuestionario = strtolower(trim($row->tipoActividad ?? '')) === 'cuestionario';
+                $activaBase = (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO')
+                    && !$fechaVencida
+                    && !$fechaInactiva;
+
+                // 100% del subconjunto asignado bloquea reintentos; "aprobado" (mínimo) NO.
+                $puntajePerfecto = false;
+                if ($esCuestionario && (!empty($row->fechaCalificacion) || $tieneRespuestasCuestionario)) {
+                    $puntajePerfecto = !empty($metaIntento['puntajePerfecto'])
+                        || CuestionarioAsignacionUtil::tienePuntajePerfectoAsignacion(
+                            (int) $row->idCalificacionActividad,
+                            (int) $row->idActividad
+                        );
+                }
+
+                $evalReintento = $esCuestionario
+                    ? CuestionarioAsignacionUtil::evaluarDisponibilidadReintento(
+                        $row->fechaCalificacion !== null ? (string) $row->fechaCalificacion : null,
+                        $intervaloReintentoCfg,
+                        $row->fechaFinal !== null ? (string) $row->fechaFinal : null,
+                        null,
+                        $puntajePerfecto
+                    )
+                    : ['permitido' => false, 'proximoIntentoEn' => null, 'motivo' => null];
+
+                $puedeResponder = false;
+                if ($activaBase) {
+                    if ($esCuestionario && $intervaloReintentoCfg !== null) {
+                        // Con intervalo: primer intento por estado pendiente; reintento cuando el tiempo ya venció.
+                        // Aprobado (cumpleMinimo) no bloquea; solo el 100% del subconjunto bloquea.
+                        if ($puntajePerfecto) {
+                            $puedeResponder = false;
+                        } elseif (!$tieneRespuestasCuestionario && empty($row->fechaCalificacion)) {
+                            $puedeResponder = in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true)
+                                || $estadoVisual === 'CORRECCION_SOLICITADA';
+                        } else {
+                            $puedeResponder = (bool) $evalReintento['permitido'];
+                        }
+                    } else {
+                        $puedeResponder = in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true)
+                            || $estadoVisual === 'CORRECCION_SOLICITADA'
+                            || (
+                                !$esCuestionario
+                                && $estadoVisual === 'POR_EVALUAR'
+                            );
+                    }
+                }
+
                 return [
                     'idCalificacionActividad' => $row->idCalificacionActividad,
                     'idActividad' => $row->idActividad,
@@ -487,22 +551,22 @@ class ActividadController extends Controller
                     'estadoVisual' => $estadoVisual,
                     'fechaVencida' => $fechaVencida,
                     'fechaInactiva' => $fechaInactiva,
-                    'puedeResponder' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO')
-                        && !$fechaVencida
-                        && !$fechaInactiva
-                        && (
-                            in_array($estadoVisual, ['PENDIENTE', 'SIN_ENTREGAR'], true)
-                            || $estadoVisual === 'CORRECCION_SOLICITADA'
-                            || (
-                                strtolower(trim($row->tipoActividad ?? '')) !== 'cuestionario'
-                                && $estadoVisual === 'POR_EVALUAR'
-                            )
-                        ),
+                    'puedeResponder' => $puedeResponder,
                     'estadoActividad' => $row->estadoActividad ?? 'ACTIVO',
-                    'activa' => (strtoupper(trim($row->estadoActividad ?? 'ACTIVO')) === 'ACTIVO') && !$fechaVencida && !$fechaInactiva,
+                    'activa' => $activaBase,
                     'esGrupal' => !empty($row->idGrupo),
                     'idGrupo' => $row->idGrupo,
                     'tieneRespuestasCuestionario' => $tieneRespuestasCuestionario,
+                    'preguntasMinimasAprobar' => $preguntasMinimasCfg,
+                    'intervaloReintento' => $intervaloReintentoCfg,
+                    'ultimoIntentoEn' => $esCuestionario && !empty($row->fechaCalificacion)
+                        ? (string) $row->fechaCalificacion
+                        : null,
+                    'proximoIntentoDisponibleEn' => $esCuestionario
+                        ? ($evalReintento['proximoIntentoEn'] ?? null)
+                        : null,
+                    'cumpleMinimoCuestionario' => $esCuestionario ? $cumpleMinimoCuestionario : null,
+                    'resultadoPerfectoCuestionario' => $esCuestionario ? $puntajePerfecto : null,
                     'preguntas' => ($row->tipoActividad ?? '') === 'cuestionario'
                         ? CuestionarioAsignacionUtil::filtrarPreguntasPayload(
                             $preguntasPorActividad[$row->idActividad] ?? [],
@@ -1156,7 +1220,14 @@ class ActividadController extends Controller
                 ->leftJoin('estado as e', 'a.idEstado', '=', 'e.id')
                 ->where('ca.id', $idCalificacionActividad)
                 ->where('m.idPersona', $idPersona)
-                ->select('ca.id', 'ca.idActividad', 'ca.fechaFinal', 'e.estado as estadoActividad')
+                ->select(
+                    'ca.id',
+                    'ca.idActividad',
+                    'ca.fechaFinal',
+                    'ca.fechaCalificacion',
+                    'ca.calificacionEstandart',
+                    'e.estado as estadoActividad'
+                )
                 ->first();
 
             if (!$ca) {
@@ -1176,6 +1247,64 @@ class ActividadController extends Controller
             if (!$actividad || ($actividad->tipoActividad ?? '') !== 'cuestionario') {
                 return response()->json(['error' => 'Esta actividad no es un cuestionario'], 422);
             }
+
+            $intervaloReintentoCfg = Schema::hasColumn('actividades', 'intervaloReintento')
+                ? ($actividad->intervaloReintento !== null ? (int) $actividad->intervaloReintento : null)
+                : null;
+
+            // Bloqueo por 100% del subconjunto asignado (aprobado/mínimo NO bloquea).
+            $puntajePerfectoSubmit = CuestionarioAsignacionUtil::tienePuntajePerfectoAsignacion(
+                $idCalificacionActividad,
+                (int) $ca->idActividad
+            );
+            if ($puntajePerfectoSubmit) {
+                return response()->json([
+                    'error' => 'Ya obtuviste el 100% de las preguntas asignadas. No es necesario realizar otro intento.',
+                    'resultadoPerfectoCuestionario' => true,
+                ], 422);
+            }
+
+            // Si hay intervalo configurado y ya existe un intento finalizado, validar tiempo + vigencia.
+            if ($intervaloReintentoCfg !== null) {
+                $evalReintento = CuestionarioAsignacionUtil::evaluarDisponibilidadReintento(
+                    $ca->fechaCalificacion !== null ? (string) $ca->fechaCalificacion : null,
+                    $intervaloReintentoCfg,
+                    $ca->fechaFinal !== null ? (string) $ca->fechaFinal : null,
+                    $tzC,
+                    false
+                );
+                $yaHuboIntento = !empty($ca->fechaCalificacion)
+                    || CuestionarioAsignacionUtil::tieneRespuestasReales($idCalificacionActividad);
+                if ($yaHuboIntento && empty($evalReintento['permitido'])) {
+                    return response()->json([
+                        'error' => $evalReintento['motivo'] ?: 'Aún no puedes realizar un nuevo intento.',
+                        'proximoIntentoDisponibleEn' => $evalReintento['proximoIntentoEn'] ?? null,
+                        'intervaloReintento' => $intervaloReintentoCfg,
+                    ], 422);
+                }
+            }
+
+            // Regenerar subconjunto solo al iniciar un reintento permitido (estable dentro del intento).
+            $puedeNuevoIntento = false;
+            if (!empty($ca->fechaCalificacion) || CuestionarioAsignacionUtil::tieneRespuestasReales($idCalificacionActividad)) {
+                if ($intervaloReintentoCfg !== null) {
+                    $evalOpen = CuestionarioAsignacionUtil::evaluarDisponibilidadReintento(
+                        $ca->fechaCalificacion !== null ? (string) $ca->fechaCalificacion : null,
+                        $intervaloReintentoCfg,
+                        $ca->fechaFinal !== null ? (string) $ca->fechaFinal : null,
+                        $tzC,
+                        false
+                    );
+                    $puedeNuevoIntento = !empty($evalOpen['permitido']);
+                }
+            } else {
+                $puedeNuevoIntento = true;
+            }
+            CuestionarioAsignacionUtil::asegurarSubconjuntoParaResponder(
+                $idCalificacionActividad,
+                (int) $ca->idActividad,
+                $puedeNuevoIntento
+            );
 
             $validated = $request->validate([
                 'respuestas' => 'required|array',
@@ -1222,14 +1351,65 @@ class ActividadController extends Controller
                 }
             }
 
+            $resultadoCalificacion = $this->calificarCuestionarioAutomatico($idCalificacionActividad, $ca->idActividad, $tblRc);
+            $cumpleMinimo = $resultadoCalificacion['cumpleMinimo'] ?? null;
+            $preguntasMinimasCfg = Schema::hasColumn('actividades', 'preguntasMinimasAprobar')
+                ? ($actividad->preguntasMinimasAprobar !== null ? (int) $actividad->preguntasMinimasAprobar : null)
+                : null;
+
+            $updateCa = [
+                'ComentarioEstudiante' => 'Cuestionario respondido',
+                'updated_at' => now(),
+            ];
+            // Persistir ok (aprobado) + c/t + n/k; open=false al finalizar el intento.
+            $metaPrev = CuestionarioAsignacionUtil::leerMetaIntentoCuestionario(
+                isset($ca->calificacionEstandart) ? (string) $ca->calificacionEstandart : null
+            );
+            // Tras asegurarSubconjunto, releer meta (k/open pueden haber cambiado).
+            $rawMetaActual = DB::table('calificacionActividad')
+                ->where('id', $idCalificacionActividad)
+                ->value('calificacionEstandart');
+            $metaActual = CuestionarioAsignacionUtil::leerMetaIntentoCuestionario(
+                $rawMetaActual !== null ? (string) $rawMetaActual : null
+            );
+            $cantidadMeta = $metaActual['cantidad'] ?? $metaPrev['cantidad'];
+            $intentoMeta = $metaActual['intento'] ?? $metaPrev['intento'] ?? 0;
+            $updateCa['calificacionEstandart'] = CuestionarioAsignacionUtil::escribirMetaIntentoCuestionario(
+                $cumpleMinimo,
+                isset($resultadoCalificacion['correctas']) ? (int) $resultadoCalificacion['correctas'] : null,
+                isset($resultadoCalificacion['totalPreguntas']) ? (int) $resultadoCalificacion['totalPreguntas'] : null,
+                $cantidadMeta,
+                $intentoMeta !== null ? (int) $intentoMeta : 0,
+                false
+            );
+
             DB::table('calificacionActividad')
                 ->where('id', $idCalificacionActividad)
-                ->update(['ComentarioEstudiante' => 'Cuestionario respondido', 'updated_at' => now()]);
+                ->update($updateCa);
 
-            // Calificación automática para preguntas de selección múltiple (Varias opciones)
-            $this->calificarCuestionarioAutomatico($idCalificacionActividad, $ca->idActividad, $tblRc);
+            $correctasFin = isset($resultadoCalificacion['correctas']) ? (int) $resultadoCalificacion['correctas'] : null;
+            $totalFin = isset($resultadoCalificacion['totalPreguntas']) ? (int) $resultadoCalificacion['totalPreguntas'] : null;
+            $resultadoPerfecto = $correctasFin !== null && $totalFin !== null && $totalFin > 0 && $correctasFin === $totalFin;
 
-            return response()->json(['message' => 'Cuestionario respondido correctamente']);
+            $proximoIntentoEn = null;
+            if ($intervaloReintentoCfg !== null && !$resultadoPerfecto) {
+                $proximo = CuestionarioAsignacionUtil::proximaFechaReintento(
+                    now($tzC)->toDateTimeString(),
+                    $intervaloReintentoCfg,
+                    $tzC
+                );
+                $proximoIntentoEn = $proximo ? $proximo->toDateTimeString() : null;
+            }
+
+            return response()->json([
+                'message' => 'Cuestionario respondido correctamente',
+                'cumpleMinimo' => $cumpleMinimo,
+                'preguntasCorrectas' => $correctasFin,
+                'preguntasEvaluadas' => $totalFin,
+                'resultadoPerfectoCuestionario' => $resultadoPerfecto,
+                'intervaloReintento' => $intervaloReintentoCfg,
+                'proximoIntentoDisponibleEn' => $proximoIntentoEn,
+            ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
@@ -1265,6 +1445,7 @@ class ActividadController extends Controller
                     'ca.idActividad',
                     'ca.calificacionNumerica',
                     'ca.fechaCalificacion',
+                    'ca.fechaFinal',
                     'ca.ComentarioDocente',
                     'ca.ComentarioEstudiante',
                     'a.tituloActividad',
@@ -1297,10 +1478,15 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Aún no hay un intento respondido para este cuestionario'], 404);
             }
 
-            $idsAsignados = CuestionarioAsignacionUtil::idsParaCalificacion($idCalificacionActividad);
-
-            // Tras haber respondido, se muestran las correctas (no existe flag de configuración en el modelo).
+            // Vigencia de la ASIGNACIÓN (fechaFinal), no del intento finalizado.
+            $asignacionActiva = CuestionarioAsignacionUtil::asignacionCuestionarioActiva(
+                isset($ca->fechaFinal) ? (string) $ca->fechaFinal : null
+            );
+            $revisionCompleta = !$asignacionActiva;
+            // En revisión completa se revelan soluciones; en parcial solo se detallan correctas.
             $mostrarRespuestasCorrectas = true;
+
+            $idsAsignados = CuestionarioAsignacionUtil::idsParaCalificacion($idCalificacionActividad);
 
             $preguntasQuery = Pregunta::with(['tipoPregunta', 'respuestas'])
                 ->where('idActividad', $ca->idActividad)
@@ -1420,6 +1606,25 @@ class ActividadController extends Controller
                 ];
             })->values();
 
+            // Resumen SIEMPRE sobre el intento completo (la restricción solo afecta el detalle).
+            $resumen = [
+                'totalPreguntas' => $preguntasPayload->count(),
+                'correctas' => $correctas,
+                'incorrectas' => $incorrectas,
+                'pendientes' => $pendientes,
+            ];
+
+            // Mientras la asignación sigue activa: no entregar detalle de incorrectas ni sus soluciones.
+            if ($asignacionActiva) {
+                $preguntasPayload = $preguntasPayload
+                    ->filter(function ($p) {
+                        $estado = (string) ($p['estado'] ?? '');
+                        // Correctas (MC) y párrafos ya calificados por el instructor.
+                        return $estado === 'correcta' || $estado === 'calificada';
+                    })
+                    ->values();
+            }
+
             $notaFinal = null;
             if ($ca->calificacionNumerica !== null && trim((string) $ca->calificacionNumerica) !== '') {
                 $notaFinal = (float) $ca->calificacionNumerica;
@@ -1434,12 +1639,10 @@ class ActividadController extends Controller
                 'porcentaje' => $porcentaje,
                 'comentarioDocente' => $ca->ComentarioDocente,
                 'mostrarRespuestasCorrectas' => $mostrarRespuestasCorrectas,
-                'resumen' => [
-                    'totalPreguntas' => $preguntasPayload->count(),
-                    'correctas' => $correctas,
-                    'incorrectas' => $incorrectas,
-                    'pendientes' => $pendientes,
-                ],
+                'asignacionActiva' => $asignacionActiva,
+                'revisionCompleta' => $revisionCompleta,
+                'fechaFinalAsignacion' => isset($ca->fechaFinal) ? (string) $ca->fechaFinal : null,
+                'resumen' => $resumen,
                 'preguntas' => $preguntasPayload,
             ]);
         } catch (\Throwable $e) {
@@ -1525,23 +1728,108 @@ class ActividadController extends Controller
             if ($actividad->tipoActividad === 'cuestionario') {
                 $actividad->load(['preguntas.tipoPregunta', 'preguntas.respuestas']);
                 $idCalif = $request->query('idCalificacionActividad');
-                if ($idCalif) {
+                $esIntentoAprendiz = !empty($idCalif);
+                if ($esIntentoAprendiz) {
+                    $idCalif = (int) $idCalif;
+                    $caRow = Schema::hasTable('calificacionActividad')
+                        ? DB::table('calificacionActividad')->where('id', $idCalif)->first()
+                        : null;
+                    if ($caRow) {
+                        $intervaloCfg = Schema::hasColumn('actividades', 'intervaloReintento')
+                            ? ($actividad->intervaloReintento !== null ? (int) $actividad->intervaloReintento : null)
+                            : null;
+                        $puntajePerfecto = CuestionarioAsignacionUtil::tienePuntajePerfectoAsignacion(
+                            $idCalif,
+                            (int) $actividad->id
+                        );
+                        $puedeNuevo = false;
+                        if (!$puntajePerfecto) {
+                            if (empty($caRow->fechaCalificacion) && !CuestionarioAsignacionUtil::tieneRespuestasReales($idCalif)) {
+                                $puedeNuevo = true;
+                            } elseif ($intervaloCfg !== null) {
+                                $eval = CuestionarioAsignacionUtil::evaluarDisponibilidadReintento(
+                                    $caRow->fechaCalificacion !== null ? (string) $caRow->fechaCalificacion : null,
+                                    $intervaloCfg,
+                                    isset($caRow->fechaFinal) ? (string) $caRow->fechaFinal : null,
+                                    null,
+                                    false
+                                );
+                                $puedeNuevo = !empty($eval['permitido']);
+                            }
+                        }
+                        CuestionarioAsignacionUtil::asegurarSubconjuntoParaResponder(
+                            $idCalif,
+                            (int) $actividad->id,
+                            $puedeNuevo
+                        );
+                    }
+
                     $preguntas = $actividad->preguntas;
-                    $ids = CuestionarioAsignacionUtil::idsParaCalificacion((int) $idCalif);
+                    $ids = CuestionarioAsignacionUtil::idsParaCalificacion($idCalif);
                     if ($ids !== null) {
                         $preguntas = $preguntas->whereIn('id', $ids);
                     }
-                    // Intento activo: no revelar la explicación de la respuesta correcta.
-                    $preguntas->each(fn ($p) => $p->makeHidden(['explicacionRespuesta']));
-                    $actividad->setRelation(
-                        'preguntas',
-                        CuestionarioAsignacionUtil::ordenarColeccionPreguntas(
-                            $preguntas,
-                            (int) $idCalif,
-                            (int) $actividad->id
-                        )
+                    $preguntas = CuestionarioAsignacionUtil::ordenarColeccionPreguntas(
+                        $preguntas,
+                        $idCalif,
+                        (int) $actividad->id
                     );
+                } else {
+                    $preguntas = $actividad->preguntas;
                 }
+
+                // Serializar preguntas del intento: array indexado 0..n-1 (nunca objeto por id)
+                // + lista explícita de IDs en el orden de presentación (fuente de verdad del orden).
+                $preguntasPayload = collect($preguntas)->values()->map(function ($p) use ($esIntentoAprendiz) {
+                    $tipoRel = (is_object($p) && method_exists($p, 'relationLoaded') && $p->relationLoaded('tipoPregunta'))
+                        ? $p->tipoPregunta
+                        : null;
+                    $respuestasRel = (is_object($p) && method_exists($p, 'relationLoaded') && $p->relationLoaded('respuestas'))
+                        ? $p->respuestas
+                        : collect();
+
+                    $respuestasPayload = collect($respuestasRel)->values()->map(function ($r) use ($esIntentoAprendiz) {
+                        $row = [
+                            'id' => (int) $r->id,
+                            'descripcionRespuesta' => $r->descripcionRespuesta,
+                            'idPregunta' => isset($r->idPregunta) ? (int) $r->idPregunta : null,
+                        ];
+                        if (!$esIntentoAprendiz) {
+                            $row['chkCorrecta'] = (bool) ($r->chkCorrecta ?? false);
+                            $row['puntaje'] = $r->puntaje ?? null;
+                        }
+
+                        return $row;
+                    })->all();
+
+                    return [
+                        'id' => (int) $p->id,
+                        'descripcion' => $p->descripcion,
+                        'puntaje' => $p->puntaje,
+                        'idTipoPregunta' => $p->idTipoPregunta !== null ? (int) $p->idTipoPregunta : null,
+                        'idActividad' => $p->idActividad !== null ? (int) $p->idActividad : null,
+                        'urlDocumento' => $p->urlDocumento,
+                        'explicacionRespuesta' => $esIntentoAprendiz ? null : ($p->explicacionRespuesta ?? null),
+                        'tipoPregunta' => $tipoRel ? [
+                            'id' => (int) $tipoRel->id,
+                            'tipoPregunta' => $tipoRel->tipoPregunta,
+                        ] : null,
+                        'respuestas' => $respuestasPayload,
+                    ];
+                })->values()->all();
+
+                // No usar setAttribute('preguntas') sobre el modelo: la relación homónima puede
+                // interferir al serializar. Forzar el orden en el JSON final.
+                $actividad->unsetRelation('preguntas');
+                $payload = $actividad->toArray();
+                unset($payload['preguntas']);
+                $payload['preguntas'] = array_values($preguntasPayload);
+                $payload['ordenPreguntasIds'] = array_values(array_map(
+                    static fn ($p) => (int) $p['id'],
+                    $preguntasPayload
+                ));
+
+                return response()->json($payload);
             }
             return response()->json($actividad);
         } catch (\Throwable $e) {
@@ -2640,6 +2928,7 @@ class ActividadController extends Controller
             $preguntasData = is_string($request->preguntas) ? json_decode($request->preguntas, true) : $request->preguntas;
             $request->merge(['preguntas' => $preguntasData ?? []]);
 
+            $totalPreguntas = is_array($request->preguntas) ? count($request->preguntas) : 0;
             $request->validate([
                 'titulo' => 'required|string|max:500',
                 'clasificacion' => 'nullable|string|max:255',
@@ -2649,6 +2938,8 @@ class ActividadController extends Controller
                 'preguntas.*.tipo' => 'required|in:Párrafo,Varias opciones',
                 'preguntas.*.titulo' => 'required|string|max:1000',
                 'preguntas.*.explicacionRespuesta' => 'nullable|string',
+                'preguntasMinimasAprobar' => 'nullable|integer|min:1|max:' . max(1, $totalPreguntas),
+                'intervaloReintento' => 'nullable|integer|min:1|max:525600',
             ]);
 
             $user = KeyUtil::user();
@@ -2656,7 +2947,7 @@ class ActividadController extends Controller
 
             $this->assertIdMateriaEsRap((int) $request->idMateria);
 
-            $actividad = Actividad::create([
+            $payloadActividad = [
                 'tituloActividad' => $request->titulo,
                 'descripcionActividad' => $request->descripcion ?? null,
                 'pathDocumentoActividad' => null,
@@ -2669,7 +2960,19 @@ class ActividadController extends Controller
                 'idClasificacion' => null,
                 'estrategia' => 'Cuestionario',
                 'entregables' => 'Respuestas al cuestionario',
-            ]);
+            ];
+            if (Schema::hasColumn('actividades', 'preguntasMinimasAprobar')) {
+                $payloadActividad['preguntasMinimasAprobar'] = $request->filled('preguntasMinimasAprobar')
+                    ? (int) $request->preguntasMinimasAprobar
+                    : null;
+            }
+            if (Schema::hasColumn('actividades', 'intervaloReintento')) {
+                $payloadActividad['intervaloReintento'] = $request->filled('intervaloReintento')
+                    ? (int) $request->intervaloReintento
+                    : null;
+            }
+
+            $actividad = Actividad::create($payloadActividad);
 
             DiagnosticoActividadesRapHistoricas::logCreacionActividad(
                 (int) $actividad->id,
@@ -2746,6 +3049,7 @@ class ActividadController extends Controller
             $preguntasData = is_string($request->preguntas) ? json_decode($request->preguntas, true) : $request->preguntas;
             $request->merge(['preguntas' => $preguntasData ?? []]);
 
+            $totalPreguntas = is_array($request->preguntas) ? count($request->preguntas) : 0;
             $request->validate([
                 'titulo' => 'required|string|max:500',
                 'clasificacion' => 'nullable|string|max:255',
@@ -2755,14 +3059,28 @@ class ActividadController extends Controller
                 'preguntas.*.tipo' => 'required|in:Párrafo,Varias opciones',
                 'preguntas.*.titulo' => 'required|string|max:1000',
                 'preguntas.*.explicacionRespuesta' => 'nullable|string',
+                'preguntasMinimasAprobar' => 'nullable|integer|min:1|max:' . max(1, $totalPreguntas),
+                'intervaloReintento' => 'nullable|integer|min:1|max:525600',
             ]);
 
-            $actividad->update([
+            $payloadUpdate = [
                 'tituloActividad' => $request->titulo,
                 'descripcionActividad' => $request->descripcion ?? null,
                 'autor' => $request->clasificacion ?? null,
                 'idMateria' => $request->idMateria,
-            ]);
+            ];
+            if (Schema::hasColumn('actividades', 'preguntasMinimasAprobar')) {
+                $payloadUpdate['preguntasMinimasAprobar'] = $request->filled('preguntasMinimasAprobar')
+                    ? (int) $request->preguntasMinimasAprobar
+                    : null;
+            }
+            if (Schema::hasColumn('actividades', 'intervaloReintento')) {
+                $payloadUpdate['intervaloReintento'] = $request->filled('intervaloReintento')
+                    ? (int) $request->intervaloReintento
+                    : null;
+            }
+
+            $actividad->update($payloadUpdate);
 
             $idsPreguntas = $actividad->preguntas()->pluck('id')->toArray();
             if (!empty($idsPreguntas) && \Illuminate\Support\Facades\Schema::hasTable('respuesta_cuestionarios')) {
@@ -2824,6 +3142,81 @@ class ActividadController extends Controller
             }
 
             return response()->json($actividad->load(['materia', 'estado', 'persona', 'preguntas.respuestas']));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Actualiza solo reglas de evaluación del cuestionario (mínimo de correctas / intervalo de reintento).
+     * Ambos campos son opcionales (null = sin regla personalizada).
+     */
+    public function actualizarReglasEvaluacionCuestionario(Request $request, int $id): JsonResponse
+    {
+        try {
+            $actividad = Actividad::findOrFail($id);
+            if (($actividad->tipoActividad ?? '') !== 'cuestionario') {
+                return response()->json(['error' => 'La actividad no es un cuestionario'], 422);
+            }
+
+            $totalPreguntas = (int) $actividad->preguntas()->count();
+            $validated = $request->validate([
+                'preguntasMinimasAprobar' => 'nullable|integer|min:1',
+                'intervaloReintento' => 'nullable|integer|min:1|max:525600',
+                // Contexto opcional: tope del mínimo = N del intento (no M del banco).
+                'cantidadPreguntasPorIntento' => 'nullable|integer|min:1|max:' . max(1, $totalPreguntas),
+            ]);
+
+            $cantidadPorIntento = array_key_exists('cantidadPreguntasPorIntento', $validated)
+                && $validated['cantidadPreguntasPorIntento'] !== null
+                ? (int) $validated['cantidadPreguntasPorIntento']
+                : null;
+
+            if (
+                array_key_exists('preguntasMinimasAprobar', $validated)
+                && $validated['preguntasMinimasAprobar'] !== null
+            ) {
+                $min = (int) $validated['preguntasMinimasAprobar'];
+                $tope = $cantidadPorIntento !== null && $cantidadPorIntento > 0
+                    ? $cantidadPorIntento
+                    : max(1, $totalPreguntas);
+                if ($min > $tope) {
+                    return response()->json([
+                        'error' => "Preguntas mínimas para aprobar ({$min}) no puede superar las preguntas por intento ({$tope}).",
+                        'preguntasMinimasAprobar' => $min,
+                        'preguntasPorIntento' => $tope,
+                    ], 422);
+                }
+                if ($totalPreguntas > 0 && $min > $totalPreguntas) {
+                    return response()->json([
+                        'error' => "Preguntas mínimas para aprobar ({$min}) no puede superar el banco ({$totalPreguntas}).",
+                        'preguntasMinimasAprobar' => $min,
+                        'bancoPreguntas' => $totalPreguntas,
+                    ], 422);
+                }
+            }
+
+            $payload = [];
+            if (Schema::hasColumn('actividades', 'preguntasMinimasAprobar') && array_key_exists('preguntasMinimasAprobar', $validated)) {
+                $payload['preguntasMinimasAprobar'] = $validated['preguntasMinimasAprobar'];
+            }
+            if (Schema::hasColumn('actividades', 'intervaloReintento') && array_key_exists('intervaloReintento', $validated)) {
+                $payload['intervaloReintento'] = $validated['intervaloReintento'];
+            }
+
+            // Incluye null: limpia reglas opcionales cuando el instructor las deja vacías.
+            if ($payload !== []) {
+                $actividad->update($payload);
+                $actividad->refresh();
+            }
+
+            return response()->json([
+                'id' => $actividad->id,
+                'preguntasMinimasAprobar' => $actividad->preguntasMinimasAprobar ?? null,
+                'intervaloReintento' => $actividad->intervaloReintento ?? null,
+            ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
@@ -2920,8 +3313,12 @@ class ActividadController extends Controller
      * Calificación automática para preguntas de selección múltiple (Varias opciones).
      * Correctas = valor proporcional, incorrectas = 0.
      * Ejemplo: 4 correctas de 5 preguntas → nota = (4/5)*5 = 4.0
+     * Si actividades.preguntasMinimasAprobar está definido, también determina cumpleMinimo
+     * por cantidad de preguntas correctas (no por puntaje).
+     *
+     * @return array{correctas: int, totalPreguntas: int, cumpleMinimo: bool|null}
      */
-    private function calificarCuestionarioAutomatico(int $idCalificacionActividad, int $idActividad, string $tblRc): void
+    private function calificarCuestionarioAutomatico(int $idCalificacionActividad, int $idActividad, string $tblRc): array
     {
         $preguntasVariasOpciones = DB::table('preguntas as p')
             ->join('tipoPreguntas as tp', 'p.idTipoPregunta', '=', 'tp.id')
@@ -2936,7 +3333,7 @@ class ActividadController extends Controller
         }
 
         if ($preguntasVariasOpciones->isEmpty()) {
-            return;
+            return ['correctas' => 0, 'totalPreguntas' => 0, 'cumpleMinimo' => null];
         }
 
         $totalPreguntas = $preguntasVariasOpciones->count();
@@ -2994,5 +3391,19 @@ class ActividadController extends Controller
                 'fechaCalificacion' => now(),
                 'updated_at' => now(),
             ]);
+
+        $cumpleMinimo = null;
+        if (Schema::hasColumn('actividades', 'preguntasMinimasAprobar')) {
+            $minAprobar = DB::table('actividades')->where('id', $idActividad)->value('preguntasMinimasAprobar');
+            if ($minAprobar !== null && (int) $minAprobar > 0) {
+                $cumpleMinimo = $correctas >= (int) $minAprobar;
+            }
+        }
+
+        return [
+            'correctas' => $correctas,
+            'totalPreguntas' => $totalPreguntas,
+            'cumpleMinimo' => $cumpleMinimo,
+        ];
     }
 }

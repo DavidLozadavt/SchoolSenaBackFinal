@@ -1319,6 +1319,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('actividades', [ActividadController::class, 'store']);
     Route::post('cuestionarios', [ActividadController::class, 'storeCuestionario']);
     Route::match(['put', 'post'], 'cuestionarios/{id}', [ActividadController::class, 'updateCuestionario']);
+    Route::put('cuestionarios/{id}/reglas-evaluacion', [ActividadController::class, 'actualizarReglasEvaluacionCuestionario']);
     Route::post('actividades/upload-documento', [ActividadController::class, 'uploadDocumento']);
     Route::post('actividades/{id}/upload-documento', [ActividadController::class, 'uploadDocumentoActividad']);
     Route::get('actividades/{id}/materiales-apoyo', [ActividadController::class, 'materialesApoyo']);
