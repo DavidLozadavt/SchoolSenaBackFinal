@@ -246,7 +246,6 @@ class AsignacionActividadController extends Controller
             $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
             $colFicha = Schema::hasColumn($tableMa, 'idFicha') ? 'idFicha' : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : null);
 
-            // Obtener matrículas académicas del estudiante en esta ficha
             $queryMa = DB::table($tableMa . ' as ma')
                 ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
                 ->where('m.idPersona', $idPersona);
@@ -444,8 +443,7 @@ class AsignacionActividadController extends Controller
                         ]);
                     }
                 } elseif (is_array($validated['aprendices'])) {
-                    // Obtener TODAS las matrículas académicas por estudiante (una por materia)
-                    // para que coincidan con la materia de cada actividad
+                    // Todas las matrículas académicas por estudiante (una por materia) para coincidir con cada actividad.
                     $aprendices = $this->aprendicesPorFichaParaAsignacion($idFicha);
                     $idsMatSeleccionados = collect($validated['aprendices'])->map(fn ($v) => (int) $v)->filter()->values();
                     foreach ($aprendices as $a) {
