@@ -23,6 +23,8 @@ class Actividad extends Model
         'idClasificacion',
         'estrategia',
         'entregables',
+        'preguntasMinimasAprobar',
+        'intervaloReintento',
     ];
 
     public function materia()

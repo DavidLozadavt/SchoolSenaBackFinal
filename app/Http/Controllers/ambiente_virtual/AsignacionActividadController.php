@@ -363,8 +363,7 @@ class AsignacionActividadController extends Controller
                 'fechaInicial' => 'nullable|date',
                 'fechaFinal' => 'nullable|date|after_or_equal:fechaInicial',
                 'configCuestionarios' => 'nullable|array',
-                'configCuestionarios.*.idsPreguntas' => 'required|array|min:1',
-                'configCuestionarios.*.idsPreguntas.*' => 'integer|exists:preguntas,id',
+                'configCuestionarios.*.cantidadPreguntas' => 'required|integer|min:1',
             ]);
 
             $ficha = \App\Models\Ficha::findOrFail($idFicha);
@@ -381,6 +380,52 @@ class AsignacionActividadController extends Controller
 
             $actividades = $validated['actividades'];
             $configCuestionarios = $validated['configCuestionarios'] ?? [];
+
+            // Validar cantidad por intento (1..banco) y preguntasMinimasAprobar vs esa cantidad (N, no M).
+            foreach ($actividades as $idActividadVal) {
+                $actVal = DB::table('actividades')->where('id', $idActividadVal)->first();
+                if (!$actVal || strtolower(trim((string) ($actVal->tipoActividad ?? ''))) !== 'cuestionario') {
+                    continue;
+                }
+                $tamanoBanco = (int) DB::table('preguntas')->where('idActividad', $idActividadVal)->count();
+                if ($tamanoBanco < 1) {
+                    return response()->json([
+                        'error' => 'El cuestionario no tiene preguntas en el banco.',
+                        'idActividad' => (int) $idActividadVal,
+                    ], 422);
+                }
+                $cantidadPorIntento = $this->resolverCantidadPreguntasAsignacion((int) $idActividadVal, $configCuestionarios);
+                if ($cantidadPorIntento === null) {
+                    return response()->json([
+                        'error' => 'Debe indicar la cantidad de preguntas por intento para el cuestionario.',
+                        'idActividad' => (int) $idActividadVal,
+                        'bancoPreguntas' => $tamanoBanco,
+                    ], 422);
+                }
+                if ($cantidadPorIntento < 1 || $cantidadPorIntento > $tamanoBanco) {
+                    return response()->json([
+                        'error' => "La cantidad por intento ({$cantidadPorIntento}) debe estar entre 1 y {$tamanoBanco} (tamaño del banco).",
+                        'idActividad' => (int) $idActividadVal,
+                        'cantidadPreguntas' => $cantidadPorIntento,
+                        'bancoPreguntas' => $tamanoBanco,
+                    ], 422);
+                }
+                if (Schema::hasColumn('actividades', 'preguntasMinimasAprobar')) {
+                    $minAprobar = $actVal->preguntasMinimasAprobar !== null
+                        ? (int) $actVal->preguntasMinimasAprobar
+                        : null;
+                    // Solo validar si el instructor configuró un mínimo (opcional).
+                    if ($minAprobar !== null && $minAprobar > 0 && $minAprobar > $cantidadPorIntento) {
+                        return response()->json([
+                            'error' => "Preguntas mínimas para aprobar ({$minAprobar}) supera las preguntas por intento ({$cantidadPorIntento}).",
+                            'idActividad' => (int) $idActividadVal,
+                            'preguntasMinimasAprobar' => $minAprobar,
+                            'preguntasPorIntento' => $cantidadPorIntento,
+                        ], 422);
+                    }
+                }
+            }
+
             $exitosas = 0;
             $omitidas = 0;
             $omitidosDetalle = [];
@@ -504,7 +549,7 @@ class AsignacionActividadController extends Controller
                     $idGrupo = is_array($idGrupo) ? ($idGrupo[0] ?? null) : $idGrupo;
                     $idGrupo = $idGrupo !== null ? (int) $idGrupo : null;
 
-                    $idsPreguntas = $this->resolverIdsPreguntasAsignacion((int) $idActividad, $configCuestionarios);
+                    $cantidadPreguntas = $this->resolverCantidadPreguntasAsignacion((int) $idActividad, $configCuestionarios);
 
                     $insertado = $this->crearCalificacionActividad(
                         (int) $idActividad,
@@ -514,7 +559,7 @@ class AsignacionActividadController extends Controller
                         $idCorte,
                         $fecha,
                         $fechaFin,
-                        $idsPreguntas
+                        $cantidadPreguntas
                     );
                     if ($insertado) {
                         $exitosas++;
@@ -736,32 +781,24 @@ class AsignacionActividadController extends Controller
         return $corte ? (int) $corte->id : 1;
     }
 
-    private function resolverIdsPreguntasAsignacion(int $idActividad, array $configCuestionarios): ?array
+    /**
+     * Cantidad de preguntas por intento configurada por el instructor (N del banco M).
+     */
+    private function resolverCantidadPreguntasAsignacion(int $idActividad, array $configCuestionarios): ?int
     {
         $actividad = Actividad::find($idActividad);
-        if (!$actividad || ($actividad->tipoActividad ?? '') !== 'cuestionario') {
+        if (!$actividad || strtolower(trim((string) ($actividad->tipoActividad ?? ''))) !== 'cuestionario') {
             return null;
         }
 
         $cfg = $configCuestionarios[(string) $idActividad] ?? $configCuestionarios[$idActividad] ?? null;
-        if (!$cfg || empty($cfg['idsPreguntas']) || !is_array($cfg['idsPreguntas'])) {
+        if (!$cfg || !isset($cfg['cantidadPreguntas'])) {
             return null;
         }
 
-        $idsSolicitados = collect($cfg['idsPreguntas'])->map(fn ($id) => (int) $id)->filter(fn ($id) => $id > 0)->unique()->values();
-        if ($idsSolicitados->isEmpty()) {
-            return null;
-        }
+        $n = (int) $cfg['cantidadPreguntas'];
 
-        $validos = DB::table('preguntas')
-            ->where('idActividad', $idActividad)
-            ->whereIn('id', $idsSolicitados->all())
-            ->pluck('id')
-            ->map(fn ($id) => (int) $id)
-            ->values()
-            ->all();
-
-        return $validos ?: null;
+        return $n > 0 ? $n : null;
     }
 
     private function crearCalificacionActividad(
@@ -772,7 +809,7 @@ class AsignacionActividadController extends Controller
         int $idCorte,
         $fecha,
         $fechaFin,
-        ?array $idsPreguntas = null
+        ?int $cantidadPreguntas = null
     ): bool {
         if (!Schema::hasTable('calificacionActividad')) return false;
         try {
@@ -792,8 +829,16 @@ class AsignacionActividadController extends Controller
                 'updated_at' => now(),
             ];
             $idCalificacion = (int) DB::table('calificacionActividad')->insertGetId($data);
-            if ($idCalificacion > 0 && !empty($idsPreguntas)) {
-                CuestionarioAsignacionUtil::guardarMarcadores($idCalificacion, $idsPreguntas);
+            if ($idCalificacion > 0 && $cantidadPreguntas !== null && $cantidadPreguntas > 0) {
+                // Subconjunto propio de este aprendiz (k=0); el banco no se modifica.
+                $ids = CuestionarioAsignacionUtil::seleccionarNPreguntasDelBanco(
+                    (int) $idActividad,
+                    $idCalificacion,
+                    $cantidadPreguntas,
+                    0
+                );
+                CuestionarioAsignacionUtil::guardarMarcadores($idCalificacion, $ids);
+                CuestionarioAsignacionUtil::persistirMetaAsignacion($idCalificacion, $cantidadPreguntas, 0, false);
             }
 
             return $idCalificacion > 0;
