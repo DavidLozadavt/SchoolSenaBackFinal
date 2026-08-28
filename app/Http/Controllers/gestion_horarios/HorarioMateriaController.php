@@ -204,7 +204,22 @@ class HorarioMateriaController extends Controller
                 // Determinar ID a excluir si estamos actualizando el horario base
                 $excludeId = ($index === 0 && $horarioBase) ? $horarioBase->id : null;
 
-                // VALIDACIÓN DE CRUCE
+                // Si la fecha de inicio quedó libre (hueco de una interrupción) pero la
+                // proyección de horas cubre fechas que siguen ocupadas, recortar el rango
+                // a las ocurrencias consecutivas realmente disponibles.
+                $fechaFinLibre = $this->limitarFechaFinalAOcurrenciasLibres($horarioData, $excludeId);
+                if ($fechaFinLibre === null) {
+                    $dia = Dia::find($horarioData['idDia']);
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => 'El horario del día ' . ($dia->dia ?? '') .
+                            ' de ' . $horarioData['horaInicial'] . ' a ' . $horarioData['horaFinal'] .
+                            ' se cruza con otra materia en el mismo rango de fechas.'
+                    ], 422);
+                }
+                $horarioData['fechaFinal'] = $fechaFinLibre;
+
+                // VALIDACIÓN DE CRUCE (por fechas de clase reales, no solo el rango)
                 if ($this->verCruce($horarioData, $excludeId)) {
                     $dia = Dia::find($horarioData['idDia']);
                     DB::rollBack();
@@ -223,8 +238,8 @@ class HorarioMateriaController extends Controller
                         AsignacionSesion::create([
                             'idHorarioMateria' => $horarioBase->id,
                             'tipoAsignacion'   => 'HORARIO COMPARTIDO',
-                            'fechaInicio'      => $fechaInicio,
-                            'fechaFin'         => $fechaFin,
+                            'fechaInicio'      => $horarioData['fechaInicial'],
+                            'fechaFin'         => $horarioData['fechaFinal'],
                             'observacion'      => $observacion,
                             'idContrato'       => null,
                         ]);
@@ -239,8 +254,8 @@ class HorarioMateriaController extends Controller
                         AsignacionSesion::create([
                             'idHorarioMateria' => $newHorario->id,
                             'tipoAsignacion'   => 'HORARIO COMPARTIDO',
-                            'fechaInicio'      => $fechaInicio,
-                            'fechaFin'         => $fechaFin,
+                            'fechaInicio'      => $horarioData['fechaInicial'],
+                            'fechaFin'         => $horarioData['fechaFinal'],
                             'observacion'      => $observacion,
                             'idContrato'       => null,
                         ]);
@@ -350,32 +365,53 @@ class HorarioMateriaController extends Controller
     }
 
     /**
-     * validate time crossing in the infrastructure
-     *
-     * @param array $data
-     * @param int $currentHorarioMateriaId
-     * @return boolean
+     * Cruce real: misma ficha, mismo día, horas superpuestas y al menos una
+     * fecha de clase en común. Un hueco (fecha interrumpida) no bloquea.
      */
     private function verCruce(array $data, $currentHorarioMateriaId = null): bool
     {
-        // Filtrar por Ficha (Grupo)
+        $existentes = $this->horariosCandidatosCruce($data, $currentHorarioMateriaId);
+        if ($existentes->isEmpty()) {
+            return false;
+        }
+
+        $tz = config('app.timezone');
+        $nuevas = $this->ocurrenciasEnRango(
+            $data['fechaInicial'] ?? null,
+            $data['fechaFinal'] ?? null,
+            $data['idDia'] ?? null,
+            $tz
+        );
+        if (empty($nuevas)) {
+            return false;
+        }
+
+        $nuevasSet = array_flip($nuevas);
+        foreach ($existentes as $existente) {
+            foreach ($this->ocurrenciasDeHorario($existente, $tz) as $fecha) {
+                if (isset($nuevasSet[$fecha])) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function horariosCandidatosCruce(array $data, $currentHorarioMateriaId = null)
+    {
         $query = HorarioMateria::where('idFicha', $data['idFicha'])
-            // Filtrar por Día
             ->where('idDia', $data['idDia'])
-            // Solo horarios activos ocupan la franja (no INTERRUMPIDO / FINALIZADO / EVALUADO)
             ->whereIn('estado', self::ESTADOS_HORARIO_ACTIVOS)
-            // Excluir el horario actual si se está editando
             ->when($currentHorarioMateriaId, function ($q) use ($currentHorarioMateriaId) {
                 return $q->where('id', '<>', $currentHorarioMateriaId);
             });
 
-        // Validar cruce de FECHAS
         $query->where(function ($q) use ($data) {
             $q->whereDate('fechaInicial', '<=', $data['fechaFinal'])
                 ->whereDate('fechaFinal', '>=', $data['fechaInicial']);
         });
 
-        // Validar cruce de HORAS
         $query->where(function ($q) use ($data) {
             $q->where(function ($sub) use ($data) {
                 $sub->whereTime('horaInicial', '<', $data['horaFinal'])
@@ -383,10 +419,52 @@ class HorarioMateriaController extends Controller
             });
         });
 
-        // validacion de dias festivos entre horarios
         $query->where('festivos', $data['festivos'] ?? false);
 
-        return $query->exists();
+        return $query->get();
+    }
+
+    /**
+     * Recorta fechaFinal a las ocurrencias consecutivas desde el inicio que no
+     * estén ocupadas. Null si la primera fecha ya está ocupada.
+     */
+    private function limitarFechaFinalAOcurrenciasLibres(array $data, $excludeId = null): ?string
+    {
+        $tz = config('app.timezone');
+        $nuevas = $this->ocurrenciasEnRango(
+            $data['fechaInicial'] ?? null,
+            $data['fechaFinal'] ?? null,
+            $data['idDia'] ?? null,
+            $tz
+        );
+        if (empty($nuevas)) {
+            return $data['fechaFinal'] ?? $data['fechaInicial'] ?? null;
+        }
+
+        $ocupadas = [];
+        foreach ($this->horariosCandidatosCruce($data, $excludeId) as $existente) {
+            foreach ($this->ocurrenciasDeHorario($existente, $tz) as $fecha) {
+                $ocupadas[$fecha] = true;
+            }
+        }
+
+        if (empty($ocupadas)) {
+            return $data['fechaFinal'] ?? $nuevas[count($nuevas) - 1];
+        }
+
+        $libres = [];
+        foreach ($nuevas as $fecha) {
+            if (isset($ocupadas[$fecha])) {
+                break;
+            }
+            $libres[] = $fecha;
+        }
+
+        if (empty($libres)) {
+            return null;
+        }
+
+        return $libres[count($libres) - 1];
     }
 
     /**
@@ -1701,30 +1779,23 @@ class HorarioMateriaController extends Controller
         $horasTotales = 0;
         $horasActuales = 0;
 
-        foreach ($horarios as $horario) {
-            // Calcular cuánto dura cada sesión en horas (con decimales)
-            $horaInicial = \Carbon\Carbon::parse($horario->horaInicial);
-            $horaFinal = \Carbon\Carbon::parse($horario->horaFinal);
-            $horasPorSesion = $horaFinal->diffInMinutes($horaInicial, true) / 60;
+            foreach ($horarios as $horario) {
+                if (! $horario->horaInicial || ! $horario->horaFinal || ! $horario->fechaInicial) {
+                    continue;
+                }
 
-            // Horas Totales: Calculadas por el rango de fechas (Teórico)
-            $fechaInicial = \Carbon\Carbon::parse($horario->fechaInicial);
-            $fechaFinal = \Carbon\Carbon::parse($horario->fechaFinal);
+                $horaInicial = \Carbon\Carbon::parse($horario->horaInicial);
+                $horaFinal = \Carbon\Carbon::parse($horario->horaFinal);
+                $horasPorSesion = $horaFinal->diffInMinutes($horaInicial, true) / 60;
 
-            if ($horario->dia && isset($horario->dia->dia)) {
-                $diasTotalesEnRango = $this->contarDiasEnRango(
-                    $fechaInicial,
-                    $fechaFinal,
-                    $horario->dia->dia
-                );
+                // Horas programadas según ocurrencias reales del rango (un hueco ya no suma).
+                $tz = config('app.timezone');
+                $diasTotalesEnRango = count($this->ocurrenciasDeHorario($horario, $tz));
                 $horasTotales += $diasTotalesEnRango * $horasPorSesion;
-            }
 
-            // Horas Actuales: Basadas en las sesiones que YA se han dado (fechaSesion no null)
-            // Usamos el contador cargado con withCount para evitar N+1
-            $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
-            $horasActuales += $sesionesDadas * $horasPorSesion;
-        }
+                $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
+                $horasActuales += $sesionesDadas * $horasPorSesion;
+            }
 
         // Calcular horas faltantes
         $horasFaltantes = max(0, $horasTotales - $horasActuales);
@@ -2156,12 +2227,12 @@ class HorarioMateriaController extends Controller
 
     public function interrumpirHorario(Request $request, int $id): JsonResponse
     {
-        return $this->cerrarHorarioAnticipado($request, $id, EstadoHorarioMateria::INTERRUMPIDO);
+        return $this->quitarFechaEspecifica($request, $id, EstadoHorarioMateria::INTERRUMPIDO);
     }
 
     public function finalizarHorario(Request $request, int $id): JsonResponse
     {
-        return $this->cerrarHorarioAnticipado($request, $id, EstadoHorarioMateria::FINALIZADO);
+        return $this->quitarFechaEspecifica($request, $id, EstadoHorarioMateria::FINALIZADO);
     }
 
     private function cerrarHorarioAnticipado(Request $request, int $id, string $nuevoEstado): JsonResponse
@@ -2300,6 +2371,463 @@ class HorarioMateriaController extends Controller
                 'error' => $th->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Quita únicamente la fecha enviada (una ocurrencia).
+     * No cambia el estado ni el rango de las demás fechas de la serie.
+     */
+    private function quitarFechaEspecifica(Request $request, int $id, string $tipoAccion): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'fechaFinal' => 'required|date',
+                'observacion' => 'nullable|string|max:2000',
+            ]);
+
+            $horario = HorarioMateria::find($id);
+            if (! $horario) {
+                return response()->json(['message' => 'Horario no encontrado'], 404);
+            }
+
+            if (! in_array($horario->estado, self::ESTADOS_HORARIO_ACTIVOS, true)) {
+                return response()->json([
+                    'message' => 'Solo se pueden modificar horarios en estado PENDIENTE o ASIGNADO.',
+                ], 422);
+            }
+
+            $bloqueo = TrimestreActualFichaService::abortSiGradoMateriaNoActual(
+                (int) $horario->idGradoMateria,
+                $horario->idFicha ? (int) $horario->idFicha : null
+            );
+            if ($bloqueo) {
+                return $bloqueo;
+            }
+
+            $tz = config('app.timezone');
+            $fechaObjetivo = Carbon::parse((string) $validated['fechaFinal'], $tz)->startOfDay();
+            $fechaObjetivoStr = $fechaObjetivo->toDateString();
+            $observacion = trim((string) ($validated['observacion'] ?? ''));
+
+            $fechaInicial = $horario->fechaInicial
+                ? Carbon::parse((string) $horario->fechaInicial, $tz)->startOfDay()
+                : null;
+            $fechaFinalActual = $horario->fechaFinal
+                ? Carbon::parse((string) $horario->fechaFinal, $tz)->startOfDay()
+                : null;
+
+            if ($fechaInicial && $fechaObjetivo->lt($fechaInicial)) {
+                return response()->json([
+                    'message' => 'La fecha no puede ser anterior a la fecha inicial del horario.',
+                ], 422);
+            }
+
+            if ($fechaFinalActual && $fechaObjetivo->gt($fechaFinalActual)) {
+                return response()->json([
+                    'message' => 'La fecha no puede ser mayor que la fecha final actual del horario.',
+                ], 422);
+            }
+
+            if (! $this->fechaCoincideConDiaHorario($fechaObjetivo, $horario->idDia)) {
+                return response()->json([
+                    'message' => 'La fecha seleccionada no corresponde a una clase de este horario.',
+                ], 422);
+            }
+
+            $idUsuario = auth()->id() ?? KeyUtil::user()?->id;
+            if (! $idUsuario) {
+                return response()->json(['message' => 'Sesión inválida'], 401);
+            }
+
+            $horariosAfectados = $this->horariosMismoSlotEnFecha($horario, $fechaObjetivoStr);
+            if ($horariosAfectados->isEmpty()) {
+                $horariosAfectados = collect([$horario]);
+            }
+
+            foreach ($horariosAfectados as $item) {
+                if ($this->sesionFechaTieneDatosReales((int) $item->id, $fechaObjetivoStr)) {
+                    return response()->json([
+                        'message' => 'No se puede modificar esa fecha: la sesión tiene asistencia o calificaciones registradas.',
+                    ], 422);
+                }
+            }
+
+            $fechaFinalAnterior = $horario->fechaFinal
+                ? Carbon::parse((string) $horario->fechaFinal, $tz)->toDateString()
+                : null;
+
+            DB::transaction(function () use (
+                $horariosAfectados,
+                $fechaObjetivoStr,
+                $observacion,
+                $idUsuario,
+                $tz,
+                $tipoAccion
+            ) {
+                foreach ($horariosAfectados as $item) {
+                    $this->quitarOcurrenciaDeHorario(
+                        $item,
+                        $fechaObjetivoStr,
+                        $observacion,
+                        (int) $idUsuario,
+                        $tz,
+                        $tipoAccion
+                    );
+                }
+            });
+
+            $horarioActualizado = HorarioMateria::find($id);
+            $accionLabel = $tipoAccion === EstadoHorarioMateria::FINALIZADO
+                ? 'finalizado'
+                : 'interrumpido';
+
+            return response()->json([
+                'message' => "Horario {$accionLabel} correctamente",
+                'data' => [
+                    'id' => $id,
+                    'estado' => $horarioActualizado?->estado,
+                    'fechaFinal' => $horarioActualizado?->fechaFinal,
+                    'fechaFinalAnterior' => $fechaFinalAnterior,
+                ],
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['message' => 'Datos inválidos', 'errors' => $e->errors()], 422);
+        } catch (\Throwable $th) {
+            Log::error('Error al quitar fecha de horario', [
+                'id' => $id,
+                'accion' => $tipoAccion,
+                'error' => $th->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Ha ocurrido un error al actualizar el horario',
+                'error' => $th->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function fechaCoincideConDiaHorario(Carbon $fecha, $idDia): bool
+    {
+        $carbonDay = (int) $fecha->dayOfWeek;
+        $dbIdDia = $carbonDay === 0 ? 7 : $carbonDay;
+
+        return (int) $idDia === $dbIdDia;
+    }
+
+    /**
+     * Fechas reales de clase del horario (mismo día de la semana, rango inclusivo).
+     *
+     * @return array<int, string>
+     */
+    private function ocurrenciasDeHorario(HorarioMateria $horario, string $tz): array
+    {
+        return $this->ocurrenciasEnRango(
+            $horario->fechaInicial ? (string) $horario->fechaInicial : null,
+            $horario->fechaFinal ? (string) $horario->fechaFinal : null,
+            $horario->idDia,
+            $tz
+        );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function ocurrenciasEnRango(?string $fechaInicial, ?string $fechaFinal, $idDia, string $tz): array
+    {
+        if (! $fechaInicial || ! $idDia) {
+            return [];
+        }
+
+        $start = Carbon::parse($fechaInicial, $tz)->startOfDay();
+        $end = $fechaFinal
+            ? Carbon::parse($fechaFinal, $tz)->startOfDay()
+            : $start->copy();
+
+        if ($end->lt($start)) {
+            return [];
+        }
+
+        $fechas = [];
+        $cursor = $start->copy();
+        while ($cursor->lte($end)) {
+            if ($this->fechaCoincideConDiaHorario($cursor, $idDia)) {
+                $fechas[] = $cursor->toDateString();
+            }
+            $cursor->addDay();
+        }
+
+        return $fechas;
+    }
+
+    /**
+     * Clones del mismo slot y de la misma serie (no otras programaciones).
+     */
+    private function horariosMismoSlotEnFecha(HorarioMateria $horario, string $fecha): Collection
+    {
+        return HorarioMateria::where('idFicha', $horario->idFicha)
+            ->where('idGradoMateria', $horario->idGradoMateria)
+            ->where('idDia', $horario->idDia)
+            ->where('horaInicial', $horario->horaInicial)
+            ->where('horaFinal', $horario->horaFinal)
+            ->whereDate('fechaInicial', $horario->fechaInicial)
+            ->whereDate('fechaFinal', $horario->fechaFinal)
+            ->whereIn('estado', self::ESTADOS_HORARIO_ACTIVOS)
+            ->whereDate('fechaInicial', '<=', $fecha)
+            ->whereDate('fechaFinal', '>=', $fecha)
+            ->get();
+    }
+
+    private function sesionFechaTieneDatosReales(int $idHorarioMateria, string $fecha): bool
+    {
+        $query = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
+            ->whereDate('fechaSesion', $fecha)
+            ->withCount([
+                'asistencia as asistencia_real_count' => function ($q) {
+                    $q->where('asistio', true);
+                },
+            ]);
+
+        if (Schema::hasTable('calificacionSesiones')) {
+            $query->withCount('calificacionSesiones');
+        }
+
+        $sesion = $query->first();
+        if (! $sesion) {
+            return false;
+        }
+
+        if ((int) $sesion->asistencia_real_count > 0) {
+            return true;
+        }
+
+        if (Schema::hasTable('calificacionSesiones') && (int) ($sesion->calificacion_sesiones_count ?? 0) > 0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function quitarOcurrenciaDeHorario(
+        HorarioMateria $horario,
+        string $fechaObjetivo,
+        string $observacion,
+        int $idUsuario,
+        string $tz,
+        string $tipoAccion = EstadoHorarioMateria::INTERRUMPIDO
+    ): void {
+        $ocurrencias = $this->ocurrenciasDeHorario($horario, $tz);
+        if (! in_array($fechaObjetivo, $ocurrencias, true)) {
+            return;
+        }
+
+        $antes = [];
+        $despues = [];
+        $vistoObjetivo = false;
+        foreach ($ocurrencias as $fecha) {
+            if ($fecha === $fechaObjetivo) {
+                $vistoObjetivo = true;
+                continue;
+            }
+            if (! $vistoObjetivo) {
+                $antes[] = $fecha;
+            } else {
+                $despues[] = $fecha;
+            }
+        }
+
+        $fechaFinalAnterior = $horario->fechaFinal
+            ? Carbon::parse((string) $horario->fechaFinal, $tz)->toDateString()
+            : null;
+
+        $this->eliminarSesionDeFecha((int) $horario->id, $fechaObjetivo);
+
+        if ($observacion !== '') {
+            $marca = $tipoAccion === EstadoHorarioMateria::FINALIZADO
+                ? '[FINALIZACIÓN]'
+                : '[INTERRUPCIÓN]';
+            $prev = trim((string) ($horario->observacion ?? ''));
+            $horario->observacion = trim($prev . "\n" . $marca . ' ' . $observacion);
+        }
+
+        if (empty($antes) && empty($despues)) {
+            $this->vaciarHorarioSinOcurrencias($horario);
+            if ($horario->exists) {
+                $this->registrarHistorialInterrupcion(
+                    $horario,
+                    $fechaFinalAnterior,
+                    $fechaObjetivo,
+                    $idUsuario,
+                    $observacion,
+                    $tipoAccion
+                );
+            }
+            return;
+        }
+
+        $clon = null;
+        $nuevoInicio = ! empty($antes) ? $antes[0] : (! empty($despues) ? $despues[0] : null);
+        $nuevoFin = ! empty($antes) ? $antes[count($antes) - 1] : null;
+
+        if (! empty($antes) && ! empty($despues)) {
+            $clon = $horario->replicate();
+            $clon->fechaInicial = $despues[0];
+            $clon->fechaFinal = $despues[count($despues) - 1];
+            $clon->save();
+
+            SesionMateria::where('idHorarioMateria', $horario->id)
+                ->whereDate('fechaSesion', '>', $fechaObjetivo)
+                ->update(['idHorarioMateria' => $clon->id]);
+
+            HorarioMateria::generarRmis($clon);
+
+            $horario->fechaFinal = $antes[count($antes) - 1];
+            $nuevoFin = $horario->fechaFinal;
+        } elseif (! empty($antes)) {
+            $horario->fechaFinal = $antes[count($antes) - 1];
+            $nuevoFin = $horario->fechaFinal;
+        } else {
+            $horario->fechaInicial = $despues[0];
+            $nuevoInicio = $horario->fechaInicial;
+        }
+
+        $horario->save();
+
+        $this->ajustarAsignacionesTrasHueco($horario, $fechaObjetivo, $nuevoInicio, $nuevoFin, $clon);
+        $this->registrarHistorialInterrupcion(
+            $horario,
+            $fechaFinalAnterior,
+            $fechaObjetivo,
+            $idUsuario,
+            $observacion,
+            $tipoAccion
+        );
+    }
+
+    private function eliminarSesionDeFecha(int $idHorarioMateria, string $fecha): void
+    {
+        $sesiones = SesionMateria::where('idHorarioMateria', $idHorarioMateria)
+            ->whereDate('fechaSesion', $fecha)
+            ->get();
+
+        foreach ($sesiones as $sesion) {
+            $sesion->asistencia()->delete();
+            if (Schema::hasTable('calificacionSesiones')) {
+                $sesion->calificacionSesiones()->delete();
+            }
+            $sesion->delete();
+        }
+    }
+
+    private function vaciarHorarioSinOcurrencias(HorarioMateria $horario): void
+    {
+        AsignacionSesion::where('idHorarioMateria', $horario->id)->delete();
+
+        $horario->sesionMaterias()->each(function ($sesion) {
+            $sesion->asistencia()->delete();
+            if (Schema::hasTable('calificacionSesiones')) {
+                $sesion->calificacionSesiones()->delete();
+            }
+            $sesion->delete();
+        });
+
+        $horario->detallesRmi()->where(function ($q) {
+            $q->where('estado', 'PENDIENTE')
+                ->whereNull('archivoPago')
+                ->whereNull('urlInforme')
+                ->whereNull('numeroPlanilla');
+        })->delete();
+
+        $totalRecordsForRap = HorarioMateria::where('idGradoMateria', $horario->idGradoMateria)->count();
+
+        if ($totalRecordsForRap > 1) {
+            $horario->delete();
+            return;
+        }
+
+        $horario->update([
+            'idDia' => null,
+            'idInfraestructura' => null,
+            'idContrato' => null,
+            'fechaFinal' => null,
+            'horaInicial' => null,
+            'horaFinal' => null,
+            'observacion' => $horario->observacion,
+            'estado' => EstadoHorarioMateria::PENDIENTE,
+        ]);
+    }
+
+    private function ajustarAsignacionesTrasHueco(
+        HorarioMateria $horario,
+        string $fechaEliminada,
+        ?string $nuevoInicio,
+        ?string $nuevoFin,
+        ?HorarioMateria $clon
+    ): void {
+        $asignaciones = AsignacionSesion::where('idHorarioMateria', $horario->id)->get();
+
+        foreach ($asignaciones as $asig) {
+            $aIni = Carbon::parse((string) $asig->fechaInicio)->toDateString();
+            $aFin = Carbon::parse((string) $asig->fechaFin)->toDateString();
+
+            if ($clon && $aFin > $fechaEliminada) {
+                $copyIni = $aIni > (string) $clon->fechaInicial ? $aIni : (string) $clon->fechaInicial;
+                $copyFin = $aFin < (string) $clon->fechaFinal ? $aFin : (string) $clon->fechaFinal;
+                if ($copyIni <= $copyFin) {
+                    AsignacionSesion::create([
+                        'idHorarioMateria' => $clon->id,
+                        'idContrato' => $asig->idContrato,
+                        'tipoAsignacion' => $asig->tipoAsignacion,
+                        'fechaInicio' => $copyIni,
+                        'fechaFin' => $copyFin,
+                        'observacion' => $asig->observacion,
+                    ]);
+                }
+            }
+
+            if ($nuevoInicio && $aFin < $nuevoInicio) {
+                $asig->delete();
+                continue;
+            }
+            if ($nuevoFin && $aIni > $nuevoFin) {
+                $asig->delete();
+                continue;
+            }
+
+            $changed = false;
+            if ($nuevoInicio && $aIni < $nuevoInicio) {
+                $asig->fechaInicio = $nuevoInicio;
+                $changed = true;
+            }
+            if ($nuevoFin && $aFin > $nuevoFin) {
+                $asig->fechaFin = $nuevoFin;
+                $changed = true;
+            }
+            if ($changed) {
+                $asig->save();
+            }
+        }
+    }
+
+    private function registrarHistorialInterrupcion(
+        HorarioMateria $horario,
+        ?string $fechaFinalAnterior,
+        string $fechaObjetivo,
+        int $idUsuario,
+        string $observacion,
+        string $tipoAccion = EstadoHorarioMateria::INTERRUMPIDO
+    ): void {
+        if (! Schema::hasTable('historialHorarioMateria') || ! $horario->id) {
+            return;
+        }
+
+        HistorialHorarioMateria::create([
+            'idHorarioMateria' => $horario->id,
+            'tipoAccion' => $tipoAccion,
+            'fechaFinalAnterior' => $fechaFinalAnterior,
+            'fechaFinalNueva' => $fechaObjetivo,
+            'idUsuario' => $idUsuario,
+            'observacion' => $observacion !== '' ? $observacion : null,
+        ]);
     }
 
     private function validarSesionesSinDatosPosteriores(int $idHorarioMateria, Carbon $nuevaFecha): ?JsonResponse
