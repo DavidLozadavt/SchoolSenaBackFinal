@@ -363,6 +363,7 @@ class AsignacionActividadController extends Controller
                 'fechaFinal' => 'nullable|date|after_or_equal:fechaInicial',
                 'configCuestionarios' => 'nullable|array',
                 'configCuestionarios.*.cantidadPreguntas' => 'required|integer|min:1',
+                'configCuestionarios.*.tiempoCuestionario' => 'nullable|integer|min:1|max:10080',
             ]);
 
             $ficha = \App\Models\Ficha::findOrFail($idFicha);
@@ -399,6 +400,13 @@ class AsignacionActividadController extends Controller
                         'error' => 'Debe indicar la cantidad de preguntas por intento para el cuestionario.',
                         'idActividad' => (int) $idActividadVal,
                         'bancoPreguntas' => $tamanoBanco,
+                    ], 422);
+                }
+                $tiempoCuestionario = $this->resolverTiempoCuestionarioAsignacion((int) $idActividadVal, $configCuestionarios);
+                if ($tiempoCuestionario !== null && $tiempoCuestionario < 1) {
+                    return response()->json([
+                        'error' => 'El tiempo límite del cuestionario debe ser mayor a 0 o dejarse vacío.',
+                        'idActividad' => (int) $idActividadVal,
                     ], 422);
                 }
                 if ($cantidadPorIntento < 1 || $cantidadPorIntento > $tamanoBanco) {
@@ -522,6 +530,13 @@ class AsignacionActividadController extends Controller
                         }
                     }
                 }
+                $tiempoCuestionario = $this->resolverTiempoCuestionarioAsignacion((int) $idActividad, $configCuestionarios);
+                if (array_key_exists((string) $idActividad, $configCuestionarios) || array_key_exists($idActividad, $configCuestionarios)) {
+                    DB::table('actividades')
+                        ->where('id', $idActividad)
+                        ->update(['tiempoCuestionario' => $tiempoCuestionario]);
+                }
+
                 foreach (array_values($destPorMatricula) as $dest) {
                     $idMa = is_array($dest['idMatriculaAcademica'] ?? null)
                         ? ($dest['idMatriculaAcademica'][0] ?? 0)
@@ -797,6 +812,27 @@ class AsignacionActividadController extends Controller
         $n = (int) $cfg['cantidadPreguntas'];
 
         return $n > 0 ? $n : null;
+    }
+
+    private function resolverTiempoCuestionarioAsignacion(int $idActividad, array $configCuestionarios): ?int
+    {
+        $actividad = Actividad::find($idActividad);
+        if (!$actividad || strtolower(trim((string) ($actividad->tipoActividad ?? ''))) !== 'cuestionario') {
+            return null;
+        }
+
+        $cfg = $configCuestionarios[(string) $idActividad] ?? $configCuestionarios[$idActividad] ?? null;
+        if (!$cfg || !array_key_exists('tiempoCuestionario', $cfg)) {
+            return null;
+        }
+
+        $tiempo = $cfg['tiempoCuestionario'];
+        if ($tiempo === null || $tiempo === '' || (is_string($tiempo) && trim($tiempo) === '')) {
+            return null;
+        }
+
+        $minutos = (int) $tiempo;
+        return $minutos > 0 ? $minutos : null;
     }
 
     private function crearCalificacionActividad(

@@ -7,6 +7,7 @@ use App\Mail\MailService;
 use App\Models\NotificacionSistema;
 use App\Models\TipoNotificacion;
 use App\Util\KeyUtil;
+use App\Util\CuestionarioAsignacionUtil;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -250,6 +251,8 @@ class CalificacionActividadController extends Controller
 
             $vistos = [];
             $result = [];
+            $tipoActividad = DB::table('actividades')->where('id', $idActividad)->value('tipoActividad');
+            $esCuestionario = strtolower(trim((string) ($tipoActividad ?? ''))) === 'cuestionario';
             foreach ($calificaciones as $c) {
                 $idMat = $c->idMatricula ?? null;
                 if ($idMat !== null && isset($vistos[$idMat])) {
@@ -266,6 +269,19 @@ class CalificacionActividadController extends Controller
                     : ($solicitudCorreccion
                         ? 'CORRECCION_SOLICITADA'
                         : ($entregado ? 'ENVIADO' : 'PENDIENTE'));
+
+                $tiempoIntento = $esCuestionario
+                    ? CuestionarioAsignacionUtil::resumenTiempoIntento(
+                        $c->calificacionEstandart !== null ? (string) $c->calificacionEstandart : null,
+                        $c->fechaCalificacion !== null ? (string) $c->fechaCalificacion : null
+                    )
+                    : [
+                        'fechaInicioIntento' => null,
+                        'fechaFinIntento' => null,
+                        'tiempoUtilizadoSegundos' => null,
+                        'cierrePorTiempo' => false,
+                        'estadoCierre' => null,
+                    ];
 
                 $result[] = [
                     'idCalificacionActividad' => $c->idCalificacionActividad,
@@ -287,6 +303,12 @@ class CalificacionActividadController extends Controller
                     /** Útil como referencia de última modificación del registro (p. ej. tras entrega). */
                     'fechaActualizacionRegistro' => $c->updated_at ?? null,
                     'estado' => $estado,
+                    'fechaInicioIntento' => $tiempoIntento['fechaInicioIntento'],
+                    'fechaFinIntento' => $tiempoIntento['fechaFinIntento'],
+                    'tiempoUtilizadoSegundos' => $tiempoIntento['tiempoUtilizadoSegundos'],
+                    'cierrePorTiempo' => $tiempoIntento['cierrePorTiempo'],
+                    'estadoCierre' => $tiempoIntento['estadoCierre'],
+                    'tiempoLimiteMinutos' => $esCuestionario ? CuestionarioAsignacionUtil::minutosTiempoCuestionario($c) : null,
                 ];
             }
 
