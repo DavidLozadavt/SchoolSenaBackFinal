@@ -14,5 +14,8 @@ yarn-error.log
 /.idea
 /.vscode
 public/*.*
+!public/index.php
+!public/.htaccess
+!public/robots.txt
 public/assets
 service-account.json
