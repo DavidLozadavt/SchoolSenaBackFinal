@@ -4,6 +4,7 @@ namespace App\Util;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Subconjunto de preguntas por intento de cuestionario.
@@ -17,11 +18,10 @@ class CuestionarioAsignacionUtil
 
     public static function tablaRespuestaCuestionarios(): ?string
     {
-        if (Schema::hasTable('respuestaCuestionarios')) {
-            return 'respuestaCuestionarios';
-        }
-        if (Schema::hasTable('respuesta_cuestionarios')) {
-            return 'respuesta_cuestionarios';
+        foreach (['respuestaCuestionarios', 'respuestasCuestionarios', 'respuesta_cuestionarios'] as $tabla) {
+            if (Schema::hasTable($tabla)) {
+                return $tabla;
+            }
         }
 
         return null;
@@ -165,6 +165,21 @@ class CuestionarioAsignacionUtil
             return;
         }
 
+        // Un grupo puede estar vacío al asignar. Su configuración se conserva en el
+        // almacenamiento privado existente, vinculada al ID de asignacionActividadGrupo.
+        $asignacionGrupo = Schema::hasTable('asignacionActividadGrupo')
+            ? DB::table('asignacionActividadGrupo')->where('idActividad', $idActividad)->where('idGrupo', $idGrupo)->first()
+            : null;
+        $configGrupo = $asignacionGrupo ? self::leerConfiguracionGrupo((int) $asignacionGrupo->id) : null;
+        if ($configGrupo !== null) {
+            $n = $configGrupo['cantidadPreguntas'];
+            $ids = self::seleccionarNPreguntasDelBanco($idActividad, $idCalificacionNueva, $n, 0);
+            self::guardarMarcadores($idCalificacionNueva, $ids);
+            self::persistirMetaAsignacion($idCalificacionNueva, $n, 0, false, null, null, null, false, $configGrupo['tiempoCuestionario']);
+
+            return;
+        }
+
         $hermano = DB::table('calificacionActividad as ca')
             ->where('ca.idActividad', $idActividad)
             ->where('ca.idGrupo', $idGrupo)
@@ -193,7 +208,7 @@ class CuestionarioAsignacionUtil
         // Misma cantidad, subconjunto propio del nuevo aprendiz
         $ids = self::seleccionarNPreguntasDelBanco($idActividad, $idCalificacionNueva, (int) $n, 0);
         self::guardarMarcadores($idCalificacionNueva, $ids);
-        self::persistirMetaAsignacion($idCalificacionNueva, (int) $n, 0, false);
+        self::persistirMetaAsignacion($idCalificacionNueva, (int) $n, 0, false, null, null, null, false, $meta['tiempoMinutos']);
     }
 
     /**
@@ -263,7 +278,8 @@ class CuestionarioAsignacionUtil
         ?bool $cumpleMinimo = null,
         ?int $correctas = null,
         ?int $total = null,
-        bool $limpiarResultadoIntento = false
+        bool $limpiarResultadoIntento = false,
+        ?int $tiempoMinutos = null
     ): void {
         if (!Schema::hasTable('calificacionActividad') || !Schema::hasColumn('calificacionActividad', 'calificacionEstandart')) {
             return;
@@ -283,7 +299,17 @@ class CuestionarioAsignacionUtil
             }
         }
 
-        $raw = self::escribirMetaIntentoCuestionario($ok, $c, $t, $cantidad, $intento, $open);
+        $inicioUnix = $metaPrev['inicioUnix'] ?? null;
+        $timeout = !empty($metaPrev['timeout']);
+        if ($limpiarResultadoIntento) {
+            $inicioUnix = now()->timestamp;
+            $timeout = false;
+        } elseif ($open && ($inicioUnix === null || $inicioUnix <= 0)) {
+            $inicioUnix = now()->timestamp;
+            $timeout = false;
+        }
+
+        $raw = self::escribirMetaIntentoCuestionario($ok, $c, $t, $cantidad, $intento, $open, $inicioUnix, $timeout, $tiempoMinutos ?? $metaPrev['tiempoMinutos']);
         DB::table('calificacionActividad')->where('id', $idCalificacion)->update([
             'calificacionEstandart' => $raw,
             'updated_at' => now(),
@@ -465,12 +491,15 @@ class CuestionarioAsignacionUtil
 
     /**
      * Meta de evaluación de cuestionario en calificacionActividad.calificacionEstandart.
-     * Formato: CQ|ok={0|1}|c={correctas}|t={totalAsignadas}|n={cantidadPorIntento}|k={intento}|open={0|1}
+     * Formato: CQ|ok={0|1}|c={correctas}|t={totalAsignadas}|n={cantidadPorIntento}|k={intento}|open={0|1}|ini={unix}|tout={0|1}
      * - ok: cumplió preguntasMinimasAprobar (solo estado académico APROBADO).
      * - c/t: correctas vs total del subconjunto del intento (100% => bloquea reintentos).
      * - n: cantidad de preguntas por intento configurada por el instructor.
      * - k: clave de intento (0 = primero; se incrementa en cada reintento regenerado).
      * - open: intento regenerado en curso (evita regenerar otra vez en F5).
+     * - ini: unix del inicio real del intento (cuenta regresiva).
+     * - tout: 1 si el intento se cerró por tiempo agotado.
+     * - lim: minutos de esta asignación (0 = sin límite); se conserva en cada intento.
      *
      * @return array{
      *   cumpleMinimo: bool|null,
@@ -479,7 +508,10 @@ class CuestionarioAsignacionUtil
      *   puntajePerfecto: bool,
      *   cantidad: int|null,
      *   intento: int|null,
-     *   open: bool
+     *   open: bool,
+     *   inicioUnix: int|null,
+     *   timeout: bool,
+     *   tiempoMinutos: int|null
      * }
      */
     public static function leerMetaIntentoCuestionario(?string $calificacionEstandart): array
@@ -493,6 +525,9 @@ class CuestionarioAsignacionUtil
             'cantidad' => null,
             'intento' => null,
             'open' => false,
+            'inicioUnix' => null,
+            'timeout' => false,
+            'tiempoMinutos' => null,
         ];
         if ($raw === '' || !str_starts_with($raw, 'CQ|')) {
             return $vacio;
@@ -529,6 +564,16 @@ class CuestionarioAsignacionUtil
             $open = $mo[1] === '1';
         }
 
+        $inicioUnix = null;
+        if (preg_match('/\|ini=(\d+)/', $raw, $mi)) {
+            $inicioUnix = (int) $mi[1];
+        }
+
+        $timeout = false;
+        if (preg_match('/\|tout=([01])/', $raw, $mto)) {
+            $timeout = $mto[1] === '1';
+        }
+
         $puntajePerfecto = $correctas !== null
             && $total !== null
             && $total > 0
@@ -542,6 +587,9 @@ class CuestionarioAsignacionUtil
             'cantidad' => $cantidad,
             'intento' => $intento,
             'open' => $open,
+            'inicioUnix' => $inicioUnix,
+            'timeout' => $timeout,
+            'tiempoMinutos' => preg_match('/\|lim=(\d+)(?:\||$)/', $raw, $ml) ? (int) $ml[1] : null,
         ];
     }
 
@@ -551,6 +599,8 @@ class CuestionarioAsignacionUtil
      * @param  int|null  $cantidad  Preguntas por intento configuradas
      * @param  int|null  $intento  Clave de intento (k)
      * @param  bool|null $open  Intento regenerado en curso
+     * @param  int|null  $inicioUnix  Inicio real del intento (unix)
+     * @param  bool|null $timeout  Cierre por tiempo agotado
      */
     public static function escribirMetaIntentoCuestionario(
         ?bool $cumpleMinimo,
@@ -558,7 +608,10 @@ class CuestionarioAsignacionUtil
         ?int $total = null,
         ?int $cantidad = null,
         ?int $intento = null,
-        ?bool $open = null
+        ?bool $open = null,
+        ?int $inicioUnix = null,
+        ?bool $timeout = null,
+        ?int $tiempoMinutos = null
     ): string {
         $parts = ['CQ'];
         if ($cumpleMinimo === null) {
@@ -578,6 +631,16 @@ class CuestionarioAsignacionUtil
         }
         if ($open !== null) {
             $parts[] = 'open=' . ($open ? '1' : '0');
+        }
+        if ($inicioUnix !== null && $inicioUnix > 0) {
+            $parts[] = 'ini=' . $inicioUnix;
+        }
+        if ($timeout !== null) {
+            $parts[] = 'tout=' . ($timeout ? '1' : '0');
+        }
+
+        if ($tiempoMinutos !== null) {
+            $parts[] = 'lim=' . max(0, $tiempoMinutos);
         }
 
         return implode('|', $parts);
@@ -784,5 +847,178 @@ class CuestionarioAsignacionUtil
         }
 
         return false;
+    }
+
+    /** El límite pertenece a calificacionActividad; lim=0 indica una asignación sin límite. */
+    public static function minutosTiempoCuestionario(?object $asignacion): ?int
+    {
+        $meta = self::leerMetaIntentoCuestionario($asignacion->calificacionEstandart ?? null);
+        $minutos = $meta['tiempoMinutos'];
+
+        return $minutos !== null && $minutos > 0 ? $minutos : null;
+    }
+
+    public static function guardarConfiguracionGrupo(int $idAsignacionGrupo, int $cantidad, ?int $minutos): void
+    {
+        $guardado = Storage::disk('local')->put("cuestionarios/asignaciones-grupo/{$idAsignacionGrupo}.json", json_encode([
+            'cantidadPreguntas' => $cantidad,
+            'tiempoCuestionario' => $minutos ?? 0,
+        ], JSON_THROW_ON_ERROR));
+        if (!$guardado) {
+            throw new \RuntimeException('No se pudo guardar la configuración del cuestionario para el grupo.');
+        }
+    }
+
+    public static function leerConfiguracionGrupo(int $idAsignacionGrupo): ?array
+    {
+        $path = "cuestionarios/asignaciones-grupo/{$idAsignacionGrupo}.json";
+        if (!Storage::disk('local')->exists($path)) {
+            return null;
+        }
+        $config = json_decode(Storage::disk('local')->get($path), true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($config) || !isset($config['cantidadPreguntas'], $config['tiempoCuestionario'])
+            || !is_int($config['cantidadPreguntas']) || $config['cantidadPreguntas'] < 1
+            || !is_int($config['tiempoCuestionario']) || $config['tiempoCuestionario'] < 0) {
+            throw new \RuntimeException('No se pudo leer la configuración del cuestionario para el grupo.');
+        }
+
+        return $config;
+    }
+
+    /**
+     * Marca el inicio del intento la primera vez que el aprendiz entra a responder.
+     */
+    public static function marcarInicioIntento(int $idCalificacion): void
+    {
+        if (!Schema::hasTable('calificacionActividad') || !Schema::hasColumn('calificacionActividad', 'calificacionEstandart')) {
+            return;
+        }
+        $ca = DB::table('calificacionActividad')->where('id', $idCalificacion)->first();
+        if (!$ca) {
+            return;
+        }
+        $meta = self::leerMetaIntentoCuestionario(
+            isset($ca->calificacionEstandart) ? (string) $ca->calificacionEstandart : null
+        );
+        if (!empty($ca->fechaCalificacion) && empty($meta['open'])) {
+            return;
+        }
+        if (!empty($meta['inicioUnix']) && (int) $meta['inicioUnix'] > 0) {
+            return;
+        }
+
+        $raw = self::escribirMetaIntentoCuestionario(
+            $meta['cumpleMinimo'],
+            $meta['correctas'],
+            $meta['total'],
+            $meta['cantidad'],
+            $meta['intento'],
+            true,
+            now()->timestamp,
+            false,
+            $meta['tiempoMinutos']
+        );
+        DB::table('calificacionActividad')->where('id', $idCalificacion)->update([
+            'calificacionEstandart' => $raw,
+            'updated_at' => now(),
+        ]);
+    }
+
+    /**
+     * @return array{
+     *   fechaInicio: string|null,
+     *   fechaVencimiento: string|null,
+     *   segundosRestantes: int|null,
+     *   vencido: bool,
+     *   cierrePorTiempo: bool,
+     *   servidorAhora: string,
+     *   tiempoCuestionario: int|null,
+     *   inicioUnix: int|null
+     * }
+     */
+    public static function estadoTemporizador(int $idCalificacion, ?int $minutos): array
+    {
+        $tz = config('app.timezone');
+        $ahora = now($tz);
+        $vacio = [
+            'fechaInicio' => null,
+            'fechaVencimiento' => null,
+            'segundosRestantes' => null,
+            'vencido' => false,
+            'cierrePorTiempo' => false,
+            'servidorAhora' => $ahora->toDateTimeString(),
+            'tiempoCuestionario' => $minutos,
+            'inicioUnix' => null,
+        ];
+        if (!Schema::hasTable('calificacionActividad')) {
+            return $vacio;
+        }
+        $ca = DB::table('calificacionActividad')->where('id', $idCalificacion)->first();
+        if (!$ca) {
+            return $vacio;
+        }
+        $meta = self::leerMetaIntentoCuestionario(
+            isset($ca->calificacionEstandart) ? (string) $ca->calificacionEstandart : null
+        );
+        $inicioUnix = !empty($meta['inicioUnix']) ? (int) $meta['inicioUnix'] : null;
+        $vencimiento = ($inicioUnix && $minutos !== null && $minutos > 0)
+            ? \Carbon\Carbon::createFromTimestamp($inicioUnix, $tz)->addMinutes($minutos)
+            : null;
+        $segundosRestantes = $vencimiento !== null
+            ? max(0, $vencimiento->getTimestamp() - $ahora->getTimestamp())
+            : null;
+
+        return [
+            'fechaInicio' => $inicioUnix
+                ? \Carbon\Carbon::createFromTimestamp($inicioUnix, $tz)->toDateTimeString()
+                : null,
+            'fechaVencimiento' => $vencimiento?->toDateTimeString(),
+            'segundosRestantes' => $segundosRestantes,
+            'vencido' => $vencimiento !== null && $ahora->greaterThanOrEqualTo($vencimiento),
+            'cierrePorTiempo' => !empty($meta['timeout']),
+            'servidorAhora' => $ahora->toDateTimeString(),
+            'tiempoCuestionario' => $minutos,
+            'inicioUnix' => $inicioUnix,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   fechaInicioIntento: string|null,
+     *   fechaFinIntento: string|null,
+     *   tiempoUtilizadoSegundos: int|null,
+     *   cierrePorTiempo: bool,
+     *   estadoCierre: string|null
+     * }
+     */
+    public static function resumenTiempoIntento(?string $calificacionEstandart, ?string $fechaCalificacion): array
+    {
+        $meta = self::leerMetaIntentoCuestionario($calificacionEstandart);
+        $inicioUnix = !empty($meta['inicioUnix']) ? (int) $meta['inicioUnix'] : null;
+        $tz = config('app.timezone');
+        $inicio = $inicioUnix
+            ? \Carbon\Carbon::createFromTimestamp($inicioUnix, $tz)
+            : null;
+        $fin = ($fechaCalificacion !== null && trim($fechaCalificacion) !== '')
+            ? \Carbon\Carbon::parse($fechaCalificacion, $tz)
+            : null;
+        $segundos = ($inicio && $fin)
+            ? max(0, $fin->getTimestamp() - $inicio->getTimestamp())
+            : null;
+        $timeout = !empty($meta['timeout']);
+        $estadoCierre = null;
+        if ($inicio && !$fin) {
+            $estadoCierre = 'EN CURSO';
+        } elseif ($fin) {
+            $estadoCierre = $timeout ? 'TIEMPO AGOTADO' : 'FINALIZADO';
+        }
+
+        return [
+            'fechaInicioIntento' => $inicio?->toDateTimeString(),
+            'fechaFinIntento' => $fin?->toDateTimeString(),
+            'tiempoUtilizadoSegundos' => $segundos,
+            'cierrePorTiempo' => $timeout,
+            'estadoCierre' => $estadoCierre,
+        ];
     }
 }

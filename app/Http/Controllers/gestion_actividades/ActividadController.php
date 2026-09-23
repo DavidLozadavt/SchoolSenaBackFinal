@@ -20,10 +20,12 @@ use App\Models\TipoPregunta;
 use App\Models\Respuesta;
 use App\Support\DiagnosticoActividadesRapHistoricas;
 use App\Util\CuestionarioAsignacionUtil;
+use App\Support\ValidacionCuestionario;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -371,7 +373,7 @@ class ActividadController extends Controller
             }
 
             $cuestionariosConRespuestas = collect();
-            $tblRc = Schema::hasTable('respuestaCuestionarios') ? 'respuestaCuestionarios' : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            $tblRc = CuestionarioAsignacionUtil::tablaRespuestaCuestionarios();
             if ($tblRc) {
                 $idsCalifCuestionarios = $registros->where('tipoActividad', 'cuestionario')->pluck('idCalificacionActividad')->unique()->filter()->values();
                 if ($idsCalifCuestionarios->isNotEmpty()) {
@@ -559,6 +561,9 @@ class ActividadController extends Controller
                     'tieneRespuestasCuestionario' => $tieneRespuestasCuestionario,
                     'preguntasMinimasAprobar' => $preguntasMinimasCfg,
                     'intervaloReintento' => $intervaloReintentoCfg,
+                    'tiempoCuestionario' => $esCuestionario
+                        ? CuestionarioAsignacionUtil::minutosTiempoCuestionario($row)
+                        : null,
                     'ultimoIntentoEn' => $esCuestionario && !empty($row->fechaCalificacion)
                         ? (string) $row->fechaCalificacion
                         : null,
@@ -891,7 +896,7 @@ class ActividadController extends Controller
                 ->filter()
                 ->values();
             $cuestionariosConRespuestas = collect();
-            $tblRc = Schema::hasTable('respuestaCuestionarios') ? 'respuestaCuestionarios' : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            $tblRc = CuestionarioAsignacionUtil::tablaRespuestaCuestionarios();
             if ($tblRc && $idsCalifCuestionarios->isNotEmpty()) {
                 $cuestionariosConRespuestas = DB::table($tblRc)
                     ->whereIn('idCalificacion', $idsCalifCuestionarios->all())
@@ -1306,6 +1311,54 @@ class ActividadController extends Controller
                 $puedeNuevoIntento
             );
 
+            $tiempoMin = CuestionarioAsignacionUtil::minutosTiempoCuestionario($ca);
+            $cierrePorTiempo = false;
+            $caTiempo = DB::table('calificacionActividad')->where('id', $idCalificacionActividad)->first();
+            $metaTiempo = CuestionarioAsignacionUtil::leerMetaIntentoCuestionario(
+                is_object($caTiempo) && isset($caTiempo->calificacionEstandart)
+                    ? (string) $caTiempo->calificacionEstandart
+                    : null
+            );
+            $intentoCerrado = $caTiempo && !empty($caTiempo->fechaCalificacion) && empty($metaTiempo['open']);
+            if (!$intentoCerrado) {
+                CuestionarioAsignacionUtil::marcarInicioIntento($idCalificacionActividad);
+            }
+            if ($tiempoMin !== null) {
+                $estadoTiempo = CuestionarioAsignacionUtil::estadoTemporizador($idCalificacionActividad, $tiempoMin);
+                $msgTiempoAgotado = 'El tiempo del cuestionario ha finalizado';
+                if ($intentoCerrado) {
+                    $agotado = !empty($estadoTiempo['cierrePorTiempo']) || !empty($estadoTiempo['vencido']);
+
+                    return response()->json([
+                        'status' => 422,
+                        'message' => $agotado
+                            ? $msgTiempoAgotado
+                            : 'Este intento ya fue finalizado. No se pueden registrar más respuestas.',
+                        'error' => $agotado
+                            ? $msgTiempoAgotado
+                            : 'Este intento ya fue finalizado. No se pueden registrar más respuestas.',
+                        'cierrePorTiempo' => $agotado,
+                    ], 422);
+                }
+                if (!empty($estadoTiempo['vencido'])) {
+                    $atraso = 0;
+                    if (!empty($estadoTiempo['inicioUnix'])) {
+                        $atraso = now($tzC)->timestamp - ((int) $estadoTiempo['inicioUnix'] + $tiempoMin * 60);
+                    }
+                    if ($atraso > 30) {
+                        $this->cerrarIntentoPorTiempoAgotado($idCalificacionActividad, $actividad);
+
+                        return response()->json([
+                            'status' => 422,
+                            'message' => $msgTiempoAgotado,
+                            'error' => $msgTiempoAgotado,
+                            'cierrePorTiempo' => true,
+                        ], 422);
+                    }
+                    $cierrePorTiempo = true;
+                }
+            }
+
             $validated = $request->validate([
                 'respuestas' => 'required|array',
                 'respuestas.*.idPregunta' => 'required|integer|exists:preguntas,id',
@@ -1315,7 +1368,7 @@ class ActividadController extends Controller
 
             $idsPermitidos = CuestionarioAsignacionUtil::idsParaCalificacion($idCalificacionActividad);
 
-            $tblRc = Schema::hasTable('respuestaCuestionarios') ? 'respuestaCuestionarios' : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            $tblRc = CuestionarioAsignacionUtil::tablaRespuestaCuestionarios();
             if (!$tblRc) {
                 return response()->json(['error' => 'Tabla de respuestas de cuestionario no disponible'], 500);
             }
@@ -1380,7 +1433,10 @@ class ActividadController extends Controller
                 isset($resultadoCalificacion['totalPreguntas']) ? (int) $resultadoCalificacion['totalPreguntas'] : null,
                 $cantidadMeta,
                 $intentoMeta !== null ? (int) $intentoMeta : 0,
-                false
+                false,
+                $metaActual['inicioUnix'] ?? $metaPrev['inicioUnix'] ?? null,
+                $cierrePorTiempo,
+                $metaActual['tiempoMinutos'] ?? $metaPrev['tiempoMinutos']
             );
 
             DB::table('calificacionActividad')
@@ -1401,14 +1457,26 @@ class ActividadController extends Controller
                 $proximoIntentoEn = $proximo ? $proximo->toDateTimeString() : null;
             }
 
+            $caTrasCierre = DB::table('calificacionActividad')->where('id', $idCalificacionActividad)->first();
+            $resumenTiempo = CuestionarioAsignacionUtil::resumenTiempoIntento(
+                isset($caTrasCierre->calificacionEstandart) ? (string) $caTrasCierre->calificacionEstandart : null,
+                isset($caTrasCierre->fechaCalificacion) ? (string) $caTrasCierre->fechaCalificacion : null
+            );
+
             return response()->json([
-                'message' => 'Cuestionario respondido correctamente',
+                'message' => $cierrePorTiempo
+                    ? 'El tiempo del cuestionario ha finalizado. Sus respuestas fueron guardadas.'
+                    : 'Cuestionario respondido correctamente',
                 'cumpleMinimo' => $cumpleMinimo,
                 'preguntasCorrectas' => $correctasFin,
                 'preguntasEvaluadas' => $totalFin,
                 'resultadoPerfectoCuestionario' => $resultadoPerfecto,
                 'intervaloReintento' => $intervaloReintentoCfg,
                 'proximoIntentoDisponibleEn' => $proximoIntentoEn,
+                'cierrePorTiempo' => $cierrePorTiempo,
+                'tiempoUtilizadoSegundos' => $resumenTiempo['tiempoUtilizadoSegundos'],
+                'fechaInicioIntento' => $resumenTiempo['fechaInicioIntento'],
+                'fechaFinIntento' => $resumenTiempo['fechaFinIntento'],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
@@ -1461,9 +1529,7 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Esta actividad no es un cuestionario'], 422);
             }
 
-            $tblRc = Schema::hasTable('respuestaCuestionarios')
-                ? 'respuestaCuestionarios'
-                : (Schema::hasTable('respuesta_cuestionarios') ? 'respuesta_cuestionarios' : null);
+            $tblRc = CuestionarioAsignacionUtil::tablaRespuestaCuestionarios();
             if (!$tblRc) {
                 return response()->json(['error' => 'Tabla de respuestas de cuestionario no disponible'], 500);
             }
@@ -1474,7 +1540,7 @@ class ActividadController extends Controller
                 ->filter(fn ($row) => !CuestionarioAsignacionUtil::esMarcador($row))
                 ->keyBy('idPregunta');
 
-            if ($respuestasAlumno->isEmpty()) {
+            if ($respuestasAlumno->isEmpty() && empty($ca->fechaCalificacion)) {
                 return response()->json(['error' => 'Aún no hay un intento respondido para este cuestionario'], 404);
             }
 
@@ -1553,8 +1619,8 @@ class ActividadController extends Controller
                     ];
 
                     if ($idSeleccionada === null) {
-                        $estado = 'incorrecta';
-                        $incorrectas++;
+                        $estado = 'pendiente';
+                        $pendientes++;
                     } elseif ($respuestaCorrecta && $idSeleccionada === (int) $respuestaCorrecta['id']) {
                         $estado = 'correcta';
                         $correctas++;
@@ -1567,11 +1633,11 @@ class ActividadController extends Controller
                         $respuestaCorrecta = null;
                     }
                 } else {
-                    $texto = trim((string) ($respAlumno->respuesta ?? ''));
+                    $texto = trim((string) ($respAlumno?->respuesta ?? ''));
                     $respuestaAprendiz = ['texto' => $texto !== '' ? $texto : null];
 
-                    $calificadoPregunta = (bool) ($respAlumno->calificado ?? false);
-                    $puntajePregunta = $respAlumno->puntaje ?? null;
+                    $calificadoPregunta = (bool) ($respAlumno?->calificado ?? false);
+                    $puntajePregunta = $respAlumno?->puntaje ?? null;
 
                     // Párrafo: solo se considera calificado si el instructor marcó la pregunta
                     // (la nota automática del cuestionario no califica párrafos).
@@ -1729,6 +1795,7 @@ class ActividadController extends Controller
                 $actividad->load(['preguntas.tipoPregunta', 'preguntas.respuestas']);
                 $idCalif = $request->query('idCalificacionActividad');
                 $esIntentoAprendiz = !empty($idCalif);
+                $intentoCuestionario = null;
                 if ($esIntentoAprendiz) {
                     $idCalif = (int) $idCalif;
                     $caRow = Schema::hasTable('calificacionActividad')
@@ -1761,6 +1828,25 @@ class ActividadController extends Controller
                             $idCalif,
                             (int) $actividad->id,
                             $puedeNuevo
+                        );
+                        $caRow = DB::table('calificacionActividad')->where('id', $idCalif)->first();
+                        $finalizado = !empty($caRow->fechaCalificacion);
+                        if (!$finalizado || $puedeNuevo) {
+                            CuestionarioAsignacionUtil::marcarInicioIntento($idCalif);
+                            $caRow = DB::table('calificacionActividad')->where('id', $idCalif)->first();
+                        }
+                        $tiempoMin = CuestionarioAsignacionUtil::minutosTiempoCuestionario($caRow);
+                        if ($tiempoMin !== null) {
+                            $estadoTiempo = CuestionarioAsignacionUtil::estadoTemporizador($idCalif, $tiempoMin);
+                            if (!empty($estadoTiempo['vencido']) && empty($caRow->fechaCalificacion)) {
+                                $this->cerrarIntentoPorTiempoAgotado($idCalif, $actividad);
+                                $caRow = DB::table('calificacionActividad')->where('id', $idCalif)->first();
+                            }
+                        }
+                        $intentoCuestionario = $this->payloadIntentoCuestionario(
+                            $idCalif,
+                            $tiempoMin,
+                            $caRow
                         );
                     }
 
@@ -1828,6 +1914,10 @@ class ActividadController extends Controller
                     static fn ($p) => (int) $p['id'],
                     $preguntasPayload
                 ));
+                $payload['tiempoCuestionario'] = $intentoCuestionario['tiempoCuestionario'] ?? null;
+                if ($intentoCuestionario !== null) {
+                    $payload['intentoCuestionario'] = $intentoCuestionario;
+                }
 
                 return response()->json($payload);
             }
@@ -2928,19 +3018,7 @@ class ActividadController extends Controller
             $preguntasData = is_string($request->preguntas) ? json_decode($request->preguntas, true) : $request->preguntas;
             $request->merge(['preguntas' => $preguntasData ?? []]);
 
-            $totalPreguntas = is_array($request->preguntas) ? count($request->preguntas) : 0;
-            $request->validate([
-                'titulo' => 'required|string|max:500',
-                'clasificacion' => 'nullable|string|max:255',
-                'descripcion' => 'nullable|string',
-                'idMateria' => 'required|exists:materia,id',
-                'preguntas' => 'required|array|min:1',
-                'preguntas.*.tipo' => 'required|in:Párrafo,Varias opciones',
-                'preguntas.*.titulo' => 'required|string|max:1000',
-                'preguntas.*.explicacionRespuesta' => 'nullable|string',
-                'preguntasMinimasAprobar' => 'nullable|integer|min:1|max:' . max(1, $totalPreguntas),
-                'intervaloReintento' => 'nullable|integer|min:1|max:525600',
-            ]);
+            ValidacionCuestionario::crear($request->all())->validate();
 
             $user = KeyUtil::user();
             $idCompany = KeyUtil::idCompany();
@@ -3049,19 +3127,7 @@ class ActividadController extends Controller
             $preguntasData = is_string($request->preguntas) ? json_decode($request->preguntas, true) : $request->preguntas;
             $request->merge(['preguntas' => $preguntasData ?? []]);
 
-            $totalPreguntas = is_array($request->preguntas) ? count($request->preguntas) : 0;
-            $request->validate([
-                'titulo' => 'required|string|max:500',
-                'clasificacion' => 'nullable|string|max:255',
-                'descripcion' => 'nullable|string',
-                'idMateria' => 'required|exists:materia,id',
-                'preguntas' => 'required|array|min:1',
-                'preguntas.*.tipo' => 'required|in:Párrafo,Varias opciones',
-                'preguntas.*.titulo' => 'required|string|max:1000',
-                'preguntas.*.explicacionRespuesta' => 'nullable|string',
-                'preguntasMinimasAprobar' => 'nullable|integer|min:1|max:' . max(1, $totalPreguntas),
-                'intervaloReintento' => 'nullable|integer|min:1|max:525600',
-            ]);
+            ValidacionCuestionario::crear($request->all())->validate();
 
             $payloadUpdate = [
                 'tituloActividad' => $request->titulo,
@@ -3080,17 +3146,6 @@ class ActividadController extends Controller
                     : null;
             }
 
-            $actividad->update($payloadUpdate);
-
-            $idsPreguntas = $actividad->preguntas()->pluck('id')->toArray();
-            if (!empty($idsPreguntas) && \Illuminate\Support\Facades\Schema::hasTable('respuesta_cuestionarios')) {
-                \Illuminate\Support\Facades\DB::table('respuesta_cuestionarios')->whereIn('idPregunta', $idsPreguntas)->delete();
-            }
-            foreach ($actividad->preguntas as $preg) {
-                Respuesta::where('idPregunta', $preg->id)->delete();
-            }
-            $actividad->preguntas()->delete();
-
             $tiposPregunta = TipoPregunta::pluck('id', 'tipoPregunta')->toArray();
             if (empty($tiposPregunta)) {
                 TipoPregunta::firstOrCreate(['tipoPregunta' => 'Párrafo'], ['tipoPregunta' => 'Párrafo']);
@@ -3098,55 +3153,214 @@ class ActividadController extends Controller
                 $tiposPregunta = TipoPregunta::pluck('id', 'tipoPregunta')->toArray();
             }
 
-            foreach ($request->preguntas as $i => $p) {
-                $idTipo = $tiposPregunta[$p['tipo']] ?? $tiposPregunta['Párrafo'] ?? null;
-                if ($idTipo === null) {
-                    throw new \InvalidArgumentException("Tipo de pregunta '{$p['tipo']}' no encontrado. Ejecute: php artisan migrate");
-                }
-                $urlDoc = null;
+            DB::transaction(function () use ($request, $actividad, $payloadUpdate, $tiposPregunta) {
+                $actividad->update($payloadUpdate);
 
-                $fileKey = "foto_pregunta_{$i}";
-                if ($request->hasFile($fileKey)) {
-                    $file = $request->file($fileKey);
-                    $dir = "cuestionarios/{$actividad->id}/preguntas";
-                    if (!Storage::disk('public')->exists($dir)) {
-                        Storage::disk('public')->makeDirectory($dir, 0755, true);
+                $existentes = $actividad->preguntas()->with('respuestas')->orderBy('id')->get();
+                $idsPreguntasConservadas = [];
+                $payloadPreguntas = is_array($request->preguntas) ? $request->preguntas : [];
+                $emparejarPreguntasPorOrden = ! collect($payloadPreguntas)->contains(
+                    fn ($p) => isset($p['id']) && (int) $p['id'] > 0
+                );
+
+                foreach ($payloadPreguntas as $i => $p) {
+                    $idTipo = $tiposPregunta[$p['tipo']] ?? $tiposPregunta['Párrafo'] ?? null;
+                    if ($idTipo === null) {
+                        throw new \InvalidArgumentException("Tipo de pregunta '{$p['tipo']}' no encontrado.");
                     }
-                    $filename = time() . '_' . $i . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
-                    $urlDoc = $file->storeAs($dir, $filename, 'public');
-                }
 
-                $explicacion = trim((string) ($p['explicacionRespuesta'] ?? ''));
-
-                $pregunta = Pregunta::create([
-                    'descripcion' => $p['titulo'],
-                    'explicacionRespuesta' => $explicacion !== '' ? $explicacion : null,
-                    'puntaje' => 1,
-                    'idTipoPregunta' => $idTipo,
-                    'idActividad' => $actividad->id,
-                    'urlDocumento' => $urlDoc,
-                ]);
-
-                if (($p['tipo'] ?? '') === 'Varias opciones' && !empty($p['opciones'])) {
-                    foreach ($p['opciones'] as $op) {
-                        if (!empty(trim($op['texto'] ?? ''))) {
-                            Respuesta::create([
-                                'idPregunta' => $pregunta->id,
-                                'descripcionRespuesta' => $op['texto'],
-                                'chkCorrecta' => (bool)($op['esCorrecta'] ?? false),
-                                'puntaje' => ($op['esCorrecta'] ?? false) ? 1 : 0,
-                            ]);
+                    $explicacion = trim((string) ($p['explicacionRespuesta'] ?? ''));
+                    $fileKey = "foto_pregunta_{$i}";
+                    $urlDocNueva = null;
+                    if ($request->hasFile($fileKey)) {
+                        $file = $request->file($fileKey);
+                        $dir = "cuestionarios/{$actividad->id}/preguntas";
+                        if (!Storage::disk('public')->exists($dir)) {
+                            Storage::disk('public')->makeDirectory($dir, 0755, true);
                         }
+                        $filename = time() . '_' . $i . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
+                        $urlDocNueva = $file->storeAs($dir, $filename, 'public');
+                    }
+
+                    $idEnviado = isset($p['id']) ? (int) $p['id'] : 0;
+                    $pregunta = null;
+                    if ($idEnviado > 0) {
+                        $pregunta = $existentes->first(
+                            fn ($ex) => (int) $ex->id === $idEnviado && ! in_array((int) $ex->id, $idsPreguntasConservadas, true)
+                        );
+                    }
+                    if (! $pregunta && $idEnviado <= 0 && $emparejarPreguntasPorOrden) {
+                        $pregunta = $existentes->first(
+                            fn ($ex) => ! in_array((int) $ex->id, $idsPreguntasConservadas, true)
+                        );
+                    }
+
+                    if ($pregunta) {
+                        $pregunta->descripcion = $p['titulo'];
+                        $pregunta->explicacionRespuesta = $explicacion !== '' ? $explicacion : null;
+                        $pregunta->idTipoPregunta = $idTipo;
+                        if ($urlDocNueva !== null) {
+                            $pregunta->urlDocumento = $urlDocNueva;
+                        }
+                        $pregunta->save();
+                    } else {
+                        $pregunta = Pregunta::create([
+                            'descripcion' => $p['titulo'],
+                            'explicacionRespuesta' => $explicacion !== '' ? $explicacion : null,
+                            'puntaje' => 1,
+                            'idTipoPregunta' => $idTipo,
+                            'idActividad' => $actividad->id,
+                            'urlDocumento' => $urlDocNueva,
+                        ]);
+                    }
+
+                    $idsPreguntasConservadas[] = (int) $pregunta->id;
+
+                    if (($p['tipo'] ?? '') === 'Varias opciones') {
+                        $this->sincronizarOpcionesPregunta($pregunta, is_array($p['opciones'] ?? null) ? $p['opciones'] : []);
                     }
                 }
-            }
 
-            return response()->json($actividad->load(['materia', 'estado', 'persona', 'preguntas.respuestas']));
+                foreach ($existentes as $preg) {
+                    if (in_array((int) $preg->id, $idsPreguntasConservadas, true)) {
+                        continue;
+                    }
+                    $this->eliminarPreguntaSiNoTieneHistorial($preg);
+                }
+            });
+
+            return response()->json($actividad->fresh()->load(['materia', 'estado', 'persona', 'preguntas.respuestas']));
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            Log::error('Error al actualizar cuestionario', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+
+            $esFk = str_contains($e->getMessage(), '1451')
+                || str_contains($e->getMessage(), 'Integrity constraint');
+
+            return response()->json([
+                'error' => $esFk
+                    ? 'No se pudo actualizar el cuestionario porque hay respuestas de estudiantes vinculadas. Intente de nuevo; el historial se conserva.'
+                    : 'No se pudo actualizar el cuestionario. Intente de nuevo.',
+            ], $esFk ? 409 : 500);
         }
+    }
+
+    /**
+     * Actualiza opciones existentes, crea las nuevas y solo borra las que no tienen historial.
+     *
+     * @param array<int, array<string, mixed>> $opciones
+     */
+    private function sincronizarOpcionesPregunta(Pregunta $pregunta, array $opciones): void
+    {
+        $existentes = $pregunta->respuestas()->orderBy('id')->get();
+        $idsUsadas = [];
+        $emparejarPorOrden = ! collect($opciones)->contains(
+            fn ($op) => isset($op['id']) && (int) $op['id'] > 0
+        );
+
+        foreach ($opciones as $op) {
+            $texto = trim((string) ($op['texto'] ?? ''));
+            if ($texto === '') {
+                continue;
+            }
+
+            $esCorrecta = (bool) ($op['esCorrecta'] ?? false);
+            $idEnviado = isset($op['id']) ? (int) $op['id'] : 0;
+            $resp = null;
+
+            if ($idEnviado > 0) {
+                $resp = $existentes->first(
+                    fn ($r) => (int) $r->id === $idEnviado && ! in_array((int) $r->id, $idsUsadas, true)
+                );
+            }
+            if (! $resp && $idEnviado <= 0 && $emparejarPorOrden) {
+                $resp = $existentes->first(
+                    fn ($r) => ! in_array((int) $r->id, $idsUsadas, true)
+                );
+            }
+
+            $payload = [
+                'descripcionRespuesta' => $texto,
+                'chkCorrecta' => $esCorrecta,
+                'puntaje' => $esCorrecta ? 1 : 0,
+            ];
+
+            if ($resp) {
+                $resp->fill($payload);
+                $resp->save();
+                $idsUsadas[] = (int) $resp->id;
+            } else {
+                $nueva = Respuesta::create($payload + ['idPregunta' => $pregunta->id]);
+                $idsUsadas[] = (int) $nueva->id;
+            }
+        }
+
+        foreach ($existentes as $resp) {
+            if (in_array((int) $resp->id, $idsUsadas, true)) {
+                continue;
+            }
+            if ($this->respuestaTieneHistorial((int) $resp->id)) {
+                if ($resp->chkCorrecta) {
+                    $resp->chkCorrecta = false;
+                    $resp->puntaje = 0;
+                    $resp->save();
+                }
+                continue;
+            }
+            $resp->delete();
+        }
+    }
+
+    private function eliminarPreguntaSiNoTieneHistorial(Pregunta $pregunta): void
+    {
+        if ($this->preguntaTieneHistorial((int) $pregunta->id)) {
+            return;
+        }
+
+        foreach ($pregunta->respuestas as $resp) {
+            if ($this->respuestaTieneHistorial((int) $resp->id)) {
+                return;
+            }
+        }
+
+        foreach ($pregunta->respuestas as $resp) {
+            $resp->delete();
+        }
+        $pregunta->delete();
+    }
+
+    private function respuestaTieneHistorial(int $idRespuesta): bool
+    {
+        $tbl = CuestionarioAsignacionUtil::tablaRespuestaCuestionarios();
+        if (! $tbl) {
+            // Sin tabla detectada no se arriesga un DELETE que rompa la FK.
+            return true;
+        }
+
+        return DB::table($tbl)->where('idRespuesta', $idRespuesta)->exists();
+    }
+
+    private function preguntaTieneHistorial(int $idPregunta): bool
+    {
+        $tbl = CuestionarioAsignacionUtil::tablaRespuestaCuestionarios();
+        if (! $tbl) {
+            return true;
+        }
+
+        if (DB::table($tbl)->where('idPregunta', $idPregunta)->exists()) {
+            return true;
+        }
+
+        $ids = Respuesta::where('idPregunta', $idPregunta)->pluck('id');
+        if ($ids->isEmpty()) {
+            return false;
+        }
+
+        return DB::table($tbl)->whereIn('idRespuesta', $ids)->exists();
     }
 
     /**
@@ -3307,6 +3521,86 @@ class ActividadController extends Controller
         }
 
         return url($path);
+    }
+
+    /**
+     * Cierra un intento abierto cuyo tiempo límite ya venció (sin aceptar nuevas respuestas).
+     */
+    private function cerrarIntentoPorTiempoAgotado(int $idCalificacionActividad, Actividad $actividad): void
+    {
+        $ca = DB::table('calificacionActividad')->where('id', $idCalificacionActividad)->first();
+        if (!$ca || !empty($ca->fechaCalificacion)) {
+            return;
+        }
+
+        $tblRc = CuestionarioAsignacionUtil::tablaRespuestaCuestionarios();
+        if (!$tblRc) {
+            return;
+        }
+
+        $resultadoCalificacion = $this->calificarCuestionarioAutomatico($idCalificacionActividad, (int) $actividad->id, $tblRc);
+        $meta = CuestionarioAsignacionUtil::leerMetaIntentoCuestionario(
+            isset($ca->calificacionEstandart) ? (string) $ca->calificacionEstandart : null
+        );
+        $rawActual = DB::table('calificacionActividad')->where('id', $idCalificacionActividad)->value('calificacionEstandart');
+        $metaActual = CuestionarioAsignacionUtil::leerMetaIntentoCuestionario(
+            $rawActual !== null ? (string) $rawActual : null
+        );
+
+        DB::table('calificacionActividad')->where('id', $idCalificacionActividad)->update([
+            'ComentarioEstudiante' => 'Cuestionario respondido',
+            'calificacionEstandart' => CuestionarioAsignacionUtil::escribirMetaIntentoCuestionario(
+                $resultadoCalificacion['cumpleMinimo'] ?? $metaActual['cumpleMinimo'] ?? $meta['cumpleMinimo'],
+                isset($resultadoCalificacion['correctas']) ? (int) $resultadoCalificacion['correctas'] : $metaActual['correctas'],
+                isset($resultadoCalificacion['totalPreguntas']) ? (int) $resultadoCalificacion['totalPreguntas'] : $metaActual['total'],
+                $metaActual['cantidad'] ?? $meta['cantidad'],
+                $metaActual['intento'] ?? $meta['intento'] ?? 0,
+                false,
+                $metaActual['inicioUnix'] ?? $meta['inicioUnix'] ?? null,
+                true,
+                $metaActual['tiempoMinutos'] ?? $meta['tiempoMinutos']
+            ),
+            'updated_at' => now(),
+        ]);
+    }
+
+    /**
+     * @param  object|null  $caRow
+     * @return array<string, mixed>
+     */
+    private function payloadIntentoCuestionario(int $idCalificacion, ?int $tiempoMin, $caRow): array
+    {
+        $estado = CuestionarioAsignacionUtil::estadoTemporizador($idCalificacion, $tiempoMin);
+        $meta = CuestionarioAsignacionUtil::leerMetaIntentoCuestionario(
+            is_object($caRow) && isset($caRow->calificacionEstandart)
+                ? (string) $caRow->calificacionEstandart
+                : null
+        );
+        $resumen = CuestionarioAsignacionUtil::resumenTiempoIntento(
+            is_object($caRow) && isset($caRow->calificacionEstandart)
+                ? (string) $caRow->calificacionEstandart
+                : null,
+            is_object($caRow) && isset($caRow->fechaCalificacion)
+                ? (string) $caRow->fechaCalificacion
+                : null
+        );
+        $intentoEnCurso = !empty($meta['open'])
+            || !(is_object($caRow) && !empty($caRow->fechaCalificacion));
+
+        return [
+            'tiempoCuestionario' => $tiempoMin,
+            'fechaInicio' => $estado['fechaInicio'],
+            'fechaVencimiento' => $estado['fechaVencimiento'],
+            'segundosRestantes' => $intentoEnCurso ? $estado['segundosRestantes'] : 0,
+            'servidorAhora' => $estado['servidorAhora'],
+            'vencido' => $intentoEnCurso
+                ? !empty($estado['vencido'])
+                : (!empty($resumen['cierrePorTiempo']) || !empty($estado['vencido'])),
+            'cierrePorTiempo' => !$intentoEnCurso && !empty($resumen['cierrePorTiempo']),
+            'finalizado' => !$intentoEnCurso,
+            'tiempoUtilizadoSegundos' => $resumen['tiempoUtilizadoSegundos'],
+            'estadoCierre' => $intentoEnCurso ? null : $resumen['estadoCierre'],
+        ];
     }
 
     /**
