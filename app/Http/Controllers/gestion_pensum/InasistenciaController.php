@@ -76,7 +76,7 @@ class InasistenciaController extends Controller
           ->get();
 
         foreach ($inasistencias as $inasistencia) {
-          $inasistencia->load('sesionMateria.horarioMateria.materia', 'matriculaAcademica.materia.grados.materia', 'matriculaAcademica.matricula.persona');
+          $inasistencia->load('sesionMateria.horarioMateria.materia', 'matriculaAcademica.materia.grados.materia', 'matriculaAcademica.matricula.person');
         }
 
         $allInasistencias = $allInasistencias->merge($inasistencias);

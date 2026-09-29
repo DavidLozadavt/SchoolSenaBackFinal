@@ -6,6 +6,7 @@ use App\Models\Ficha;
 use App\Models\AperturarPrograma;
 use App\Models\Company;
 use App\Models\Contract;
+use App\Models\HorarioMateria;
 use App\Models\Programa;
 use App\Models\Sede;
 use App\Models\Status;
@@ -602,8 +603,8 @@ class FichaController extends Controller
 
 
             // Guardar valores antiguos (ANTES de actualizar)
-            $oldCodigo   = $ficha->codigo;
-            $oldSede     = $ficha->idSede;
+            $oldCodigo = $ficha->codigo;
+            $oldSede = $ficha->idSede;
             $oldPrograma = $apertura->idPrograma;
 
             $rutaDocumento = $ficha->documento;
@@ -676,12 +677,12 @@ class FichaController extends Controller
                 $rutaVieja = str_replace('/storage/', '', $ficha->documento);
 
                 // 🔹 NUEVA RUTA
-                $sedeNueva     = Sede::findOrFail($validated['idSede']);
+                $sedeNueva = Sede::findOrFail($validated['idSede']);
                 $programaNuevo = Programa::findOrFail($validated['idPrograma']);
 
-                $sedeName     = $sanitize($sedeNueva->nombre);
+                $sedeName = $sanitize($sedeNueva->nombre);
                 $programaName = $sanitize($programaNuevo->nombrePrograma);
-                $codigoFicha  = $validated['codigo'];
+                $codigoFicha = $validated['codigo'];
 
                 $nuevaCarpeta = "documentos/programas/{$programaName}/fichas/{$sedeName}/{$codigoFicha}/documento";
 
@@ -1527,10 +1528,12 @@ class FichaController extends Controller
                 $idContratoVista = null;
                 try {
                     $cv = KeyUtil::lastContractActive();
-                    if ($cv && $cv->id) $idContratoVista = (int) $cv->id;
+                    if ($cv && $cv->id)
+                        $idContratoVista = (int) $cv->id;
                 } catch (\Throwable $e) {
                 }
-                if (!$idContratoVista && !empty($claseData->contrato_id)) $idContratoVista = (int) $claseData->contrato_id;
+                if (!$idContratoVista && !empty($claseData->contrato_id))
+                    $idContratoVista = (int) $claseData->contrato_id;
                 foreach ($this->resolverModalidadRap($idHorarioMateria, $idContratoVista) as $k => $v) {
                     $claseDataArray[$k] = $v;
                 }
@@ -1825,7 +1828,7 @@ class FichaController extends Controller
     }
 
     /**
-     * Momento de fin de la franja de clase en la fecha dada (ajuste tarde/noche como en sincronizarSesionesCompletadas).
+     * Momento de fin de la franja de clase en la fecha dada (horas literales de horarioMateria, 24h).
      */
     private function carbonFinVentanaClaseDia(
         string $fechaYmd,
@@ -1843,16 +1846,6 @@ class FichaController extends Controller
         $mIni = $horaIni->minute;
         $hFin = $horaFin->hour;
         $mFin = $horaFin->minute;
-        $lowerJ = strtolower((string) $jornadaNombre);
-        $esTardeONoche = str_contains($lowerJ, 'tarde')
-            || str_contains($lowerJ, 'noche')
-            || str_contains($lowerJ, 'nocturna');
-        if ($esTardeONoche && $hIni < 12) {
-            $hIni += 12;
-        }
-        if ($esTardeONoche && $hFin < 12) {
-            $hFin += 12;
-        }
 
         $base = Carbon::parse($fechaYmd)->startOfDay();
         $inicio = $base->copy()->setTime($hIni, $mIni, 0);
@@ -2262,7 +2255,7 @@ class FichaController extends Controller
             if (!$user || !$user->idpersona) {
                 return response()->json([
                     'message' => 'Usuario no autenticado o sin persona asociada',
-                    'data'    => []
+                    'data' => []
                 ], 401);
             }
 
@@ -2304,7 +2297,7 @@ class FichaController extends Controller
             if ($idsFichas === []) {
                 return response()->json([
                     'message' => 'El estudiante no tiene matrículas activas con fichas asignadas',
-                    'data'    => []
+                    'data' => []
                 ], 200);
             }
 
@@ -2350,17 +2343,17 @@ class FichaController extends Controller
             if ($clases->isEmpty()) {
                 return response()->json([
                     'message' => 'El estudiante tiene ficha asignada, pero no hay horarios registrados para esta ficha',
-                    'data'    => []
+                    'data' => []
                 ], 200);
             }
 
             // — Castear IDs a entero en cada clase antes de procesar —
             $clases = $clases->map(function ($clase) {
                 $clase->idHorarioMateria = (int) $clase->idHorarioMateria;
-                $clase->idMateria        = (int) $clase->idMateria;
-                $clase->idDia            = (int) $clase->idDia;
-                $clase->idFicha          = (int) $clase->idFicha;
-                $clase->contrato_id      = $clase->contrato_id !== null ? (int) $clase->contrato_id : null;
+                $clase->idMateria = (int) $clase->idMateria;
+                $clase->idDia = (int) $clase->idDia;
+                $clase->idFicha = (int) $clase->idFicha;
+                $clase->contrato_id = $clase->contrato_id !== null ? (int) $clase->contrato_id : null;
                 return $clase;
             });
 
@@ -2375,23 +2368,23 @@ class FichaController extends Controller
             $materias = [];
 
             foreach ($clasesAgrupadas as $claveGrupo => $horariosMateria) {
-                $primerHorario  = $horariosMateria->first();
+                $primerHorario = $horariosMateria->first();
                 $horariosUnicos = $horariosMateria->unique('idHorarioMateria');
 
                 // — Validar fechas del primer horario —
                 $fechaInicialValida = !empty($primerHorario->fechaInicial) && strtotime($primerHorario->fechaInicial) !== false;
-                $fechaFinalValida   = !empty($primerHorario->fechaFinal)   && strtotime($primerHorario->fechaFinal)   !== false;
+                $fechaFinalValida = !empty($primerHorario->fechaFinal) && strtotime($primerHorario->fechaFinal) !== false;
 
                 // — Construir diasHorarios —
                 $diasHorarios = [];
                 foreach ($horariosUnicos as $horario) {
                     $diaNombre = $horario->dia_semana ?? 'Sin día';
-                    $horaIni   = $horario->horaInicial ? Carbon::parse($horario->horaInicial)->format('H:i') : '';
-                    $horaFin   = $horario->horaFinal   ? Carbon::parse($horario->horaFinal)->format('H:i')   : '';
+                    $horaIni = $horario->horaInicial ? Carbon::parse($horario->horaInicial)->format('H:i') : '';
+                    $horaFin = $horario->horaFinal ? Carbon::parse($horario->horaFinal)->format('H:i') : '';
                     $diasHorarios[] = [
-                        'dia'             => $diaNombre,
-                        'horaInicial'     => $horaIni,
-                        'horaFinal'       => $horaFin,
+                        'dia' => $diaNombre,
+                        'horaInicial' => $horaIni,
+                        'horaFinal' => $horaFin,
                         'idHorarioMateria' => (int) $horario->idHorarioMateria,
                     ];
                 }
@@ -2399,7 +2392,7 @@ class FichaController extends Controller
                 usort($diasHorarios, function ($a, $b) use ($horariosUnicos) {
                     $horarioA = $horariosUnicos->firstWhere('idHorarioMateria', $a['idHorarioMateria']);
                     $horarioB = $horariosUnicos->firstWhere('idHorarioMateria', $b['idHorarioMateria']);
-                    return ((int)($horarioA->idDia ?? 999)) <=> ((int)($horarioB->idDia ?? 999));
+                    return ((int) ($horarioA->idDia ?? 999)) <=> ((int) ($horarioB->idDia ?? 999));
                 });
 
                 // — Texto de horario para display —
@@ -2410,9 +2403,9 @@ class FichaController extends Controller
                 $horarioTexto = implode(', ', $horarioDisplay);
 
                 // — Calcular sesiones y totales —
-                $totalSesiones      = 0;
+                $totalSesiones = 0;
                 $sesionesCompletadas = 0;
-                $todasLasSesiones   = [];
+                $todasLasSesiones = [];
 
                 Log::info('clasesEstudiante: inicio grupo materia-profesor', [
                     'clave_grupo' => $claveGrupo,
@@ -2424,7 +2417,7 @@ class FichaController extends Controller
                 foreach ($horariosUnicos as $horario) {
                     // Validar fechas del horario actual
                     $hFechaIniValida = !empty($horario->fechaInicial) && strtotime($horario->fechaInicial) !== false;
-                    $hFechaFinValida = !empty($horario->fechaFinal)   && strtotime($horario->fechaFinal)   !== false;
+                    $hFechaFinValida = !empty($horario->fechaFinal) && strtotime($horario->fechaFinal) !== false;
 
                     if (!$hFechaIniValida || !$hFechaFinValida) {
                         continue;
@@ -2455,18 +2448,18 @@ class FichaController extends Controller
 
                     $sesionesCompletadasHorario = $this->obtenerSesionesCompletadas((int) $horario->idHorarioMateria);
 
-                    $totalSesiones      += (int) $totalSesionesHorario;
+                    $totalSesiones += (int) $totalSesionesHorario;
                     $sesionesCompletadas += (int) $sesionesDadasHorario;
 
                     foreach ($sesionesCompletadasHorario as $sesion) {
                         $todasLasSesiones[] = [
-                            'id'              => (int) $sesion['id'],
-                            'numeroSesion'    => (int) $sesion['numeroSesion'],
-                            'fechaSesion'     => $sesion['fechaSesion'],
+                            'id' => (int) $sesion['id'],
+                            'numeroSesion' => (int) $sesion['numeroSesion'],
+                            'fechaSesion' => $sesion['fechaSesion'],
                             'idHorarioMateria' => (int) $horario->idHorarioMateria,
-                            'horaInicial'     => $horario->horaInicial,
-                            'horaFinal'       => $horario->horaFinal,
-                            'idDia'           => (int) $horario->idDia,
+                            'horaInicial' => $horario->horaInicial,
+                            'horaFinal' => $horario->horaFinal,
+                            'idDia' => (int) $horario->idDia,
                         ];
                     }
                 }
@@ -2477,16 +2470,16 @@ class FichaController extends Controller
 
                 foreach ($horariosUnicos as $horario) {
                     $hFechaIniValida = !empty($horario->fechaInicial) && strtotime($horario->fechaInicial) !== false;
-                    $hFechaFinValida = !empty($horario->fechaFinal)   && strtotime($horario->fechaFinal)   !== false;
+                    $hFechaFinValida = !empty($horario->fechaFinal) && strtotime($horario->fechaFinal) !== false;
 
                     if (!$hFechaIniValida || !$hFechaFinValida) {
                         continue;
                     }
 
-                    $fechaInicio      = Carbon::parse($horario->fechaInicial);
-                    $fechaFin         = Carbon::parse($horario->fechaFinal);
-                    $idDia            = (int) $horario->idDia;
-                    $carbonDayOfWeek  = $idDia === 7 ? 0 : $idDia;
+                    $fechaInicio = Carbon::parse($horario->fechaInicial);
+                    $fechaFin = Carbon::parse($horario->fechaFinal);
+                    $idDia = (int) $horario->idDia;
+                    $carbonDayOfWeek = $idDia === 7 ? 0 : $idDia;
 
                     $fechaTemporal = $fechaInicio->copy();
 
@@ -2506,16 +2499,16 @@ class FichaController extends Controller
 
                                 if ($horaIni && $horaFin) {
                                     $fechaHoraInicio = $fechaTemporal->copy()->setTime($horaIni->hour, $horaIni->minute, $horaIni->second);
-                                    $fechaHoraFin    = $fechaTemporal->copy()->setTime($horaFin->hour, $horaFin->minute, $horaFin->second);
+                                    $fechaHoraFin = $fechaTemporal->copy()->setTime($horaFin->hour, $horaFin->minute, $horaFin->second);
 
                                     $todasLasFechasSesiones[] = [
-                                        'fecha'                  => $fechaTemporal->format('Y-m-d'),
-                                        'fechaHoraInicioCarbon'  => $fechaHoraInicio,
-                                        'fechaHoraFinCarbon'     => $fechaHoraFin,
-                                        'horaInicial'            => $horario->horaInicial,
-                                        'horaFinal'              => $horario->horaFinal,
-                                        'idDia'                  => $idDia,
-                                        'idHorarioMateria'       => (int) $horario->idHorarioMateria,
+                                        'fecha' => $fechaTemporal->format('Y-m-d'),
+                                        'fechaHoraInicioCarbon' => $fechaHoraInicio,
+                                        'fechaHoraFinCarbon' => $fechaHoraFin,
+                                        'horaInicial' => $horario->horaInicial,
+                                        'horaFinal' => $horario->horaFinal,
+                                        'idDia' => $idDia,
+                                        'idHorarioMateria' => (int) $horario->idHorarioMateria,
                                     ];
                                 }
                             }
@@ -2536,19 +2529,19 @@ class FichaController extends Controller
                     $sesionNum = 1;
                     foreach ($horariosUnicos as $horario) {
                         $hFechaIniValida = !empty($horario->fechaInicial) && strtotime($horario->fechaInicial) !== false;
-                        $hFechaFinValida = !empty($horario->fechaFinal)   && strtotime($horario->fechaFinal)   !== false;
+                        $hFechaFinValida = !empty($horario->fechaFinal) && strtotime($horario->fechaFinal) !== false;
 
                         if (!$hFechaIniValida || !$hFechaFinValida) {
                             continue;
                         }
 
                         $fechaInicio = Carbon::parse($horario->fechaInicial);
-                        $fechaFin    = Carbon::parse($horario->fechaFinal);
-                        $fechaTemp   = $fechaInicio->copy();
+                        $fechaFin = Carbon::parse($horario->fechaFinal);
+                        $fechaTemp = $fechaInicio->copy();
 
                         while ($fechaTemp->lte($fechaFin)) {
                             $fechaHoraInicio = $fechaTemp->copy();
-                            $fechaHoraFin    = $fechaTemp->copy();
+                            $fechaHoraFin = $fechaTemp->copy();
 
                             if ($horario->horaInicial) {
                                 $hi = Carbon::parse($horario->horaInicial);
@@ -2567,13 +2560,13 @@ class FichaController extends Controller
                             }
 
                             $todasLasFechasSesiones[] = [
-                                'fecha'           => $fechaTemp->format('Y-m-d'),
-                                'horaInicial'     => $horario->horaInicial ?? '',
-                                'horaFinal'       => $horario->horaFinal   ?? '',
+                                'fecha' => $fechaTemp->format('Y-m-d'),
+                                'horaInicial' => $horario->horaInicial ?? '',
+                                'horaFinal' => $horario->horaFinal ?? '',
                                 'idHorarioMateria' => (int) $horario->idHorarioMateria,
-                                'idDia'           => (int) ($horario->idDia ?? 0),
-                                'estado'          => $estado,
-                                'numeroSesion'    => $sesionNum++,
+                                'idDia' => (int) ($horario->idDia ?? 0),
+                                'estado' => $estado,
+                                'numeroSesion' => $sesionNum++,
                             ];
 
                             $fechaTemp->addWeek();
@@ -2593,7 +2586,7 @@ class FichaController extends Controller
                     }
 
                     $fechaHoraInicio = $sesion['fechaHoraInicioCarbon'];
-                    $fechaHoraFin    = $sesion['fechaHoraFinCarbon'];
+                    $fechaHoraFin = $sesion['fechaHoraFinCarbon'];
 
                     $estadoSesion = 'PENDIENTE';
                     if ($ahora->gte($fechaHoraFin)) {
@@ -2612,12 +2605,52 @@ class FichaController extends Controller
 
                 // — Garantizar campos mínimos en cada sesión —
                 foreach ($todasLasFechasSesiones as &$sesion) {
-                    $sesion['fecha']            = $sesion['fecha']            ?? '';
-                    $sesion['horaInicial']      = $sesion['horaInicial']      ?? '';
-                    $sesion['horaFinal']        = $sesion['horaFinal']        ?? '';
+                    $sesion['fecha'] = $sesion['fecha'] ?? '';
+                    $sesion['horaInicial'] = $sesion['horaInicial'] ?? '';
+                    $sesion['horaFinal'] = $sesion['horaFinal'] ?? '';
                     $sesion['idHorarioMateria'] = (int) ($sesion['idHorarioMateria'] ?? 0);
-                    $sesion['estado']           = $sesion['estado']           ?? 'PENDIENTE';
-                    $sesion['numeroSesion']     = (int) ($sesion['numeroSesion']     ?? 0);
+                    $sesion['estado'] = $sesion['estado'] ?? 'PENDIENTE';
+                    $sesion['numeroSesion'] = (int) ($sesion['numeroSesion'] ?? 0);
+
+                    // Buscar si existe el id de sesionMateria real en base de datos para esta sesión
+                    $idSesionReal = null;
+                    foreach ($todasLasSesiones as $ts) {
+                        if ($ts['idHorarioMateria'] === $sesion['idHorarioMateria'] && $ts['fechaSesion'] === $sesion['fecha']) {
+                            $idSesionReal = (int) $ts['id'];
+                            break;
+                        }
+                    }
+                    $sesion['idSesionMateria'] = $idSesionReal;
+
+                    // Si ya existe la sesión real, verificar si el estudiante actual ya la calificó
+                    $yaCalificada = false;
+                    $calificacionInfo = null;
+                    if ($idSesionReal) {
+                        $matriculaAcademica = \App\Models\MatriculaAcademica::whereHas('matricula', function($q) use ($idPersona) {
+                            $q->where('idPersona', $idPersona);
+                        })
+                        ->where('idFicha', $sesion['idHorarioMateria'] ? \DB::table('horarioMateria')->where('id', $sesion['idHorarioMateria'])->value('idFicha') : null)
+                        ->where('idMateria', (int) $primerHorario->idMateria)
+                        ->first();
+
+                        if ($matriculaAcademica) {
+                            $califDb = \DB::table('calificacionSesiones')
+                                ->where('idSesionMateria', $idSesionReal)
+                                ->where('idMatriculaAcademica', $matriculaAcademica->id)
+                                ->first();
+                            
+                            if ($califDb) {
+                                $yaCalificada = true;
+                                $calificacionInfo = [
+                                    'id' => $califDb->id,
+                                    'estrellas' => $califDb->estrellas,
+                                    'comentarios' => $califDb->comentarios,
+                                ];
+                            }
+                        }
+                    }
+                    $sesion['yaCalificada'] = $yaCalificada;
+                    $sesion['calificacionInfo'] = $calificacionInfo;
                 }
                 unset($sesion);
 
@@ -2628,7 +2661,7 @@ class FichaController extends Controller
 
                 // — Aulas únicas —
                 $aulasUnicas = $horariosUnicos->pluck('aula_nombre')->filter()->unique()->values();
-                $aulaNombre  = $aulasUnicas->count() > 1
+                $aulaNombre = $aulasUnicas->count() > 1
                     ? $aulasUnicas->implode(', ')
                     : ($primerHorario->aula_nombre ?? 'Sin aula asignada');
 
@@ -2641,32 +2674,32 @@ class FichaController extends Controller
 
                 // — Respuesta final con tipos forzados —
                 $materias[] = [
-                    'idMateria'           => (int)   $primerHorario->idMateria,
-                    'materia_nombre'      => (string) ($primerHorario->materia_nombre ?? ''),
-                    'ficha_codigo'        => (string) ($primerHorario->ficha_codigo ?? ''),
-                    'profesor_nombre'     => (string) trim($primerHorario->profesor_nombre ?? 'Sin asignar'),
-                    'profesor_email'      => (string) ($primerHorario->profesor_email ?? ''),
-                    'aula_nombre'         => (string) $aulaNombre,
-                    'horario_texto'       => (string) $horarioTexto,
-                    'horarios'            => $diasHorarios,
-                    'total_sesiones'      => (int)   $totalSesiones,
-                    'sesiones_completadas' => (int)   $sesionesCompletadas,
-                    'sesiones_restantes'  => (int)   max(0, $totalSesiones - $sesionesCompletadas),
+                    'idMateria' => (int) $primerHorario->idMateria,
+                    'materia_nombre' => (string) ($primerHorario->materia_nombre ?? ''),
+                    'ficha_codigo' => (string) ($primerHorario->ficha_codigo ?? ''),
+                    'profesor_nombre' => (string) trim($primerHorario->profesor_nombre ?? 'Sin asignar'),
+                    'profesor_email' => (string) ($primerHorario->profesor_email ?? ''),
+                    'aula_nombre' => (string) $aulaNombre,
+                    'horario_texto' => (string) $horarioTexto,
+                    'horarios' => $diasHorarios,
+                    'total_sesiones' => (int) $totalSesiones,
+                    'sesiones_completadas' => (int) $sesionesCompletadas,
+                    'sesiones_restantes' => (int) max(0, $totalSesiones - $sesionesCompletadas),
                     'porcentaje_completado' => (float) $porcentajeCompletado,
-                    'sesiones'            => array_values($todasLasFechasSesiones),
-                    'idHorariosMateria'   => $idHorariosMateria,
+                    'sesiones' => array_values($todasLasFechasSesiones),
+                    'idHorariosMateria' => $idHorariosMateria,
                 ];
             }
 
             return response()->json([
                 'message' => 'Clases del estudiante obtenidas correctamente',
-                'data'    => $materias,
-                'total'   => (int) count($materias)
+                'data' => $materias,
+                'total' => (int) count($materias)
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Error al obtener las clases del estudiante',
-                'error'   => $e->getMessage()
+                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -2706,7 +2739,8 @@ class FichaController extends Controller
     private function idsHorarioMateriaMismoSlot(int $idHorarioMateria): array
     {
         $hm = DB::table('horarioMateria')->where('id', $idHorarioMateria)->first();
-        if (!$hm) return [$idHorarioMateria];
+        if (!$hm)
+            return [$idHorarioMateria];
 
         return DB::table('horarioMateria')
             ->where('idFicha', $hm->idFicha)
@@ -2768,7 +2802,8 @@ class FichaController extends Controller
 
     private function contratosActivosEnSlot(array $slotIds): array
     {
-        if (empty($slotIds)) return [];
+        if (empty($slotIds))
+            return [];
         return DB::table('horarioMateria')
             ->whereIn('id', $slotIds)
             ->whereNotNull('idContrato')
@@ -2783,7 +2818,8 @@ class FichaController extends Controller
             fn($item) => (int) ($item['id'] ?? 0),
             $contratoIdsConRol
         ))));
-        if (empty($ids)) return [];
+        if (empty($ids))
+            return [];
 
         $rows = DB::table('contrato as c')
             ->join('persona as per', 'c.idpersona', '=', 'per.id')
@@ -2798,13 +2834,20 @@ class FichaController extends Controller
         $out = [];
         foreach ($contratoIdsConRol as $item) {
             $id = (int) ($item['id'] ?? 0);
-            if ($id <= 0 || !isset($rows[$id])) continue;
+            if ($id <= 0 || !isset($rows[$id]))
+                continue;
             $r = $rows[$id];
             $out[] = [
                 'idContrato' => $id,
+<<<<<<< HEAD
                 'nombre'     => trim((string) ($r->nombre ?? '')) ?: 'Instructor',
                 'rutaFotoUrl' => $r->rutaFotoUrl ?? null,
                 'rol'        => (string) ($item['rol'] ?? 'titular'),
+=======
+                'nombre' => trim((string) ($r->nombre ?? '')) ?: 'Instructor',
+                'rutaFotoUrl' => $r->rutaFotoUrl ?? null,
+                'rol' => (string) ($item['rol'] ?? 'titular'),
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
             ];
         }
         return $out;
@@ -2824,7 +2867,8 @@ class FichaController extends Controller
         ];
 
         $hm = DB::table('horarioMateria')->where('id', $idHorarioMateria)->first();
-        if (!$hm) return $default;
+        if (!$hm)
+            return $default;
 
         $ref = $fechaReferenciaYmd
             ? Carbon::parse($fechaReferenciaYmd)->startOfDay()
@@ -2838,7 +2882,7 @@ class FichaController extends Controller
 
         $titularId = $horarioContratoId ?: (
             DB::table('horarioMateria')->whereIn('id', $slotIds)
-            ->whereNotNull('idContrato')->orderBy('id')->value('idContrato')
+                ->whereNotNull('idContrato')->orderBy('id')->value('idContrato')
             ? (int) DB::table('horarioMateria')->whereIn('id', $slotIds)
                 ->whereNotNull('idContrato')->orderBy('id')->value('idContrato')
             : null
@@ -2918,6 +2962,295 @@ class FichaController extends Controller
         $cid = $horarioContratoId ?: $idContratoVista;
         return array_merge($default, [
             'instructores_rap' => $cid ? $this->instructoresRapPayload([['id' => (int) $cid, 'rol' => 'titular']]) : [],
+        ]);
+    }
+    public function asignarProyectoFormativo(Request $request, $idFicha)
+    {
+        $request->validate([
+            'idProyectoFormativo' => 'required|integer'
+        ]);
+
+        $ficha = Ficha::findOrFail($idFicha);
+
+        $ficha->idProyectoFormativo = $request->idProyectoFormativo;
+        $ficha->save();
+
+        return response()->json([
+            'message' => 'Proyecto formativo asignado correctamente.',
+            'data' => $ficha
+        ]);
+    }
+    public function getProyectoByFicha(int $fichaId): JsonResponse
+    {
+        $ficha = Ficha::with([
+            'proyectoFormativo.fases.actividades.faseProyectoRaps.materia',
+            'proyectoFormativo.fases.actividades.faseProyectoRaps.faseProyectoMaterias.materia',
+            'proyectoFormativo.fases.faseProyectoRaps.materia',
+            'proyectoFormativo.fases.faseProyectoRaps.faseProyectoMaterias.materia',
+            'aperturarPrograma'
+        ])->findOrFail($fichaId);
+
+        if (!$ficha->idProyectoFormativo) {
+            return response()->json([
+                'message' => 'La ficha no tiene un proyecto formativo asignado.',
+            ], 404);
+        }
+
+        $proyecto = $ficha->proyectoFormativo;
+        $idPrograma = $ficha->aperturarPrograma->idPrograma ?? null;
+        $porcentajeEjecucion = $ficha->porcentajeEjecucion ?? 100;
+
+        // Matriculas para estados
+        $matriculasFicha = \App\Models\MatriculaAcademica::where('idFicha', $fichaId)
+            ->select('idMateria', 'estado')
+            ->get()
+            ->groupBy('idMateria');
+
+        // Horarios para sesiones, instructores, fechas, etc.
+        $horarios = HorarioMateria::where('idFicha', $fichaId)
+            ->with([
+                'gradoMateria.materia',
+                'gradoMateria.gradoPrograma.grado',
+                'contrato.persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto,email',
+            ])
+            ->withCount([
+                'sesionMaterias as sesiones_realizadas_count' => function ($q) {
+                    $q->whereNotNull('fechaSesion');
+                }
+            ])
+            ->get();
+
+        // Para las horasPrograma
+        $horasPorMateria = [];
+        if ($idPrograma) {
+            $horasPorMateria = \Illuminate\Support\Facades\DB::table('agregarMateriaPrograma')
+                ->where('idPrograma', $idPrograma)
+                ->pluck('horas', 'idMateria')
+                ->toArray();
+        }
+
+        // IDs de materias permitidas en este programa
+        $materiasDelPrograma = $idPrograma
+            ? \Illuminate\Support\Facades\DB::table('agregarMateriaPrograma')
+                ->where('idPrograma', $idPrograma)
+                ->pluck('idMateria')
+                ->toArray()
+            : [];
+
+        // Mapa idMateria => datos agregados
+        $datosPorMateria = $horarios
+            ->groupBy(fn($h) => $h->gradoMateria->idMateria ?? 0)
+            ->map(function ($grupo) {
+                $instructores = $grupo
+                    ->pluck('contrato.persona')
+                    ->filter()
+                    ->unique('id')
+                    ->values()
+                    ->map(function ($persona) {
+                        return [
+                            'id' => $persona->id,
+                            'nombre' => trim("{$persona->nombre1} {$persona->nombre2} {$persona->apellido1} {$persona->apellido2}"),
+                            'email' => $persona->email,
+                            'rutaFoto' => $persona->rutaFoto,
+                        ];
+                    });
+
+                $trimestres = $grupo
+                    ->pluck('gradoMateria.gradoPrograma.grado.numeroGrado')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->implode(', ');
+
+                $fechaInicio = $grupo->pluck('fechaInicial')->filter()->min();
+                $fechaFin = $grupo->pluck('fechaFinal')->filter()->max();
+                $numeroSesiones = $grupo->sum('sesiones_realizadas_count');
+
+                $horasActuales = 0;
+                foreach ($grupo as $horario) {
+                    if ($horario->horaInicial && $horario->horaFinal) {
+                        $hI = \Carbon\Carbon::parse($horario->horaInicial);
+                        $hF = \Carbon\Carbon::parse($horario->horaFinal);
+                        $duracionSesion = $hF->diffInMinutes($hI, true) / 60;
+                        $sesionesDadas = $horario->sesiones_realizadas_count ?? 0;
+                        $horasActuales += $sesionesDadas * $duracionSesion;
+                    }
+                }
+
+                return [
+                    'instructores' => $instructores,
+                    'trimestre' => $trimestres,
+                    'fechaInicio' => $fechaInicio ? \Carbon\Carbon::parse($fechaInicio)->format('Y-m-d') : null,
+                    'fechaFin' => $fechaFin ? \Carbon\Carbon::parse($fechaFin)->format('Y-m-d') : null,
+                    'numeroSesiones' => $numeroSesiones,
+                    'horasActuales' => round($horasActuales, 2),
+                ];
+            });
+
+        $formatearRap = function ($rap) use ($datosPorMateria, $matriculasFicha, $horasPorMateria, $materiasDelPrograma) {
+            $materia = $rap->materia;
+
+            // Obtener datos de la materia actual
+            $datos = $datosPorMateria->get($materia->id, [
+                'instructores' => collect(),
+                'trimestre' => '',
+                'fechaInicio' => null,
+                'fechaFin' => null,
+                'numeroSesiones' => 0,
+                'horasActuales' => 0
+            ]);
+
+            $horasPrograma = $horasPorMateria[$materia->id] ?? ($materia->horas ?? 0);
+
+            // Obtener las hijas de este FaseProyectoRap
+            $hijasDelPrograma = $rap->faseProyectoMaterias
+                ->map(fn($fpm) => $fpm->materia)
+                ->filter(fn($hija) => in_array($hija->id, $materiasDelPrograma));
+
+            // Calcular estado de la materia actual
+            $aprobadoCount = $matriculasFicha->get($materia->id, collect())
+                ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
+                ->count();
+
+            $estaFinalizado = $aprobadoCount >= 5;
+
+            // ... (dentro de $formatearRap en tu controlador PHP)
+            if ($hijasDelPrograma->isNotEmpty()) {
+                $materiaData['hijas'] = $hijasDelPrograma
+                    ->map(function ($hija) use ($datosPorMateria, $matriculasFicha, $horasPorMateria, $datos) { // <-- Pasamos $datos del padre
+                        $datosHija = $datosPorMateria->get($hija->id, [
+                            'instructores' => collect(),
+                            'trimestre' => '',
+                            'fechaInicio' => null,
+                            'fechaFin' => null,
+                            'numeroSesiones' => 0,
+                            'horasActuales' => 0
+                        ]);
+
+                        // SI LA HIJA NO TIENE INSTRUCTORES, HEREDA LOS DEL PADRE
+                        $instructoresHija = $datosHija['instructores']->isNotEmpty()
+                            ? $datosHija['instructores']
+                            : $datos['instructores'];
+
+                        $horasProgramaHija = $horasPorMateria[$hija->id] ?? ($hija->horas ?? 0);
+                        $aprobadoCountHija = $matriculasFicha->get($hija->id, collect())
+                            ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
+                            ->count();
+
+                        $estaFinalizadoHija = $aprobadoCountHija >= 5;
+
+                        return [
+                            'id' => $hija->id,
+                            'nombre' => $hija->nombreMateria ?? $hija->descripcion ?? null,
+                            'instructores' => is_array($instructoresHija) ? $instructoresHija : $instructoresHija->toArray(),
+                            'trimestre' => $datosHija['trimestre'] ?: $datos['trimestre'],
+                            'fechaInicio' => $datosHija['fechaInicio'],
+                            'fechaFin' => $datosHija['fechaFin'],
+                            'numeroSesiones' => $datosHija['numeroSesiones'],
+                            'horasActuales' => $datosHija['horasActuales'],
+                            'horas' => $horasProgramaHija,
+                            'estado' => $estaFinalizadoHija ? 'APROBADO' : 'POR EVALUAR',
+                        ];
+                    })
+                    ->values()
+                    ->toArray();
+            }
+
+            // Formatear datos de la materia actual
+            $materiaData = [
+                'id' => $materia->id,
+                'nombre' => $materia->nombreMateria ?? $materia->descripcion ?? null,
+                'instructores' => is_array($datos['instructores']) ? $datos['instructores'] : $datos['instructores']->toArray(),
+                'trimestre' => $datos['trimestre'],
+                'fechaInicio' => $datos['fechaInicio'],
+                'fechaFin' => $datos['fechaFin'],
+                'numeroSesiones' => $datos['numeroSesiones'],
+                'horasActuales' => $datos['horasActuales'],
+                'horas' => $horasPrograma,
+                'estado' => $estaFinalizado ? 'APROBADO' : 'POR EVALUAR',
+            ];
+
+            // Formatear hijas (sin recursión)
+            if ($hijasDelPrograma->isNotEmpty()) {
+                $materiaData['hijas'] = $hijasDelPrograma
+                    ->map(function ($hija) use ($datosPorMateria, $matriculasFicha, $horasPorMateria, $materiasDelPrograma) {
+                        $datosHija = $datosPorMateria->get($hija->id, [
+                            'instructores' => collect(),
+                            'trimestre' => '',
+                            'fechaInicio' => null,
+                            'fechaFin' => null,
+                            'numeroSesiones' => 0,
+                            'horasActuales' => 0
+                        ]);
+
+                        $horasProgramaHija = $horasPorMateria[$hija->id] ?? ($hija->horas ?? 0);
+
+                        $aprobadoCountHija = $matriculasFicha->get($hija->id, collect())
+                            ->filter(fn($m) => strtoupper(trim($m->estado ?? '')) === 'APROBADO')
+                            ->count();
+
+                        $estaFinalizadoHija = $aprobadoCountHija >= 5;
+
+                        return [
+                            'id' => $hija->id,
+                            'nombre' => $hija->nombreMateria ?? $hija->descripcion ?? null,
+                            'instructores' => is_array($datosHija['instructores']) ? $datosHija['instructores'] : $datosHija['instructores']->toArray(),
+                            'trimestre' => $datosHija['trimestre'],
+                            'fechaInicio' => $datosHija['fechaInicio'],
+                            'fechaFin' => $datosHija['fechaFin'],
+                            'numeroSesiones' => $datosHija['numeroSesiones'],
+                            'horasActuales' => $datosHija['horasActuales'],
+                            'horas' => $horasProgramaHija,
+                            'estado' => $estaFinalizadoHija ? 'APROBADO' : 'POR EVALUAR',
+                        ];
+                    })
+                    ->values()
+                    ->toArray();
+            }
+
+            return [
+                'id' => $rap->id,
+                'materia' => $materiaData,
+                'idMateriaPadre' => $materia->idMateriaPadre,
+                'instructores' => $materiaData['instructores'],
+                'trimestre' => $materiaData['trimestre'],
+                'fechaInicio' => $materiaData['fechaInicio'],
+                'fechaFin' => $materiaData['fechaFin'],
+                'numeroSesiones' => $materiaData['numeroSesiones'],
+                'horasActuales' => $materiaData['horasActuales'],
+                'horas' => $materiaData['horas'],
+                'estado' => $materiaData['estado'],
+            ];
+        };
+
+        $fasesFormateadas = $proyecto->fases->map(function ($fase) use ($formatearRap) {
+            $actividadesFormateadas = $fase->actividades->map(function ($actividad) use ($formatearRap) {
+                return [
+                    'id' => $actividad->id,
+                    'descripcionActividad' => $actividad->descripcionActividad,
+                    'faseProyectoRap' => $actividad->faseProyectoRaps->map($formatearRap),
+                ];
+            });
+
+            $rapsSinActividad = $fase->faseProyectoRaps
+                ->whereNull('idActividadProyecto')
+                ->map($formatearRap)
+                ->values();
+
+            return [
+                'id' => $fase->id,
+                'descripcionFase' => $fase->descripcionFase,
+                'actividades' => $actividadesFormateadas,
+                'rapsGenerales' => $rapsSinActividad,
+            ];
+        });
+
+        return response()->json([
+            'proyectoFormativo' => [
+                'id' => $proyecto->id,
+                'nombre' => $proyecto->nombre ?? $proyecto->descripcion ?? null,
+            ],
+            'fasesProyecto' => $fasesFormateadas,
         ]);
     }
 }

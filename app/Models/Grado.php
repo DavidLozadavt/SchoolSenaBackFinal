@@ -11,6 +11,10 @@ class Grado extends Model
 
     protected $fillable = ['numeroGrado', 'nombreGrado', 'idTipoGrado'];
 
+    protected $casts = [
+        'numeroGrado' => 'integer',
+    ];
+
     public function tipoGrado()
     {
         return $this->belongsTo(TipoGrado::class, 'idTipoGrado');

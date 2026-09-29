@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\gestion_horarios;
 
 use App\Enums\EstadoGradoMateria;
+use App\Enums\EstadoGradoPrograma;
 use App\Models\Grado;
 use App\Models\GradoPrograma;
 use App\Util\QueryUtil;
@@ -18,6 +19,7 @@ use App\Models\TipoGrado;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Services\TrimestreActualFichaService;
 use PhpParser\Node\Stmt\TryCatch;
 
 use function PHPUnit\Framework\isEmpty;
@@ -97,19 +99,50 @@ class GradoProgramaController extends Controller
         try{
             $datos = $request->validate([
                 'idPrograma' => 'required|integer',
-                'numeroGrado' => 'required|integer',
+                'numeroGrado' => 'required|integer|min:1',
                 'fechaInicio' => 'required|date',
                 'fechaFin' => 'required|date',
                 'idFicha' => 'required|integer',
                 'materias' => 'required|array',
             ]);
 
+            $numeroGrado = (int) $datos['numeroGrado'];
+
             // consultar el id del tipo de grado(TRIMESTRE)
             $tipoGrado = TipoGrado::where('nombreTipoGrado', 'TRIMESTRE')->firstOrFail();
             // buscar el grado con ese tipo de grado
             $grado = Grado::where('idTipoGrado', $tipoGrado->id)
-                ->where('numeroGrado', $datos['numeroGrado'])
+                ->where('numeroGrado', $numeroGrado)
                 ->firstOrFail();
+
+            // Finalizar trimestres anteriores de esta ficha/programa (solo uno activo a la vez).
+            $idsGradosAnteriores = Grado::where('idTipoGrado', $tipoGrado->id)
+                ->where('numeroGrado', '<', $numeroGrado)
+                ->pluck('id');
+
+            if ($idsGradosAnteriores->isNotEmpty()) {
+                $idsGradoProgramaAnteriores = HorarioMateria::where('idFicha', $datos['idFicha'])
+                    ->whereHas('gradoMateria.gradoPrograma', function ($q) use ($datos, $idsGradosAnteriores) {
+                        $q->where('idPrograma', $datos['idPrograma'])
+                            ->whereIn('idGrado', $idsGradosAnteriores);
+                    })
+                    ->with('gradoMateria:id,idGradoPrograma')
+                    ->get()
+                    ->pluck('gradoMateria.idGradoPrograma')
+                    ->filter()
+                    ->unique()
+                    ->values();
+
+                if ($idsGradoProgramaAnteriores->isNotEmpty()) {
+                    GradoPrograma::whereIn('id', $idsGradoProgramaAnteriores)
+                        ->whereNotIn('estado', [
+                            EstadoGradoPrograma::FINALIZADO,
+                            EstadoGradoPrograma::CANCELADO,
+                            EstadoGradoPrograma::INTERRUMPIDO,
+                        ])
+                        ->update(['estado' => EstadoGradoPrograma::FINALIZADO]);
+                }
+            }
 
             // buscamos todos lo horarios de la ficha con estado PENDIENTE y ASIGNADO
             $horarios = HorarioMateria::where('idFicha', $datos['idFicha'])
@@ -211,6 +244,7 @@ class GradoProgramaController extends Controller
                 'materias' => 'required|array',
             ]);
 
+<<<<<<< HEAD
             $ficha = Ficha::with('asignacion')->findOrFail($datos['idFicha']);
             $gradoPrograma = GradoPrograma::firstOrCreate(
                 [
@@ -218,6 +252,17 @@ class GradoProgramaController extends Controller
                     'idPrograma' => $ficha->asignacion->idPrograma,
                 ]
             );
+=======
+            $bloqueo = TrimestreActualFichaService::abortSiGradoProgramaNoActual(
+                (int) $datos['idGradoPrograma'],
+                (int) $datos['idFicha']
+            );
+            if ($bloqueo) {
+                return $bloqueo;
+            }
+
+            foreach ($datos['materias'] as $nueva) {
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
 
             foreach ($datos['materias'] as $nueva) {
                 $materia = Materia::findOrFail($nueva['id']);

@@ -58,17 +58,120 @@ trait ValidatesMaterialDocumentUpload
     }
 
     /**
-     * MIME types válidos para Word (doc/docx).
+     * MIME types válidos para Word .doc (OLE / legacy).
+     *
+     * @return list<string>
+     */
+    protected function materialDocumentoWordDocAllowedMimes(): array
+    {
+        return [
+            'application/msword',
+            'application/vnd.ms-word',
+            'application/x-msword',
+            'application/CDFV2',
+            'application/x-ole-storage',
+            'application/octet-stream',
+        ];
+    }
+
+    /**
+     * MIME types válidos para Word .docx (OOXML; a menudo se detecta como ZIP).
+     *
+     * @return list<string>
+     */
+    protected function materialDocumentoWordDocxAllowedMimes(): array
+    {
+        return [
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-word.document.macroenabled.12',
+            'application/msword',
+            'application/zip',
+            'application/x-zip-compressed',
+            'application/octet-stream',
+        ];
+    }
+
+    /**
+     * MIME types válidos para Word (doc/docx) — unión para mensajes/helpers.
      *
      * @return list<string>
      */
     protected function materialDocumentoWordAllowedMimes(): array
     {
-        return [
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/octet-stream',
-        ];
+        return array_values(array_unique(array_merge(
+            $this->materialDocumentoWordDocAllowedMimes(),
+            $this->materialDocumentoWordDocxAllowedMimes()
+        )));
+    }
+
+    /**
+     * Documento base de actividad: solo PDF / Word (.doc, .docx), máx. 50 MB.
+     */
+    protected function assertActividadDocumentoFile(ValidatorInstance $validator, ?UploadedFile $file, string $attribute = 'documento'): void
+    {
+        if (! $file) {
+            return;
+        }
+
+        $allowed = ['pdf', 'doc', 'docx'];
+        $ext = strtolower((string) $file->getClientOriginalExtension());
+        $message = 'Tipo de archivo no permitido. Solo se permiten: PDF, Word (.doc, .docx).';
+
+        if ($ext === '' || ! in_array($ext, $allowed, true)) {
+            $validator->errors()->add($attribute, $message);
+
+            return;
+        }
+
+        if ($ext === 'doc' || $ext === 'docx') {
+            $mime = strtolower((string) ($file->getMimeType() ?? ''));
+            $allowedMimes = $ext === 'doc'
+                ? $this->materialDocumentoWordDocAllowedMimes()
+                : $this->materialDocumentoWordDocxAllowedMimes();
+
+            if ($mime !== '' && ! in_array($mime, $allowedMimes, true)) {
+                $validator->errors()->add($attribute, $message);
+            }
+
+            return;
+        }
+
+        // PDF: validación secundaria estándar.
+        $secondary = Validator::make([$attribute => $file], [
+            $attribute => 'mimes:pdf',
+        ]);
+
+        if ($secondary->fails()) {
+            $validator->errors()->add($attribute, $message);
+        }
+    }
+
+    /**
+     * Valida Word por extensión + MIME allowlist (evita fallos de mimes: de Laravel/Symfony).
+     *
+     * @return bool true si el archivo es Word y ya se validó (ok o error agregado).
+     */
+    protected function assertWordFileByExtensionAndMime(
+        ValidatorInstance $validator,
+        UploadedFile $file,
+        string $attribute,
+        string $errorMessage
+    ): bool {
+        $ext = strtolower((string) $file->getClientOriginalExtension());
+        if ($ext !== 'doc' && $ext !== 'docx') {
+            return false;
+        }
+
+        $mime = strtolower((string) ($file->getMimeType() ?? ''));
+        $allowedMimes = $ext === 'doc'
+            ? $this->materialDocumentoWordDocAllowedMimes()
+            : $this->materialDocumentoWordDocxAllowedMimes();
+
+        if ($mime !== '' && ! in_array($mime, $allowedMimes, true)) {
+            $validator->errors()->add($attribute, $errorMessage);
+        }
+
+        return true;
     }
 
     /**
@@ -125,13 +228,12 @@ trait ValidatesMaterialDocumentUpload
             return;
         }
 
-        if ($ext === 'doc' || $ext === 'docx') {
-            $mime = strtolower((string) ($file->getMimeType() ?? ''));
-            $allowed = $this->materialDocumentoWordAllowedMimes();
-            if ($mime !== '' && ! in_array($mime, $allowed, true)) {
-                $validator->errors()->add($attribute, $this->materialDocumentoAllowedExtensionsMessage());
-            }
-
+        if ($this->assertWordFileByExtensionAndMime(
+            $validator,
+            $file,
+            $attribute,
+            $this->materialDocumentoAllowedExtensionsMessage()
+        )) {
             return;
         }
 

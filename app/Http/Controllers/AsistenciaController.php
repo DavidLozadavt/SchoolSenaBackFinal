@@ -701,6 +701,26 @@ class AsistenciaController extends Controller
 
             $horarioMateria = \App\Models\HorarioMateria::findOrFail($idHorarioMateria);
 
+            $estadosActivos = [
+                \App\Enums\EstadoHorarioMateria::PENDIENTE,
+                \App\Enums\EstadoHorarioMateria::ASIGNADO,
+            ];
+            if (! in_array($horarioMateria->estado, $estadosActivos, true)) {
+                return response()->json([
+                    'message' => 'No se puede iniciar clase en un horario interrumpido o finalizado.',
+                ], 422);
+            }
+
+            if ($horarioMateria->fechaFinal) {
+                $hoyDate = today()->toDateString();
+                $finDate = \Carbon\Carbon::parse((string) $horarioMateria->fechaFinal)->toDateString();
+                if ($hoyDate > $finDate) {
+                    return response()->json([
+                        'message' => 'La fecha de hoy supera la fecha final del horario. No se pueden generar nuevas sesiones.',
+                    ], 422);
+                }
+            }
+
             // Buscar la sesiÃ³n existente para hoy o CREARLA si no existe
             $sesionMateria = \App\Models\SesionMateria::where('idHorarioMateria', $idHorarioMateria)
                 ->whereDate('fechaSesion', today())
@@ -1988,7 +2008,7 @@ class AsistenciaController extends Controller
                         ? 'Inasistencia justificada'
                         : (
                             $estadoJust === 'PENDIENTE'
-                                ? 'Justificación pendiente'
+                                ? 'Justificaciï¿½n pendiente'
                                 : (
                                     $estadoPermiso === 'APROBADO'
                                         ? 'Permiso aprobado'
@@ -1997,7 +2017,7 @@ class AsistenciaController extends Controller
                                                 ? 'Permiso pendiente'
                                                 : (
                                                     $estadoJust === 'RECHAZADO' || $estadoPermiso === 'RECHAZADO'
-                                                        ? 'Ausente (justificación rechazada)'
+                                                        ? 'Ausente (justificaciï¿½n rechazada)'
                                                         : 'Ausente'
                                                 )
                                         )

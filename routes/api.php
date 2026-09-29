@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\PortafolioController;
+use App\Http\Controllers\PortafolioDocumentoController;
+use App\Http\Controllers\PortafolioFichaController;
+use App\Http\Controllers\PortafolioCategoriaController;
 use App\Http\Controllers\SchoolBridgeController;
 use App\Http\Controllers\EventoController;
 use App\Http\Controllers\GestionEventoHermanoController;
@@ -25,6 +29,7 @@ use App\Http\Controllers\auth\UserController;
 use App\Http\Controllers\auth\LoginController;
 use App\Http\Controllers\ClaseVehiculoController;
 use App\Http\Controllers\ComprasWebController;
+use App\Http\Controllers\gestion_horarios\CalificacionSesionController;
 use App\Http\Controllers\PuntoVentaController;
 use App\Http\Controllers\DepartamentoController;
 use App\Http\Controllers\DetalleRevisionController;
@@ -125,6 +130,16 @@ use App\Http\Controllers\gestion_regional\RegionalController;
 use App\Http\Controllers\PeriodosController;
 use App\Http\Controllers\gestion_jornadas\JornadaController;
 use App\Http\Controllers\GCController;
+use App\Http\Controllers\SeguimientoAspiranteController;
+use App\Http\Controllers\WhatsappPlantillaController;
+use App\Http\Controllers\TelecomConfigController;
+use App\Http\Controllers\WhatsappWebhookController;
+use App\Http\Controllers\WhatsappPlantillaMetaController;
+use App\Http\Controllers\MensajesPlanController;
+use App\Http\Controllers\SolicitudPlanMensajeController;
+use App\Http\Controllers\NotificacionPlanController;
+use App\Http\Controllers\DashboardPlanesController;
+use App\Permission\PermissionConst;
 
 use App\Http\Controllers\gestion_programas_academicos\NivelesProgramaController;
 use App\Http\Controllers\SedeController as ControllersSedeController;
@@ -156,6 +171,7 @@ use App\Http\Controllers\CompromisosController;
 use App\Http\Controllers\ActaController;
 use App\Http\Controllers\FaseProyectoController;
 use App\Http\Controllers\FaseProyectoRapController;
+use App\Http\Controllers\FaseProyectoMateriaController;
 use App\Http\Controllers\gestion_horarios\AsignacionSesionController;
 use App\Http\Controllers\gestion_notificacion\NotificacionesSistemaController;
 use App\Http\Controllers\gestion_pensum\InasistenciaController;
@@ -165,7 +181,11 @@ use App\Http\Controllers\SancionesController;
 use App\Http\Controllers\AnexoActaController;
 use App\Http\Controllers\gestion_solicitudes_instructor\SolicitudMateriaController;
 use App\Http\Controllers\InstructorLiderController;
+<<<<<<< HEAD
 use App\Http\Controllers\ReunionesTemporalesController;
+=======
+use App\Http\Controllers\SeguimientoAprendizController;
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
 
 /*
 |--------------------------------------------------------------------------
@@ -184,11 +204,30 @@ Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
 Route::post('integration/sync-password', [ForgotPasswordController::class, 'syncPassword']);
 
+// Webhook público de WhatsApp Cloud API (Meta) — módulo Seguimiento de Aspirantes.
+// NO requiere autenticación: Meta llama directamente a estas URLs.
+Route::get('webhooks/meta', [WhatsappWebhookController::class, 'verify']);   // Validación (hub.challenge)
+Route::post('webhooks/meta', [WhatsappWebhookController::class, 'receive']); // Recepción de mensajes/estados
+
+// Webhook público de la pasarela de pagos Wompi — compra de planes de mensajes.
+// NO requiere autenticación: Wompi llama directamente. La firma del evento se
+// valida con WOMPI_EVENTS_SECRET dentro del controlador.
+Route::post('webhooks/wompi', [WompiController::class, 'webhookPlan']);
+
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
 Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
+<<<<<<< HEAD
+=======
+// Inscripción pública del aspirante (Seguimiento de Aspirantes) — identifica
+// al aspirante únicamente por tokenPublico, sin login. Reutiliza el módulo
+// de Formularios y su endpoint de upload-adjunto de arriba.
+Route::get('inscripcion-aspirante/{token}', [App\Http\Controllers\AspiranteInscripcionController::class, 'show']);
+Route::post('inscripcion-aspirante/{token}/responder', [App\Http\Controllers\AspiranteInscripcionController::class, 'responder']);
+
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
 // Inscripción pública a eventos (sin auth de School, para usuarios de NexiService)
 Route::post('eventos-multimedia/{id}/register-public', [App\Http\Controllers\EventoController::class, 'registerPublic']);
 Route::get('eventos-multimedia/{id}/check-registration-public', [App\Http\Controllers\EventoController::class, 'checkRegistrationPublic']);
@@ -237,10 +276,13 @@ Route::middleware('auth:api')->group(function () {
 
 });
 
+
 // jerarquía de permisos
-Route::get('permisos_jerarquia', [PermissionHierarchyController::class, 'index']);
-Route::post('permissions/{id}/set-parent', [PermissionHierarchyController::class, 'setParent'])->whereNumber('id');
-Route::get('menu/dynamic', [PermissionHierarchyController::class, 'getAllPermissionsHierarchy']);
+Route::middleware('auth:api')->group(function () {
+    Route::get('permisos_jerarquia', [PermissionHierarchyController::class, 'index']);
+    Route::post('permissions/{id}/set-parent', [PermissionHierarchyController::class, 'setParent'])->whereNumber('id');
+    Route::get('menu/dynamic', [PermissionHierarchyController::class, 'getAllPermissionsHierarchy']);
+});
 
 // notificaciones
 Route::resource('notificaciones', NotificacionController::class);
@@ -1307,6 +1349,10 @@ Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
 Route::get('/ficha/validar-codigo', [FichaController::class, 'validarCodigo']);
 
+//proyecto Formativo
+Route::put('/fichasproyecto/{idFicha}/proyecto-formativo', [FichaController::class, 'asignarProyectoFormativo']);
+Route::get('/fichapry/{idFicha}/proyecto-formativo', [FichaController::class, 'getProyectoByFicha']);
+
 // Rutas Actividades (módulo académico)
 Route::middleware('auth:api')->group(function () {
     Route::get('actividades', [ActividadController::class, 'index']);
@@ -1314,16 +1360,19 @@ Route::middleware('auth:api')->group(function () {
     Route::post('actividades', [ActividadController::class, 'store']);
     Route::post('cuestionarios', [ActividadController::class, 'storeCuestionario']);
     Route::match(['put', 'post'], 'cuestionarios/{id}', [ActividadController::class, 'updateCuestionario']);
+    Route::put('cuestionarios/{id}/reglas-evaluacion', [ActividadController::class, 'actualizarReglasEvaluacionCuestionario']);
     Route::post('actividades/upload-documento', [ActividadController::class, 'uploadDocumento']);
     Route::post('actividades/{id}/upload-documento', [ActividadController::class, 'uploadDocumentoActividad']);
     Route::get('actividades/{id}/materiales-apoyo', [ActividadController::class, 'materialesApoyo']);
     Route::post('actividades/{id}/materiales-apoyo', [ActividadController::class, 'storeMaterialApoyo']);
     Route::delete('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}', [ActividadController::class, 'destroyMaterialApoyo']);
+    Route::post('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}/mover-biblioteca', [ActividadController::class, 'moverMaterialApoyoBiblioteca']);
     Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
     Route::get('ambiente-virtual/instructor/mis-actividades', [ActividadController::class, 'misActividadesInstructor']);
     Route::get('ambiente-virtual/material-apoyo', [ActividadController::class, 'materialApoyoAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta-cuestionario', [ActividadController::class, 'responderCuestionarioAprendiz']);
+    Route::get('actividades-aprendiz/{idCalificacionActividad}/revision-cuestionario', [ActividadController::class, 'revisionCuestionarioAprendiz']);
     Route::get('actividades/{id}', [ActividadController::class, 'show']);
     Route::put('actividades/{id}', [ActividadController::class, 'update']);
     Route::delete('actividades/{id}', [ActividadController::class, 'destroy']);
@@ -1385,8 +1434,16 @@ Route::middleware('auth:api')->group(function () {
     Route::post('calificaciones/individual', [CalificacionActividadController::class, 'calificarIndividual']);
     Route::post('calificaciones/por-grupo', [CalificacionActividadController::class, 'calificarPorGrupo']);
     Route::get('calificaciones_ficha_by_instructor/{idInstructor}', [MatriculaAcademicaController::class, 'calificacionesFichaByInstructor']);
+
+    // Calificaciones de Sesiones de Clase
+    Route::post('calificacion-sesion', [CalificacionSesionController::class, 'store']);
+    Route::get('calificacion-sesion/sesion/{idSesionMateria}', [CalificacionSesionController::class, 'getPorSesion']);
 }); //Juicios evaluativos:
-Route::post('raps', action: [TmpRapController::class, 'uploadRaps']);
+Route::middleware('auth:api')->group(function () {
+    Route::post('raps', [TmpRapController::class, 'uploadRaps']);
+    Route::get('juicios-evaluativos/ficha/{idFicha}', [TmpRapController::class, 'getJuiciosByFicha']);
+    Route::get('raps/ultima-carga/{idFicha}', [TmpRapController::class, 'lastUpdateFicha']);
+});
 
 //rutas de Jornadas
 Route::post('jornadas/crear_jornada_materias', [JornadaController::class, 'crearJornadaMaterias']);
@@ -1443,6 +1500,8 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
     Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
+    Route::put('horarios/materia/{id}/interrumpir', [HorarioMateriaController::class, 'interrumpirHorario']);
+    Route::put('horarios/materia/{id}/finalizar', [HorarioMateriaController::class, 'finalizarHorario']);
     Route::delete('horarios/materia/{id}', [HorarioMateriaController::class, 'destroy']); //eliminar horario
 });
 
@@ -1501,11 +1560,11 @@ Route::post('sanciones', [SancionesController::class, 'store']);
 // asistencia e inasistencia
 Route::apiResource('asistencia', AsistenciaController::class);
 Route::apiResource('inasistencia', InasistenciaController::class)->only(['index', 'show']);
-Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica',[AsistenciaController::class, 'getAllAssistance']);
-Route::put('update_assistance',[AsistenciaController::class, 'updateAssistance']);
-Route::post('update_assistance',[AsistenciaController::class, 'updateAssistance']);
-Route::get('estadisticas-estudiante',[AsistenciaController::class, 'getEstadisticasPorEstudiante']);
-Route::get('justificaciones-inasistencia/{id}/soporte',[AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
+Route::get('get_assisetEstadoAsociacionstances_by_matricula_academica', [AsistenciaController::class, 'getAllAssistance']);
+Route::put('update_assistance', [AsistenciaController::class, 'updateAssistance']);
+Route::post('update_assistance', [AsistenciaController::class, 'updateAssistance']);
+Route::get('estadisticas-estudiante', [AsistenciaController::class, 'getEstadisticasPorEstudiante']);
+Route::get('justificaciones-inasistencia/{id}/soporte', [AsistenciaController::class, 'verSoporteJustificacion'])->name('justificaciones.soporte');
 Route::post('solicitar-justificacion-asistencia', [AsistenciaController::class, 'solicitarJustificacionAsistencia']);
 Route::post('solicitar-justificacion-asistencia-rango', [AsistenciaController::class, 'solicitarJustificacionAsistenciaRango']);
 Route::get('justificaciones-pendientes-instructor', [AsistenciaController::class, 'justificacionesPendientesInstructor']);
@@ -1515,6 +1574,7 @@ Route::get('asistencias-instructor-global', [AsistenciaController::class, 'asist
 //Intructores:
 Route::middleware('auth:api')->group(function () {
     Route::get('instructores', [InstructoresController::class, 'getInstructors']);
+    Route::get('instructores/estado_informe_pago', [InstructoresController::class, 'getEstadoInformePago']);
     Route::get('instructores/historial', [InstructoresController::class, 'getInstructorsHistorial']);
     Route::get('instructores/fichas', [InstructoresController::class, 'getFichasByContrato']);
     Route::put('instructores/{idActivation}/aceptar-rmi', [InstructoresController::class, 'aceptarRmi']);
@@ -1604,6 +1664,12 @@ Route::middleware('auth:api')->group(function () {
 });
 
 Route::middleware('auth:api')->group(function () {
+    Route::get('fase-proyecto-materia/materias', [FaseProyectoMateriaController::class, 'getMaterias']);
+    Route::post('fase-proyecto-materia', [FaseProyectoMateriaController::class, 'store']);
+    Route::delete('fase-proyecto-materia/{id}', [FaseProyectoMateriaController::class, 'destroy']);
+});
+
+Route::middleware('auth:api')->group(function () {
     // Rutas para actividades del contrato
     Route::prefix('actividades-contrato')->group(function () {
         Route::get('/', [ActividadContratoController::class, 'index']);
@@ -1651,14 +1717,14 @@ Route::middleware('auth:api')->group(function () {
     // Deezer
     Route::get('deezer/search', [MultimediaHistoriasController::class, 'searchTrack']);
     Route::get('deezer/search/{id}', [MultimediaHistoriasController::class, 'getTrack']);
-    
+
     // --- EVENTOS ---
     Route::get('eventos-multimedia', [EventoController::class, 'index']);
     Route::get('eventos-multimedia/{id}', [EventoController::class, 'show']);
     Route::post('eventos-multimedia', [EventoController::class, 'store']);
     Route::post('eventos-multimedia/{id}', [EventoController::class, 'update']);
     Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy']);
-    
+
     // Rutas de inscripción
     Route::get('eventos-multimedia/{id}/check-registration', [EventoController::class, 'checkRegistration']);
     Route::post('eventos-multimedia/{id}/register', [EventoController::class, 'register']);
@@ -1697,6 +1763,18 @@ Route::middleware('auth:api')->group(function () {
     Route::post('instructor-lider/cambiar-estado-aprendiz', [InstructorLiderController::class, 'cambiarEstadoAprendiz']);
 });
 
+Route::middleware('auth:api')->group(function () {
+    Route::get('seguimientos/buscar', [SeguimientoAprendizController::class, 'porAprendiz']);
+    Route::get('seguimientos/instructores', [SeguimientoAprendizController::class, 'instructores']);
+    Route::get('seguimientos/por-instructor', [SeguimientoAprendizController::class, 'porInstructor']);
+    Route::apiResource('seguimientos', SeguimientoAprendizController::class);
+    Route::get('seguimientos/{seguimiento}/documentos', [SeguimientoAprendizController::class, 'documentosIndex']);
+    Route::post('seguimientos/{seguimiento}/documentos', [SeguimientoAprendizController::class, 'documentosStore']);
+    Route::post('documentos/{documento}', [SeguimientoAprendizController::class, 'documentosUpdate']);
+    Route::patch('documentos/{documento}/estado', [SeguimientoAprendizController::class, 'documentosCambiarEstado']);
+    Route::delete('documentos/{documento}', [SeguimientoAprendizController::class, 'documentosDestroy']);
+});
+
 // Solicitud de Instructores trasversales
 Route::middleware('auth:api')->group(function () {
     Route::get('solicitud-materia', [SolicitudMateriaController::class, 'index']);
@@ -1720,7 +1798,7 @@ Route::prefix('invitado')->group(function () {
     Route::get('/stats', [GestionEventoHermanoController::class, 'stats']);
     Route::get('/export-csv', [GestionEventoHermanoController::class, 'exportCsv']);
     Route::get('/historial-scan', [GestionEventoHermanoController::class, 'historialScan']);
-    Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']); 
+    Route::post('/abonar/{id}', [GestionEventoHermanoController::class, 'abonar']);
     Route::get('/', [GestionEventoHermanoController::class, 'index']);
     Route::get('/token/{token}', [GestionEventoHermanoController::class, 'getByToken']);
     Route::get('/token/{token}/items', [GestionEventoHermanoController::class, 'getItemsByToken']);
@@ -1730,12 +1808,13 @@ Route::prefix('invitado')->group(function () {
     Route::post('/generar-qrs', [GestionEventoHermanoController::class, 'generarQrs']);
     Route::post('/{id}/qr', [GestionEventoHermanoController::class, 'guardarQrImagen']);
     Route::post('/token/{token}/item/{itemId}/toggle', [GestionEventoHermanoController::class, 'toggleItem']);
-    Route::get('/{id}', [GestionEventoHermanoController::class, 'show']); 
+    Route::get('/{id}', [GestionEventoHermanoController::class, 'show']);
     Route::put('/{id}', [GestionEventoHermanoController::class, 'update']);
     Route::delete('/{id}', [GestionEventoHermanoController::class, 'destroy']);
 });
 
 
+<<<<<<< HEAD
 //rutas SHOOL SENA para gestión de aperturaPrograma:
 Route::middleware('auth:api')->group(function () {
     Route::get('aperturarprograma/disponibles', [AperturarProgramaController::class, 'aperturasDisponibles']);
@@ -1751,3 +1830,133 @@ Route::middleware('auth:api')->group(function () {
     Route::apiResource('reuniones_temporales', ReunionesTemporalesController::class);
     Route::post('reuniones_temporales/{reunion}/extend', [ReunionesTemporalesController::class, 'extend']);
 });
+=======
+
+Route::middleware('auth:api')->group(function () {
+    Route::get('portafolios/instructor/{idContrato}', [PortafolioController::class, 'portafoliosInstructor']);
+    Route::get('portafolios/{id}/fichas', [PortafolioController::class, 'fichas']);
+    Route::get('portafolios/{id}/descargar-zip', [PortafolioController::class, 'downloadZip']);
+    Route::apiResource('portafolios', PortafolioController::class);
+    Route::apiResource('portafolio-fichas', PortafolioFichaController::class);
+    Route::apiResource('portafolio-documentos', PortafolioDocumentoController::class);
+    Route::get('portafolio-categorias', [PortafolioCategoriaController::class, 'index']);
+    Route::post('portafolio-categorias', [PortafolioCategoriaController::class, 'store']);
+  
+    // Módulo de Seguimiento de Aspirantes
+    Route::post('seguimiento-aspirantes/importar', [SeguimientoAspiranteController::class, 'importar']);
+    Route::get('seguimiento-aspirantes', [SeguimientoAspiranteController::class, 'index']);
+    Route::get('seguimiento-aspirantes/programas', [SeguimientoAspiranteController::class, 'getProgramas']);
+    Route::get('seguimiento-aspirantes/centros', [SeguimientoAspiranteController::class, 'getCentros']);
+    Route::get('seguimiento-aspirantes/fichas', [SeguimientoAspiranteController::class, 'getFichas']);
+    Route::get('seguimiento-aspirantes/exportar', [SeguimientoAspiranteController::class, 'exportar']);
+    Route::post('seguimiento-aspirantes/eliminar', [SeguimientoAspiranteController::class, 'eliminarSeleccionados']);
+    Route::delete('seguimiento-aspirantes/todos', [SeguimientoAspiranteController::class, 'eliminarTodos']);
+    Route::post('seguimiento-aspirantes/enviar-whatsapp', [SeguimientoAspiranteController::class, 'enviarWhatsApp']);
+    Route::apiResource('whatsapp-plantillas', WhatsappPlantillaController::class);
+
+    // Panel administrativo "Solicitudes de Inscripción" — independiente del
+    // listado de Seguimiento de Aspirantes, mismo permiso del módulo.
+    Route::middleware('permission:' . PermissionConst::GESTION_SEGUIMIENTO_ASPIRANTES)->group(function () {
+        Route::get('solicitudes-inscripcion', [App\Http\Controllers\SolicitudInscripcionController::class, 'index']);
+        Route::get('solicitudes-inscripcion/{id}', [App\Http\Controllers\SolicitudInscripcionController::class, 'show']);
+        Route::post('solicitudes-inscripcion/{id}/aprobar', [App\Http\Controllers\SolicitudInscripcionController::class, 'aprobar']);
+        Route::post('solicitudes-inscripcion/{id}/rechazar', [App\Http\Controllers\SolicitudInscripcionController::class, 'rechazar']);
+    });
+
+    // Estadísticas de Mensajes WhatsApp - SENA. Solo lectura sobre datos
+    // existentes de Seguimiento de Aspirantes; permiso propio, no reutiliza
+    // GESTION_SEGUIMIENTO_ASPIRANTES a propósito (rol distinto: Administrador).
+    Route::prefix('sena/message-statistics')
+        ->middleware('permission:' . PermissionConst::GESTION_ESTADISTICAS_WHATSAPP_SENA)
+        ->group(function () {
+            Route::get('/', [App\Http\Controllers\MessageStatisticsController::class, 'index']);
+            Route::get('dashboard', [App\Http\Controllers\MessageStatisticsController::class, 'dashboard']);
+            Route::get('report', [App\Http\Controllers\MessageStatisticsController::class, 'report']);
+            Route::get('export/excel', [App\Http\Controllers\MessageStatisticsController::class, 'exportExcel']);
+            Route::get('export/pdf', [App\Http\Controllers\MessageStatisticsController::class, 'exportPdf']);
+        });
+
+    // Configuración local de WhatsApp Cloud API (Meta) — CRUD autónomo.
+    // Protegido por el permiso GESTION_TELECOM_CONFIG (mismo middleware que el resto del proyecto).
+    Route::middleware('permission:' . PermissionConst::GESTION_TELECOM_CONFIG)->group(function () {
+        Route::get('telecom-config/activa', [TelecomConfigController::class, 'activa']);
+        Route::post('telecom-config/probar', [TelecomConfigController::class, 'probar']);
+        Route::apiResource('telecom-config', TelecomConfigController::class)
+            ->parameters(['telecom-config' => 'id']);
+    });
+
+    // ---------------------------------------------------------------------
+    // MÓDULO: Planes de mensajes por usuario (aditivo).
+    // El plan pertenece al USUARIO: consultar saldo, ver planes y solicitar
+    // una compra NO requiere permiso especial, solo estar autenticado.
+    // ---------------------------------------------------------------------
+    Route::get('mensajes/mi-saldo', [MensajesPlanController::class, 'miSaldo']);
+    Route::get('mensajes/planes', [MensajesPlanController::class, 'index']);
+    Route::get('mensajes/mis-movimientos', [MensajesPlanController::class, 'misMovimientos']);
+    Route::post('mensajes/solicitudes', [SolicitudPlanMensajeController::class, 'store']);
+    Route::get('mensajes/mis-solicitudes', [SolicitudPlanMensajeController::class, 'misSolicitudes']);
+    Route::get('mensajes/mis-notificaciones', [SolicitudPlanMensajeController::class, 'misNotificaciones']);
+
+    // Compra de planes con la pasarela oficial de Wompi (flujo principal).
+    Route::get('mensajes/wompi/resumen/{planId}', [WompiController::class, 'resumenPlan']);
+    Route::post('mensajes/wompi/checkout', [WompiController::class, 'checkoutPlan']);
+    Route::post('mensajes/wompi/confirmar', [WompiController::class, 'confirmarPlan']);
+    Route::get('mensajes/wompi/mis-transacciones', [WompiController::class, 'misTransaccionesPlan']);
+
+    // Notificaciones in-app del módulo de planes. Cada usuario ve solo las suyas.
+    Route::get('mensajes/notificaciones', [NotificacionPlanController::class, 'index']);
+    Route::get('mensajes/notificaciones/no-leidas', [NotificacionPlanController::class, 'noLeidas']);
+    Route::post('mensajes/notificaciones/{id}/leer', [NotificacionPlanController::class, 'marcarLeida']);
+    Route::post('mensajes/notificaciones/leer-todas', [NotificacionPlanController::class, 'marcarTodasLeidas']);
+
+    // Historial de Facturación (Administrador VT). Solo lectura sobre datos ya
+    // existentes: no crea, modifica ni elimina compras.
+    Route::middleware('permission:' . PermissionConst::GESTION_SOLICITUDES_PLANES)->group(function () {
+        Route::get('facturacion/historial', [SolicitudPlanMensajeController::class, 'historial']);
+        Route::get('facturacion/historial/opciones', [SolicitudPlanMensajeController::class, 'historialOpciones']);
+        Route::get('facturacion/historial/export/excel', [SolicitudPlanMensajeController::class, 'historialExportExcel']);
+        Route::get('facturacion/historial/export/pdf', [SolicitudPlanMensajeController::class, 'historialExportPdf']);
+    });
+
+    // Configuración General de Pagos (Administrador VT). Las llaves nunca se
+    // devuelven: solo se informa si están presentes.
+    Route::middleware('permission:' . PermissionConst::GESTION_SOLICITUDES_PLANES)->group(function () {
+        Route::get('pagos/configuracion', [MensajesPlanController::class, 'configuracion']);
+        Route::get('pagos/configuracion/diagnostico', [MensajesPlanController::class, 'diagnosticoConfiguracion']);
+        Route::post('pagos/configuracion/verificar', [MensajesPlanController::class, 'verificarConfiguracion']);
+        Route::put('pagos/configuracion', [MensajesPlanController::class, 'actualizarConfiguracion']);
+    });
+
+    // Dashboard del Administrador VT (solo lectura).
+    Route::middleware('permission:' . PermissionConst::GESTION_SOLICITUDES_PLANES)->group(function () {
+        Route::get('mensajes/dashboard', [DashboardPlanesController::class, 'resumen']);
+    });
+
+    // Administrador VT: aprobación de solicitudes y catálogo de planes.
+    Route::middleware('permission:' . PermissionConst::GESTION_SOLICITUDES_PLANES)->group(function () {
+        Route::get('mensajes/solicitudes', [SolicitudPlanMensajeController::class, 'index']);
+        Route::get('mensajes/solicitudes/{id}/comprobante', [SolicitudPlanMensajeController::class, 'comprobante']);
+        Route::post('mensajes/solicitudes/{id}/aprobar', [SolicitudPlanMensajeController::class, 'aprobar']);
+        Route::post('mensajes/solicitudes/{id}/rechazar', [SolicitudPlanMensajeController::class, 'rechazar']);
+
+        Route::get('mensajes/wompi/transacciones/{id}', [WompiController::class, 'detalleTransaccionPlan']);
+
+        Route::post('mensajes/planes', [MensajesPlanController::class, 'store']);
+        Route::put('mensajes/planes/{id}', [MensajesPlanController::class, 'update']);
+        Route::delete('mensajes/planes/{id}', [MensajesPlanController::class, 'destroy']);
+    });
+
+    // ---------------------------------------------------------------------
+    // MÓDULO: Plantillas de Meta (aditivo). No sustituye a `whatsapp-plantillas`,
+    // que sigue sirviendo la plantilla oficial del envío de campañas.
+    // ---------------------------------------------------------------------
+    Route::middleware('permission:' . PermissionConst::GESTION_SEGUIMIENTO_ASPIRANTES)->group(function () {
+        Route::get('whatsapp-plantillas-meta', [WhatsappPlantillaMetaController::class, 'index']);
+        Route::post('whatsapp-plantillas-meta', [WhatsappPlantillaMetaController::class, 'store']);
+        Route::post('whatsapp-plantillas-meta/sincronizar', [WhatsappPlantillaMetaController::class, 'sincronizar']);
+        Route::post('whatsapp-plantillas-meta/{id}/sincronizar', [WhatsappPlantillaMetaController::class, 'sincronizarUna']);
+        Route::get('whatsapp-plantillas-meta/{id}', [WhatsappPlantillaMetaController::class, 'show']);
+        Route::delete('whatsapp-plantillas-meta/{id}', [WhatsappPlantillaMetaController::class, 'destroy']);
+    });
+});
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f

@@ -188,87 +188,139 @@
         </tr>
         {{-- DESARROLLO DE LA REUNIÓN --}}
         <tr>
-            <td colspan="3">
+            <td colspan="3" style="border-bottom: none;">
                 <p style="font-weight:bold; text-align:center; margin:4px 0;">DESARROLLO DE LA REUNIÓN</p>
+            </td>
+        </tr>
 
-                {{-- Calendario --}}
-                <table style="margin: 6px auto; border-collapse: collapse; font-size:9px;">
-                    <tr>
-                        <td colspan="7" style="text-align:center; font-weight:bold; padding:3px;">
-                            Días de formación - {{ \Carbon\Carbon::parse($acta->fecha)->translatedFormat('F') }}
-                        </td>
-                    </tr>
-                    <tr>
-                        @foreach (['L', 'M', 'M', 'J', 'V', 'S', 'D'] as $cabecera)
-                            <td
-                                style="width:22px; height:18px; text-align:center; font-weight:bold; border:1px solid #ccc; background:#f0f0f0;">
-                                {{ $cabecera }}
-                            </td>
-                        @endforeach
-                    </tr>
+        @php
+            $calItems = is_array($calendario) ? $calendario : (is_object($calendario) && method_exists($calendario, 'toArray') ? $calendario->toArray() : (array) $calendario);
+            $calChunks = array_chunk($calItems, 2, true); // 2 por fila para evitar desbordes horizontales
+        @endphp
 
-                    @php
-                        $inicioMes = \Carbon\Carbon::parse($acta->fecha)->startOfMonth();
-                        $finMes = \Carbon\Carbon::parse($acta->fecha)->endOfMonth();
-                        // dayOfWeek: 0=dom,1=lun...6=sab → queremos empezar en lunes
-                        // Desplazamiento: lunes=1 → offset 0, martes=2→1 ... domingo=0→6
-                        $primerDia = $inicioMes->copy();
-                        $offsetInicio = $primerDia->dayOfWeek === 0 ? 6 : $primerDia->dayOfWeek - 1;
-                        $totalDias = $finMes->day;
-                        $celda = 0;
-                        $totalCeldas = $offsetInicio + $totalDias;
-                        $filas = ceil($totalCeldas / 7);
-                    @endphp
+        @foreach($calChunks as $chunk)
+            <tr>
+                <td colspan="3" style="padding: 5px; border-top: none; border-bottom: none;">
+                    <table border="0" cellpadding="0" cellspacing="0"
+                        style="width: 100%; border-collapse: collapse; border: none;">
+                        <tr style="border-top: none;"> <!-- Añade este estilo -->
+                            @foreach($chunk as $mesKey => $diasMes)
+                                <td style="border: none; padding: 5px; vertical-align: top; width: 50%;">
+                                    @php
+                                        $fechaMes = \Carbon\Carbon::createFromFormat('Y-m', $mesKey);
+                                        $nombreMes = $fechaMes->translatedFormat('F Y');
+                                    @endphp
+                                    <table border="0" cellpadding="0" cellspacing="0"
+                                        style="margin: 0 auto; border-collapse: collapse; font-size:9px;">
+                                        <tr>
+                                            <td colspan="7"
+                                                style="text-align:center; font-weight:bold; padding:3px; border: 1px solid #ccc;">
+                                                Días de formación - {{ ucfirst($nombreMes) }}
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            @foreach (['L', 'M', 'M', 'J', 'V', 'S', 'D'] as $cabecera)
+                                                <td
+                                                    style="width:22px; height:18px; text-align:center; font-weight:bold; border:1px solid #ccc; background:#f0f0f0;">
+                                                    {{ $cabecera }}
+                                                </td>
+                                            @endforeach
+                                        </tr>
 
-                    @for ($fila = 0; $fila < $filas; $fila++)
-                        <tr>
-                            @for ($col = 0; $col < 7; $col++)
-                                @php
-                                    $numeroCelda = $fila * 7 + $col;
-                                    $dia = $numeroCelda - $offsetInicio + 1;
-                                    $esValido = $dia >= 1 && $dia <= $totalDias;
-                                    $coloresDia = $esValido ? $calendario[$dia]['colores'] ?? [] : [];
-                                    $hayClase = count($coloresDia) > 0;
-                                    // Si hay más de un color, fondo degradado; si hay uno, ese color; si no hay, blanco
-                                    if ($hayClase && count($coloresDia) === 1) {
-                                        $bgStyle = 'background-color:' . $coloresDia[0] . ';';
-                                        $textColor = 'color:#fff;';
-                                    } elseif ($hayClase) {
-                                        // Dividir celda con múltiples colores usando background linear-gradient
-                                        $step = round(100 / count($coloresDia));
-                                        $gradientParts = [];
-                                        foreach ($coloresDia as $i => $c) {
-                                            $from = $i * $step;
-                                            $to = ($i + 1) * $step;
-                                            $gradientParts[] = "$c {$from}% {$to}%";
-                                        }
-                                        $bgStyle =
-                                            'background: linear-gradient(90deg, ' .
-                                            implode(', ', $gradientParts) .
-                                            ');';
-                                        $textColor = 'color:#fff;';
-                                    } else {
-                                        $bgStyle = 'background-color:#fff;';
-                                        $textColor = 'color:#000;';
-                                    }
-                                @endphp
-                                <td
-                                    style="width:22px; height:20px; text-align:center; border:1px solid #ccc; font-weight:bold; {{ $bgStyle }} {{ $textColor }}">
-                                    {{ $esValido ? $dia : '' }}
+                                        @php
+                                            $inicioMes = $fechaMes->copy()->startOfMonth();
+                                            $finMes = $fechaMes->copy()->endOfMonth();
+                                            $primerDia = $inicioMes->copy();
+                                            $offsetInicio = $primerDia->dayOfWeek === 0 ? 6 : $primerDia->dayOfWeek - 1;
+                                            $totalDias = $finMes->day;
+                                            $totalCeldas = $offsetInicio + $totalDias;
+                                            $filas = ceil($totalCeldas / 7);
+                                            $calendarioIndexado = $diasMes;
+                                        @endphp
+
+                                        @for ($fila = 0; $fila < $filas; $fila++)
+                                            <tr>
+                                                @for ($col = 0; $col < 7; $col++)
+                                                    @php
+                                                        $numeroCelda = $fila * 7 + $col;
+                                                        $dia = $numeroCelda - $offsetInicio + 1;
+                                                        $esValido = $dia >= 1 && $dia <= $totalDias;
+                                                        $coloresDia = $esValido ? ($calendarioIndexado[(string) $dia]['colores'] ?? []) : [];
+                                                        $hayClase = count($coloresDia) > 0;
+
+                                                        if ($hayClase && count($coloresDia) === 1) {
+                                                            $bgStyle = 'background-color:' . $coloresDia[0] . ';';
+                                                            $textColor = 'color:#fff;';
+                                                        } elseif ($hayClase) {
+                                                            $step = round(100 / count($coloresDia));
+                                                            $gradientParts = [];
+                                                            foreach ($coloresDia as $i => $c) {
+                                                                $from = $i * $step;
+                                                                $to = ($i + 1) * $step;
+                                                                $gradientParts[] = "$c {$from}% {$to}%";
+                                                            }
+                                                            $bgStyle = 'background: linear-gradient(90deg, ' . implode(', ', $gradientParts) . ');';
+                                                            $textColor = 'color:#fff;';
+                                                        } else {
+                                                            $bgStyle = 'background-color:#fff;';
+                                                            $textColor = 'color:#000;';
+                                                        }
+                                                    @endphp
+                                                    <td
+                                                        style="width:22px; height:20px; text-align:center; border:1px solid #ccc; font-weight:bold; {{ $bgStyle }} {{ $textColor }}">
+                                                        {{ $esValido ? $dia : '' }}
+                                                    </td>
+                                                @endfor
+                                            </tr>
+                                        @endfor
+                                    </table>
                                 </td>
-                            @endfor
+                            @endforeach
                         </tr>
-                    @endfor
-                </table>
+                    </table>
+                </td>
+            </tr>
+        @endforeach
 
+        <tr>
+            <td colspan="3">
                 {{-- Leyenda de instructores con color --}}
-                <table style="margin: 6px auto; border-collapse: collapse; font-size:9px;">
-                    @foreach ($instructoresConColor as $inst)
+                @php
+                    $instArray = is_array($instructoresConColor) ? $instructoresConColor : (is_object($instructoresConColor) && method_exists($instructoresConColor, 'toArray') ? $instructoresConColor->toArray() : (array) $instructoresConColor);
+
+                    usort($instArray, function ($a, $b) {
+                        return strcmp(
+                            ($a['nombre'] ?? '') . ' ' . ($a['apellido'] ?? ''),
+                            ($b['nombre'] ?? '') . ' ' . ($b['apellido'] ?? '')
+                        );
+                    });
+
+                    $instChunks = array_chunk($instArray, 3);
+                @endphp
+                <table border="0" cellpadding="0" cellspacing="0"
+                    style="margin: 6px auto; border-collapse: collapse; font-size:9px; border: none; width: 100%;">
+                    @foreach ($instChunks as $chunk)
                         <tr>
-                            <td
-                                style="width:16px; height:14px; background-color:{{ $inst['color'] }}; border:1px solid #ccc;">
-                            </td>
-                            <td style="padding-left:5px;">{{ $inst['nombre'] }} {{ $inst['apellido'] }}</td>
+                            @for ($i = 0; $i < 3; $i++)
+                                @if (isset($chunk[$i]))
+                                    @php $inst = $chunk[$i]; @endphp
+                                    <td style="border: none; padding: 2px 5px; width: 33.33%; vertical-align: middle;">
+                                        <table border="0" cellpadding="0" cellspacing="0"
+                                            style="border-collapse: collapse; font-size:9px; border: none; margin: 0;">
+                                            <tr>
+                                                <td
+                                                    style="width:16px; height:14px; background-color:{{ $inst['color'] }}; border:1px solid #ccc;">
+                                                </td>
+                                                <td style="padding-left:5px; border:none; text-align: left;">
+                                                    {{ $inst['nombre'] }} {{ $inst['apellido'] }}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                @else
+                                    <td style="border: none; padding: 2px 5px; width: 33.33%;"></td>
+                                @endif
+                            @endfor
                         </tr>
                     @endforeach
                 </table>
@@ -278,12 +330,12 @@
                 </p>
             </td>
         </tr>
+
         {{-- Fila para instructores con sus competencias --}}
         <tr>
             <td colspan="3">
                 <p style="margin: 0 0 6px 0;">
-                    Los resultados que se orientarán en el mes de
-                    <strong>{{ \Carbon\Carbon::parse($acta->fecha)->translatedFormat('F') }}</strong> son:
+                    Los resultados que se orientarán en el periodo correspondiente son:
                 </p>
 
                 <table class="tabla-actividades" style="width:100%; font-size:10px;">
@@ -374,13 +426,13 @@
                         <ul style="margin: 2px 0 2px 15px; padding-left: 15px;">
                     @endif
 
-                    <li class="left">
-                        {{ $conclusion->conclusion }}
-                    </li>
+                        <li class="left">
+                            {{ $conclusion->conclusion }}
+                        </li>
 
-                    @if ($loop->last)
-                        </ul>
-                    @endif
+                        @if ($loop->last)
+                            </ul>
+                        @endif
                 @empty
                     <p class="left" style="margin: 2px 0 2px 15px;">
                         Sin conclusiones registradas
@@ -527,9 +579,9 @@
         @endif
     @endforeach
 
-        <div class="spacer"></div>
+    <div class="spacer"></div>
 
-        <script type="text/php">
+    <script type="text/php">
     if (isset($pdf)) {
         $font        = $fontMetrics->getFont("Arial", "normal");
         $anchoPagina = $pdf->get_width();

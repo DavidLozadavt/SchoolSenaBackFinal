@@ -23,9 +23,20 @@ class Actividad extends Model
         'idClasificacion',
         'estrategia',
         'entregables',
+        'preguntasMinimasAprobar',
+        'intervaloReintento',
     ];
 
     public function materia()
+    {
+        return $this->belongsTo(Materia::class, 'idMateria');
+    }
+
+    /**
+     * RAP propietario (FK actividades.idMateria → materia.id del RAP).
+     * Una actividad pertenece únicamente a un RAP, nunca a una competencia.
+     */
+    public function rap()
     {
         return $this->belongsTo(Materia::class, 'idMateria');
     }

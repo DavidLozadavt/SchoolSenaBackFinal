@@ -81,7 +81,8 @@ class ProductoEmpresarialController extends Controller
      */
     public function show($id)
     {
-        //
+        $producto = ProductoEmpresarial::findOrFail($id);
+        return response()->json($producto);
     }
 
     /**
@@ -93,7 +94,10 @@ class ProductoEmpresarialController extends Controller
      */
     public function update(Request $request, $id)
     {
-        //
+        $producto = ProductoEmpresarial::findOrFail($id);
+        $producto->update($request->all());
+
+        return response()->json($producto);
     }
 
     /**
@@ -104,7 +108,10 @@ class ProductoEmpresarialController extends Controller
      */
     public function destroy($id)
     {
-        //
+        $producto = ProductoEmpresarial::findOrFail($id);
+        $producto->delete();
+
+        return response()->json(['message' => 'Producto empresarial eliminado.']);
     }
 
 

@@ -296,7 +296,7 @@ class BoardTaskController extends Controller
                 $nombreBoard = $board->nombreBoard;
 
 
-                SendAssignmentBoardNotification::dispatch($email, $userName, $nombreBoard);
+                // SendAssignmentBoardNotification::dispatch($email, $userName, $nombreBoard);
 
                 $assignments[] = $boards;
             }
@@ -367,18 +367,20 @@ class BoardTaskController extends Controller
 
 
 
-    public function getPersonsToAssign($id)
+ public function getPersonsToAssign($id)
     {
 
-        $assignedUserIds = AsignacionBoardUser::where('idBoard', $id)
+    $assignedUserIds = AsignacionBoardUser::where('idBoard', $id)
             ->pluck('idUser');
 
         $users = User::whereNotIn('id', $assignedUserIds)
+            ->whereHas('persona')
             ->with('persona')
             ->get();
 
         return response()->json($users);
     }
+
 
 
 

@@ -11,6 +11,7 @@ use App\Models\HorarioMateria;
 use App\Models\SesionMateria;
 use App\Models\Contract;
 use App\Jobs\SendBasicEmail;
+use App\Services\TrimestreActualFichaService;
 
 class AsignacionSesionController extends Controller
 {
@@ -26,6 +27,11 @@ class AsignacionSesionController extends Controller
             'fechaFin'         => 'required|date|after_or_equal:fechaInicio',
             'idContrato'       => 'nullable|integer',
         ]);
+
+        $bloqueo = TrimestreActualFichaService::abortSiHorarioNoActual((int) $request->idHorarioMateria);
+        if ($bloqueo) {
+            return $bloqueo;
+        }
 
         DB::beginTransaction();
 

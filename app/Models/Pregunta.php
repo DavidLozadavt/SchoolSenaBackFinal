@@ -10,7 +10,7 @@ class Pregunta extends Model
 
     public $timestamps = false;
 
-    protected $fillable = ['descripcion', 'puntaje', 'idTipoPregunta', 'idActividad', 'urlDocumento'];
+    protected $fillable = ['descripcion', 'explicacionRespuesta', 'puntaje', 'idTipoPregunta', 'idActividad', 'urlDocumento'];
 
     public function tipoPregunta()
     {

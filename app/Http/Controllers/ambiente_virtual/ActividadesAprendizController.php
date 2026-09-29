@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\ambiente_virtual;
 
+use App\Http\Controllers\Concerns\ValidatesMaterialDocumentUpload;
 use App\Http\Controllers\Controller;
 use App\Models\Actividad;
 use App\Util\KeyUtil;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Validator;
  */
 class ActividadesAprendizController extends Controller
 {
+    use ValidatesMaterialDocumentUpload;
     /**
      * Listar actividades asignadas al aprendiz autenticado.
      * Incluye: actividad, fechas, nota, quien asignó, material de apoyo.
@@ -161,8 +163,10 @@ class ActividadesAprendizController extends Controller
         try {
             $validator = Validator::make($request->all(), [
                 'idCalificacionActividad' => 'required|integer',
-                'archivo' => 'nullable|file|max:10240',
+                'archivo' => 'nullable|file|max:51200',
                 'ComentarioEstudiante' => 'nullable|string|max:2000',
+            ], [
+                'archivo.max' => 'El archivo supera el tamaño máximo permitido de 50 MB.',
             ]);
 
             $validator->after(function ($v) use ($request) {
@@ -177,9 +181,10 @@ class ActividadesAprendizController extends Controller
 
                 $allowedExtensions = ['pdf', 'doc', 'docx', 'zip', 'rar', 'sql'];
                 $ext = strtolower((string) $file->getClientOriginalExtension());
+                $msg = 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, ZIP, RAR, SQL.';
 
                 if ($ext === '' || ! in_array($ext, $allowedExtensions, true)) {
-                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, ZIP, RAR, SQL.');
+                    $v->errors()->add('archivo', $msg);
                     return;
                 }
 
@@ -200,12 +205,16 @@ class ActividadesAprendizController extends Controller
                     return;
                 }
 
+                if ($this->assertWordFileByExtensionAndMime($v, $file, 'archivo', $msg)) {
+                    return;
+                }
+
                 $secondary = Validator::make(['archivo' => $file], [
-                    'archivo' => 'mimes:pdf,doc,docx,zip,rar',
+                    'archivo' => 'mimes:pdf,zip,rar',
                 ]);
 
                 if ($secondary->fails()) {
-                    $v->errors()->add('archivo', 'Tipo de archivo no permitido. Solo se permiten: PDF, DOC, DOCX, ZIP, RAR, SQL.');
+                    $v->errors()->add('archivo', $msg);
                 }
             });
 

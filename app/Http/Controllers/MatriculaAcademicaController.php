@@ -1,15 +1,27 @@
 <?php
 namespace App\Http\Controllers;
 
+use App\Enums\Estado;
 use App\Models\MatriculaAcademica;
+use App\Models\Status;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 
 class MatriculaAcademicaController extends Controller
 {
     private array $relations;
     private array $columns;
+
+    /** Estados de matrícula.estado que permiten ver al aprendiz en Ambiente Virtual. */
+    private const ESTADOS_MATRICULA_VIGENTES = [
+        Estado::EN_FORMACION,
+        Estado::ACTIVO,
+        Estado::ENCURSO,
+        Estado::CURSANDO,
+        Estado::MATRICULADO,
+    ];
 
     function __construct(){
         $this-> relations=[];
@@ -34,6 +46,20 @@ class MatriculaAcademicaController extends Controller
             $idFicha   = $data['idFicha'] ?? null;
             // Si el frontend envía el horario exacto, usarlo directamente
             $idHorarioMateriaFijo = isset($data['idHorarioMateria']) ? (int)$data['idHorarioMateria'] : null;
+
+            // Fuente de verdad: el RAP del horario (gm.idMateria), no el id enviado por navegación
+            // (puede ser idMateriaPadre/competencia y dejar la lista vacía en técnicos/tecnólogos).
+            if ($idHorarioMateriaFijo) {
+                $horarioParaMateria = \App\Models\HorarioMateria::with('gradoMateria')->find($idHorarioMateriaFijo);
+                if ($horarioParaMateria?->gradoMateria?->idMateria) {
+                    $idMateria = (int) $horarioParaMateria->gradoMateria->idMateria;
+                }
+                if (!$idFicha && $horarioParaMateria?->idFicha) {
+                    $idFicha = (int) $horarioParaMateria->idFicha;
+                }
+            }
+
+            $placeholders = implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?'));
  
             $matriculasAcademicas = MatriculaAcademica::with([
                 'matricula.person',
@@ -41,7 +67,15 @@ class MatriculaAcademicaController extends Controller
                 'ficha',
                 'materia'
             ])
-            ->where('idMateria', $idMateria);
+            ->where('idMateria', $idMateria)
+            // 1) Matrícula vigente en ficha (matricula.estado)
+            // 2) Usuario de plataforma ACTIVO: activation_company_users.state_id = 1 (tabla estado)
+            ->whereHas('matricula', function ($query) use ($placeholders) {
+                $query->whereRaw('UPPER(TRIM(estado)) IN ('.$placeholders.')', self::ESTADOS_MATRICULA_VIGENTES)
+                    ->whereHas('person.usuario.activationCompanyUsers', function ($q) {
+                        $q->where('state_id', Status::ID_ACTIVE);
+                    });
+            });
  
             if ($idFicha) {
                 $matriculasAcademicas->where('idFicha', $idFicha);
@@ -201,6 +235,8 @@ class MatriculaAcademicaController extends Controller
                 ->orderBy('id', 'asc')
                 ->paginate($perPage, ['*'], 'page', $page);
 
+            $hoy = now()->toDateString();
+
             // Calcular nota parcial y porcentaje de avance
             $result->getCollection()->transform(function ($matricula) use ($hoy) { $permiso = null; $idPersona = $matricula->matricula?->idPersona; $idFicha = $matricula->idFicha; if ($idPersona && $idFicha) { try { $detalle = \App\Models\JustificacionAsistenciaRangoDetalle::whereHas('rango', function($q) use ($idPersona, $hoy) { $q->where('idPersonaAprendiz', $idPersona)->whereDate('fechaInicial', '<=', $hoy)->whereDate('fechaFinal', '>=', $hoy); })->where('idFicha', $idFicha)->with(['rango', 'personaAutoriza'])->first(); if ($detalle) { $permiso = [ 'tienePermiso' => true, 'estado' => $detalle->estado, 'fechaInicial' => $detalle->rango->fechaInicial, 'fechaFinal' => $detalle->rango->fechaFinal, 'tipoExcusa' => $detalle->rango->tipoExcusa, 'observacion' => $detalle->rango->observacion, 'archivoSoporteUrl' => $detalle->rango->archivoSoporte ? url('storage/' . $detalle->rango->archivoSoporte) : null, 'autorizadoPor' => $detalle->personaAutoriza ? trim($detalle->personaAutoriza->nombre1 . ' ' . $detalle->personaAutoriza->apellido1) : null, 'fechaRespuesta' => $detalle->fechaRespuesta, 'observacionInstructor' => $detalle->observacionInstructor ]; } } catch (\Throwable $e) {} } $matricula->permisoAsistencia = $permiso; // Debido a posibles cruces al momento de asignar actividades, buscamos por todas las matrículas académicas del estudiante
                 $idsMaEstudiante = \DB::table('matriculaAcademica')
@@ -337,6 +373,14 @@ class MatriculaAcademicaController extends Controller
 
         // Aplicar filtros
         $query->where('idMateria', $idMateria);
+
+        $placeholders = implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?'));
+        $query->whereHas('matricula', function ($q) use ($placeholders) {
+            $q->whereRaw('UPPER(TRIM(estado)) IN ('.$placeholders.')', self::ESTADOS_MATRICULA_VIGENTES)
+                ->whereHas('person.usuario.activationCompanyUsers', function ($uq) {
+                    $uq->where('state_id', Status::ID_ACTIVE);
+                });
+        });
 
         if ($idFicha) {
             $query->where('idFicha', $idFicha);

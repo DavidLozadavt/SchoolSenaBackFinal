@@ -134,13 +134,30 @@
             word-wrap: break-word;
             overflow-wrap: break-word;
             white-space: normal;
-            /* Evita que el texto se mantenga en una sola línea */
         }
 
         .tabla-actividades .tabla-horarios {
             table-layout: fixed;
             width: 100%;
             font-size: 10px;
+        }
+
+        .tabla-anidada {
+            table-layout: fixed;
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            margin-bottom: 5px;
+            font-size: 9px;
+        }
+
+        .tabla-anidada td {
+            border: 1px solid #000;
+            padding: 3px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+            text-align: justify;
         }
     </style>
 </head>
@@ -205,6 +222,33 @@
 
     <div class="page-break"></div>
 
+    @php
+        $generalidades = [
+            'Este formato tiene por objeto dar cuenta de la ejecución mensual que un contratista desarrolla con ocasión de un contrato de prestación de servicios profesionales y de apoyo a la gestión.',
+            'La acreditación del documento por el contratista brinda al supervisor las herramientas que le permiten verificar la ejecución del contrato para efectos de pago.',
+            'El formato está asociado al Manual de Contratación (GCCON-M-001) y al Manual Supervisión e Interventoría (GCCON-M-002), así como a los procedimientos que rigen la gestión contractual de la entidad.',
+            'Este formato es diligenciado por el contratista y es revisado y aprobado por el supervisor del contrato. De igual forma, también podrá ser suscrito por el ordenador del gasto.',
+            'Su diligenciamiento se debe dar cada vez que se realice un reporte mensual de actividades.',
+            'El formato no requiere ser impreso. Sin embargo, debe ser cargado en las plataformas administradas por Colombia Compra Eficiente.',
+            'Este formato, una vez diligenciado, deberá archivarse de conformidad con lo establecido en las tablas de retención documental de la entidad.',
+            'El contenido que se encuentra en color diferente a negro, entre paréntesis o con el signo "[]" son orientaciones para el diligenciamiento del formato.',
+            'El formato puede ser modificado en aquellos apartados en que así se indique.',
+            'Las notas internas son situaciones o recomendaciones que se deben tener en cuenta al momento de elaborar el formato. No obstante, las mismas deben ser eliminadas previa impresión o suscripción del mismo.',
+            'Todas las recomendaciones o sugerencias que busquen mejorar el presente documento pueden ser remitidas al correo de la Dirección jurídica del SENA.',
+        ];
+        @endphp
+
+        <section>
+            <h3>Generalidades</h3>
+            <ol>
+                @foreach($generalidades as $item)
+                    <li>{{ $item }}</li>
+                @endforeach
+            </ol>
+        </section>
+
+    <div class="page-break"></div>
+
 
     <table class="header-table">
         <tr>
@@ -252,14 +296,14 @@
         {{ \Carbon\Carbon::parse($rmi->periodo ?? now())->year }}
     </div>
 
-    <div>
+    <div style="width: 50%; margin-left: 50%; text-align: justify;">
         <!--
         //Preguntar por el número de contrato que maneja el SENA
         -->
         <strong>
             Referencia:
         </strong>
-        No. {{ $contrato->numeroContrato }}
+        No. {{ $contrato->numeroContrato }} de {{ \Carbon\Carbon::parse($contrato->fechaContractacion)->year }} 
     </div>
     <div class="spacer3"></div>
 
@@ -318,7 +362,7 @@
         <colgroup>
             <col style="width: 5%;">
             <col style="width: 20%;">
-            <col style="width: 50%;">
+            <col style="width: 55%;">
             <col style="width: 20%;">
         </colgroup>
         <thead>
@@ -409,30 +453,34 @@
 
                     @foreach ($fichasConProyecto as $ficha)
                         @foreach ($ficha['materias'] as $materia)
-                            <table style="margin-top: 20px; width:100%">
+                            <table class="tabla-anidada">
+                                <colgroup>
+                                    <col style="width: 30%;">
+                                    <col style="width: 70%;">
+                                </colgroup>
                                 <tr>
-                                    <td style="text-align: justify; width: 30%">Ficha</td>
-                                    <td style="text-align: justify">{{ $ficha['codigoFicha'] }}</td>
+                                    <td style="font-weight:bold;">Ficha</td>
+                                    <td>{{ $ficha['codigoFicha'] }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Programa</td>
-                                    <td style="text-align: justify">{{ $ficha['programaFormacion'] }}</td>
+                                    <td style="font-weight:bold;">Programa</td>
+                                    <td>{{ $ficha['programaFormacion'] }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Proyecto</td>
-                                    <td style="text-align: justify">{{ $materia['proyectoFormativo'] }}</td>
+                                    <td style="font-weight:bold;">Proyecto</td>
+                                    <td>{{ $materia['proyectoFormativo'] }}</td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Actividad</td>
-                                    <td style="text-align: justify">
+                                    <td style="font-weight:bold;">Actividad</td>
+                                    <td>
                                         @foreach ($materia['actividades'] as $actividad)
                                             {{ $actividad['descripcionActividad'] }}<br>
                                         @endforeach
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td style="text-align: justify">Fase del Proyecto</td>
-                                    <td style="text-align: justify">{{ $materia['faseProyecto'] }}</td>
+                                    <td style="font-weight:bold;">Fase del Proyecto</td>
+                                    <td>{{ $materia['faseProyecto'] }}</td>
                                 </tr>
                             </table>
                         @endforeach
@@ -454,30 +502,34 @@
                             $fichaInfo = $horariosPorFicha->firstWhere('idFicha', $idFicha);
                             $porEstado = collect($aprendices)->groupBy('estado');
                         @endphp
-                        <table style="margin-top: 20px; margin-bottom: 10px;">
+                        <table class="tabla-anidada">
+                            <colgroup>
+                                <col style="width: 40%;">
+                                <col style="width: 60%;">
+                            </colgroup>
                             <tr>
-                                <td style="text-align: justify; width: 40%;"><strong>No. Ficha</strong></td>
-                                <td style="text-align: justify">{{ $fichaInfo['codigoFicha'] ?? $idFicha }}</td>
+                                <td><strong>No. Ficha</strong></td>
+                                <td>{{ $fichaInfo['codigoFicha'] ?? $idFicha }}</td>
                             </tr>
                             <tr>
-                                <td style="text-align: justify"><strong>Nombre Programa</strong></td>
-                                <td style="text-align: justify">{{ $fichaInfo['programaFormacion'] ?? '—' }}</td>
+                                <td><strong>Nombre Programa</strong></td>
+                                <td>{{ $fichaInfo['programaFormacion'] ?? '—' }}</td>
                             </tr>
                             <tr>
-                                <td style="text-align: justify"><strong>No. Aprendices con novedades</strong></td>
-                                <td style="text-align: justify">{{ count($aprendices) }}</td>
+                                <td><strong>No. Aprendices con novedades</strong></td>
+                                <td>{{ count($aprendices) }}</td>
                             </tr>
                             <tr>
-                                <td style="text-align: justify"><strong>Novedad reportada</strong></td>
-                                <td style="text-align: justify">
+                                <td><strong>Novedad reportada</strong></td>
+                                <td>
                                     @foreach ($porEstado as $estado => $grupo)
                                         {{ $estado }} ({{ count($grupo) }})<br>
                                     @endforeach
                                 </td>
                             </tr>
                             <tr>
-                                <td style="text-align: justify"><strong>Nombre de Aprendices</strong></td>
-                                <td style="text-align: justify">
+                                <td><strong>Nombre de Aprendices</strong></td>
+                                <td>
                                     @foreach ($aprendices as $aprendiz)
                                         {{ $aprendiz['nombreCompleto'] }}<br>
                                     @endforeach
@@ -498,30 +550,30 @@
                 </td>
                 <td style="vertical-align: middle; text-align: justify;">
                     {{ $actividadesContrato[3]->accionesRealizadas }}
-                    <table style="margin-top: 20px; margin-bottom: 10px;">
+                    <table class="tabla-anidada">
+                        <colgroup>
+                            <col style="width: 40%;">
+                            <col style="width: 60%;">
+                        </colgroup>
                         <tr>
-                            <td style="text-align: justify; width: 40%;"><strong>No. Ficha</strong></td>
-                            <td style="text-align: justify"></td>
+                            <td><strong>No. Ficha</strong></td>
+                            <td></td>
                         </tr>
                         <tr>
-                            <td style="text-align: justify"><strong>Nombre Programa</strong></td>
-                            <td style="text-align: justify"></td>
+                            <td><strong>Nombre Programa</strong></td>
+                            <td></td>
                         </tr>
                         <tr>
-                            <td style="text-align: justify"><strong>Actividad realizada</strong></td>
-                            <td style="text-align: justify"></td>
+                            <td><strong>Actividad realizada</strong></td>
+                            <td></td>
                         </tr>
                         <tr>
-                            <td style="text-align: justify"><strong>Horas asignadas</strong></td>
-                            <td style="text-align: justify">
-
-                            </td>
+                            <td><strong>Horas asignadas</strong></td>
+                            <td></td>
                         </tr>
                         <tr>
-                            <td style="text-align: justify"><strong>Observación</strong></td>
-                            <td style="text-align: justify">
-
-                            </td>
+                            <td><strong>Observación</strong></td>
+                            <td></td>
                         </tr>
                     </table>
 
@@ -739,7 +791,7 @@
         $font       = $fontMetrics->getFont("Arial", "normal");
         $anchoPagina = $pdf->get_width();  // 612 para letter
 
-        $textoFooter = "GCCON-F-087 V1";
+        $textoFooter = "GCCON-F-087 V2";
         $anchoTexto  = $fontMetrics->getTextWidth($textoFooter, $font, 8);
         $xCentrado   = ($anchoPagina - $anchoTexto) / 2;
 

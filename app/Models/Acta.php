@@ -27,6 +27,8 @@ class Acta extends Model
         'idFicha',
         'idContrato',
         'documento',
+        'fechaInicialFormacion',
+        'fechaFinalFormacion',
     ];
 
     /**
@@ -47,6 +49,8 @@ class Acta extends Model
         'idFicha' => 'integer',
         'idContrato' => 'integer',
         'documento' => 'string',
+        'fechaInicialFormacion' => 'date',
+        'fechaFinalFormacion' => 'date',
     ];
 
     // Relaciones
@@ -97,7 +101,8 @@ class Acta extends Model
 
     public function getRutaDocumentoUrlAttribute()
     {
-        if (!$this->documento) return null;
+        if (!$this->documento)
+            return null;
 
         if (str_starts_with($this->documento, 'http')) {
             return $this->documento;

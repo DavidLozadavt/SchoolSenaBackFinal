@@ -62,6 +62,7 @@ class SchoolBridgeController extends Controller
                 'direccion' => $request->direccion ?? 'No especificada',
                 'email' => $request->email,
                 'digitoVerificacion' => 0,
+<<<<<<< HEAD
                 'idCiudad' => 1,
                 'rutaLogo' => '',
                 'valorIva' => 0.00,
@@ -78,6 +79,10 @@ class SchoolBridgeController extends Controller
                 'urlDocumento' => '',
                 'created_at' => now(),
                 'updated_at' => now(),
+=======
+                'idCiudad' => 1, // Default o primera ciudad
+                'rutaLogo' => Company::RUTA_LOGO_DEFAULT,
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
             ]);
             $company = Company::find($companyId);
 
@@ -97,6 +102,7 @@ class SchoolBridgeController extends Controller
                 'idTipoIdentificacion' => 1, // CC
                 'celular' => $request->telefono ?? '0000000',
                 'idCiudadUbicacion' => 1,
+<<<<<<< HEAD
                 'perfil' => 'Admin',
                 'sexo' => 'M',
                 'rh' => '',
@@ -107,13 +113,28 @@ class SchoolBridgeController extends Controller
 
             // 5. Crear el registro en tabla 'usuario' (Credenciales por defecto o sincronizadas)
             $tempPassword = 'VirtualT2026!';
+=======
+                'perfil' => 'Representante',
+                'sexo' => 'M',
+            ]);
+
+            // 5. Crear el registro en tabla 'usuario' (Credenciales por defecto)
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
             $user = new User();
             $user->idpersona = $person->id;
             $user->email = $request->email;
             
+<<<<<<< HEAD
             if ($request->filled('contrasena_hash')) {
                 $user->contrasena = $request->contrasena_hash; // Ya viene encriptada del ERP
             } else {
+=======
+            $tempPassword = null;
+            if ($request->filled('contrasena_hash')) {
+                $user->contrasena = $request->contrasena_hash;
+            } else {
+                $tempPassword = 'VirtualT2026!';
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
                 $user->contrasena = bcrypt($tempPassword); // Columna principal de contraseña
             }
             $user->save();
@@ -130,10 +151,41 @@ class SchoolBridgeController extends Controller
 
             // 7. Asignar el rol real de administrador (ya gestionado desde Gestión de Roles y Permisos)
             $role = Role::firstOrCreate([
+<<<<<<< HEAD
                 'name' => 'ADMINISTRADOR VT',
                 'guard_name' => 'web',
             ]);
 
+=======
+                'name' => 'Admin',
+                'guard_name' => 'web',
+            ]);
+
+            // Sincronizar permisos estándar de administración (filtrando solo los que existen en la BD)
+            $permissions = [
+                'GESTION_ROLES',
+                'GESTION_ROL_PERMISOS',
+                'GESTION_USUARIO',
+                'GESTION_PROCESOS',
+                'GESTION_TIPO_DOCUMENTOS',
+                'GESTION_MEDIO_PAGO',
+                'GESTION_TIPO_PAGO',
+                'GESTION_TIPO_TRANSACCION',
+                'GESTION_CONTRATACION',
+                'GESTION_CONTRATOS',
+                'GESTION_PAGOS_CONTRATOS',
+                'GESTION_LABORAL',
+                'GESTION_CHAT',
+            ];
+            $existingPermissions = DB::table('permissions')
+                ->whereIn('name', $permissions)
+                ->pluck('name')
+                ->toArray();
+
+            $role->syncPermissions($existingPermissions);
+
+            // Asignar el rol
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
             $activation->assignRole($role);
 
             DB::commit();

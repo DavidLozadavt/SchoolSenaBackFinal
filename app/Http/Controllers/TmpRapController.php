@@ -4,6 +4,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ArchivoRap;
+use App\Models\MatriculaAcademica;
 use Illuminate\Http\Request;
 use App\Util\KeyUtil;
 use DateTime;
@@ -149,6 +150,110 @@ class TmpRapController extends Controller
             return response()->json([
                 'error' => 'Ocurrió un error al procesar el archivo o ejecutar el procedimiento',
                 'detalle' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Listar juicios evaluativos de una ficha (provenientes de Sofía Plus / carga de RAPs).
+     * GET juicios-evaluativos/ficha/{idFicha}
+     */
+    public function getJuiciosByFicha(int $idFicha): JsonResponse
+    {
+        if ($idFicha <= 0) {
+            return response()->json(['message' => 'El idFicha es obligatorio', 'data' => []], 400);
+        }
+
+        try {
+            $ultimaCarga = ArchivoRap::where('idFicha', $idFicha)
+                ->orderByDesc('fechaReporte')
+                ->orderByDesc('id')
+                ->first();
+
+            $registros = MatriculaAcademica::with([
+                'matricula.person',
+                'materia.padre',
+                'evaluador',
+                'ficha',
+            ])
+                ->where('idFicha', $idFicha)
+                ->whereHas('materia', function ($q) {
+                    // Los juicios se registran a nivel RAP (materia hija)
+                    $q->whereNotNull('idMateriaPadre');
+                })
+                ->orderBy('id')
+                ->get();
+
+            $data = $registros->map(function (MatriculaAcademica $ma) {
+                $person = $ma->matricula?->person;
+                $rap = $ma->materia;
+                $competencia = $rap?->padre;
+                $evaluador = $ma->evaluador;
+
+                $nombreAprendiz = $person
+                    ? trim(implode(' ', array_filter([
+                        $person->nombre1,
+                        $person->nombre2,
+                        $person->apellido1,
+                        $person->apellido2,
+                    ])))
+                    : null;
+
+                $nombreEvaluador = $evaluador
+                    ? trim(implode(' ', array_filter([
+                        $evaluador->nombre1,
+                        $evaluador->nombre2,
+                        $evaluador->apellido1,
+                        $evaluador->apellido2,
+                    ])))
+                    : null;
+
+                return [
+                    'id' => $ma->id,
+                    'estado' => $ma->estado,
+                    'observacion' => $ma->observacion,
+                    'updated_at' => $ma->updated_at,
+                    'created_at' => $ma->created_at,
+                    'aprendiz' => [
+                        'id' => $person?->id,
+                        'identificacion' => $person?->identificacion,
+                        'nombre' => $nombreAprendiz,
+                    ],
+                    'competencia' => [
+                        'id' => $competencia?->id,
+                        'codigo' => $competencia?->codigo,
+                        'nombreMateria' => $competencia?->nombreMateria,
+                        'descripcion' => $competencia?->descripcion,
+                    ],
+                    'rap' => [
+                        'id' => $rap?->id,
+                        'codigo' => $rap?->codigo,
+                        'nombreMateria' => $rap?->nombreMateria,
+                        'descripcion' => $rap?->descripcion,
+                    ],
+                    'evaluador' => [
+                        'id' => $evaluador?->id,
+                        'nombre' => $nombreEvaluador,
+                        'identificacion' => $evaluador?->identificacion,
+                    ],
+                    'ficha' => [
+                        'id' => $ma->ficha?->id ?? $ma->idFicha,
+                        'codigo' => $ma->ficha?->codigo,
+                    ],
+                ];
+            })->values();
+
+            return response()->json([
+                'message' => 'Juicios evaluativos consultados correctamente',
+                'ultimaCarga' => $ultimaCarga,
+                'total' => $data->count(),
+                'data' => $data,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Error al consultar juicios evaluativos',
+                'error' => $e->getMessage(),
+                'data' => [],
             ], 500);
         }
     }

@@ -44,4 +44,21 @@ class PermissionConst
 
     /** Aula Virtual - Aprendiz */
     const AULA_VIRTUAL_APRENDIZ = 'AULA_VIRTUAL_APRENDIZ';
+
+    const GESTION_SEGUIMIENTO_ASPIRANTES = 'GESTION_SEGUIMIENTO_ASPIRANTES';
+
+    /** Configuración de credenciales de Meta WhatsApp Cloud API (TelecomConfig) */
+    const GESTION_TELECOM_CONFIG = 'GESTION_TELECOM_CONFIG';
+
+    /** Estadísticas de mensajes WhatsApp del módulo Seguimiento de Aspirantes (solo lectura). */
+    const GESTION_ESTADISTICAS_WHATSAPP_SENA = 'GESTION_ESTADISTICAS_WHATSAPP_SENA';
+
+    /**
+     * Módulo administrativo de Planes de Mensajes (Administrador VT).
+     * Permiso ÚNICO del módulo: cubre sus cinco pestañas —Solicitudes,
+     * Administración de Planes, Dashboard, Historial de Facturación y
+     * Configuración de Pagos—. Quien tiene el módulo, lo tiene entero.
+     */
+    const GESTION_SOLICITUDES_PLANES = 'GESTION_SOLICITUDES_PLANES';
 }
+

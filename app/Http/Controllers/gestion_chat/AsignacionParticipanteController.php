@@ -54,7 +54,7 @@ class AsignacionParticipanteController extends Controller
     }
 
     $asignacionParticipante = AsignacionParticipante::create($data);
-    $asignacionParticipante->load('grupo', 'matricula.persona');
+    $asignacionParticipante->load('grupo', 'matricula.person');
     return response()->json($asignacionParticipante, 201);
   }
 

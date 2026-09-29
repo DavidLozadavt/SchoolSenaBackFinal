@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers\ambiente_virtual;
 
+use App\Enums\Estado;
 use App\Http\Controllers\Controller;
 use App\Models\Actividad;
 use App\Models\GrupoFicha;
 use App\Models\PlaneacionActividad;
+use App\Models\Status;
+use App\Util\CuestionarioAsignacionUtil;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -18,6 +21,22 @@ use Illuminate\Support\Facades\Schema;
  */
 class AsignacionActividadController extends Controller
 {
+    /**
+     * Estados de matricula.estado (matrícula en ficha) que permiten listar al aprendiz.
+     * Fuente académica: tabla `matricula`, campo `estado` (enum string).
+     */
+    private const ESTADOS_MATRICULA_VIGENTES = [
+        Estado::EN_FORMACION,
+        Estado::ACTIVO,
+        Estado::ENCURSO,
+        Estado::CURSANDO,
+        Estado::MATRICULADO,
+    ];
+
+    /**
+     * Estado de usuario en plataforma: activation_company_users.state_id → estado.id
+     * ACTIVO = 1 (tabla `estado`). Si el usuario no está ACTIVO, no aparece en Ambiente Virtual.
+     */
     /**
      * Estudiantes (matrículas) en ficha y, por actividad, cuántos ya tienen registro en calificacionActividad.
      * Usado en la lista de actividades: el estado "Asignado" es informativo; no bloquea nuevas asignaciones
@@ -48,6 +67,7 @@ class AsignacionActividadController extends Controller
                 ->whereNotNull('idMatricula')
                 ->distinct()
                 ->pluck('idMatricula');
+            $idsMatFicha = $this->filtrarMatriculasEstadoVigente($idsMatFicha);
             $totalEnFicha = $idsMatFicha->unique()->count();
             if ($totalEnFicha === 0) {
                 $ap = $this->aprendicesPorFicha($idFicha);
@@ -226,7 +246,6 @@ class AsignacionActividadController extends Controller
             $tableMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
             $colFicha = Schema::hasColumn($tableMa, 'idFicha') ? 'idFicha' : (Schema::hasColumn($tableMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : null);
 
-            // Obtener matrículas académicas del estudiante en esta ficha
             $queryMa = DB::table($tableMa . ' as ma')
                 ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
                 ->where('m.idPersona', $idPersona);
@@ -342,6 +361,9 @@ class AsignacionActividadController extends Controller
                 'grupos' => 'nullable',    // array de idGrupo o "todos"
                 'fechaInicial' => 'nullable|date',
                 'fechaFinal' => 'nullable|date|after_or_equal:fechaInicial',
+                'configCuestionarios' => 'nullable|array',
+                'configCuestionarios.*.cantidadPreguntas' => 'required|integer|min:1',
+                'configCuestionarios.*.tiempoCuestionario' => 'nullable|integer|min:1|max:10080',
             ]);
 
             $ficha = \App\Models\Ficha::findOrFail($idFicha);
@@ -357,6 +379,60 @@ class AsignacionActividadController extends Controller
                 : ($ficha->asignacion?->fechaFinalClases ?? $fecha->copy()->addMonths(3));
 
             $actividades = $validated['actividades'];
+            $configCuestionarios = $validated['configCuestionarios'] ?? [];
+
+            // Validar cantidad por intento (1..banco) y preguntasMinimasAprobar vs esa cantidad (N, no M).
+            foreach ($actividades as $idActividadVal) {
+                $actVal = DB::table('actividades')->where('id', $idActividadVal)->first();
+                if (!$actVal || strtolower(trim((string) ($actVal->tipoActividad ?? ''))) !== 'cuestionario') {
+                    continue;
+                }
+                $tamanoBanco = (int) DB::table('preguntas')->where('idActividad', $idActividadVal)->count();
+                if ($tamanoBanco < 1) {
+                    return response()->json([
+                        'error' => 'El cuestionario no tiene preguntas en el banco.',
+                        'idActividad' => (int) $idActividadVal,
+                    ], 422);
+                }
+                $cantidadPorIntento = $this->resolverCantidadPreguntasAsignacion((int) $idActividadVal, $configCuestionarios);
+                if ($cantidadPorIntento === null) {
+                    return response()->json([
+                        'error' => 'Debe indicar la cantidad de preguntas por intento para el cuestionario.',
+                        'idActividad' => (int) $idActividadVal,
+                        'bancoPreguntas' => $tamanoBanco,
+                    ], 422);
+                }
+                $tiempoCuestionario = $this->resolverTiempoCuestionarioAsignacion((int) $idActividadVal, $configCuestionarios);
+                if ($tiempoCuestionario !== null && $tiempoCuestionario < 1) {
+                    return response()->json([
+                        'error' => 'El tiempo límite del cuestionario debe ser mayor a 0 o dejarse vacío.',
+                        'idActividad' => (int) $idActividadVal,
+                    ], 422);
+                }
+                if ($cantidadPorIntento < 1 || $cantidadPorIntento > $tamanoBanco) {
+                    return response()->json([
+                        'error' => "La cantidad por intento ({$cantidadPorIntento}) debe estar entre 1 y {$tamanoBanco} (tamaño del banco).",
+                        'idActividad' => (int) $idActividadVal,
+                        'cantidadPreguntas' => $cantidadPorIntento,
+                        'bancoPreguntas' => $tamanoBanco,
+                    ], 422);
+                }
+                if (Schema::hasColumn('actividades', 'preguntasMinimasAprobar')) {
+                    $minAprobar = $actVal->preguntasMinimasAprobar !== null
+                        ? (int) $actVal->preguntasMinimasAprobar
+                        : null;
+                    // Solo validar si el instructor configuró un mínimo (opcional).
+                    if ($minAprobar !== null && $minAprobar > 0 && $minAprobar > $cantidadPorIntento) {
+                        return response()->json([
+                            'error' => "Preguntas mínimas para aprobar ({$minAprobar}) supera las preguntas por intento ({$cantidadPorIntento}).",
+                            'idActividad' => (int) $idActividadVal,
+                            'preguntasMinimasAprobar' => $minAprobar,
+                            'preguntasPorIntento' => $cantidadPorIntento,
+                        ], 422);
+                    }
+                }
+            }
+
             $exitosas = 0;
             $omitidas = 0;
             $omitidosDetalle = [];
@@ -375,8 +451,7 @@ class AsignacionActividadController extends Controller
                         ]);
                     }
                 } elseif (is_array($validated['aprendices'])) {
-                    // Obtener TODAS las matrículas académicas por estudiante (una por materia)
-                    // para que coincidan con la materia de cada actividad
+                    // Todas las matrículas académicas por estudiante (una por materia) para coincidir con cada actividad.
                     $aprendices = $this->aprendicesPorFichaParaAsignacion($idFicha);
                     $idsMatSeleccionados = collect($validated['aprendices'])->map(fn ($v) => (int) $v)->filter()->values();
                     foreach ($aprendices as $a) {
@@ -455,6 +530,13 @@ class AsignacionActividadController extends Controller
                         }
                     }
                 }
+                $tiempoCuestionario = $this->resolverTiempoCuestionarioAsignacion((int) $idActividad, $configCuestionarios);
+                if (array_key_exists((string) $idActividad, $configCuestionarios) || array_key_exists($idActividad, $configCuestionarios)) {
+                    DB::table('actividades')
+                        ->where('id', $idActividad)
+                        ->update(['tiempoCuestionario' => $tiempoCuestionario]);
+                }
+
                 foreach (array_values($destPorMatricula) as $dest) {
                     $idMa = is_array($dest['idMatriculaAcademica'] ?? null)
                         ? ($dest['idMatriculaAcademica'][0] ?? 0)
@@ -480,6 +562,8 @@ class AsignacionActividadController extends Controller
                     $idGrupo = is_array($idGrupo) ? ($idGrupo[0] ?? null) : $idGrupo;
                     $idGrupo = $idGrupo !== null ? (int) $idGrupo : null;
 
+                    $cantidadPreguntas = $this->resolverCantidadPreguntasAsignacion((int) $idActividad, $configCuestionarios);
+
                     $insertado = $this->crearCalificacionActividad(
                         (int) $idActividad,
                         $idMa,
@@ -487,7 +571,8 @@ class AsignacionActividadController extends Controller
                         $idPersona,
                         $idCorte,
                         $fecha,
-                        $fechaFin
+                        $fechaFin,
+                        $cantidadPreguntas
                     );
                     if ($insertado) {
                         $exitosas++;
@@ -503,7 +588,7 @@ class AsignacionActividadController extends Controller
                             ->where('idGrupo', $idGrupo)
                             ->exists();
                         if (!$yaExiste) {
-                            DB::table('asignacionActividadGrupo')->insert([
+                            $rowGrupo = [
                                 'idActividad' => $idActividad,
                                 'idGrupo' => $idGrupo,
                                 'fechaInicial' => $fecha,
@@ -511,7 +596,8 @@ class AsignacionActividadController extends Controller
                                 'idPersona' => $idPersona,
                                 'created_at' => now(),
                                 'updated_at' => now(),
-                            ]);
+                            ];
+                            DB::table('asignacionActividadGrupo')->insert($rowGrupo);
                             $exitosas++;
                         }
                     }
@@ -550,7 +636,10 @@ class AsignacionActividadController extends Controller
             if (Schema::hasColumn('matricula', 'idFicha')) {
                 $matriculas = DB::table('matricula')
                     ->where('idFicha', $idFicha)
-                    ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                    ->whereRaw(
+                        'UPPER(TRIM(estado)) IN ('.implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?')).')',
+                        self::ESTADOS_MATRICULA_VIGENTES
+                    )
                     ->pluck('id');
             } elseif (Schema::hasColumn('matricula', 'idAsignacionPeriodoProgramaJornada')) {
                 $idAppj = null;
@@ -566,7 +655,10 @@ class AsignacionActividadController extends Controller
                 if ($idAppj) {
                     $matriculas = DB::table('matricula')
                         ->where('idAsignacionPeriodoProgramaJornada', $idAppj)
-                        ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                        ->whereRaw(
+                            'UPPER(TRIM(estado)) IN ('.implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?')).')',
+                            self::ESTADOS_MATRICULA_VIGENTES
+                        )
                         ->pluck('id');
                 }
             }
@@ -574,6 +666,10 @@ class AsignacionActividadController extends Controller
                 ? DB::table($tableMa)->whereIn('idMatricula', $matriculas)->get()
                 : collect();
         }
+
+        // Matrícula vigente + usuario plataforma ACTIVO (state_id = 1).
+        $idsVigentes = $this->filtrarMatriculasEstadoVigente($ma->pluck('idMatricula'));
+        $ma = $ma->filter(fn ($m) => $idsVigentes->contains((int) ($m->idMatricula ?? 0)))->values();
 
         $idsMatricula = $ma->pluck('idMatricula')->unique()->filter()->values();
         $matriculasMap = DB::table('matricula')->whereIn('id', $idsMatricula)->get(['id', 'idPersona'])->keyBy('id');
@@ -632,7 +728,10 @@ class AsignacionActividadController extends Controller
             if (Schema::hasColumn('matricula', 'idFicha')) {
                 $matriculas = DB::table('matricula')
                     ->where('idFicha', $idFicha)
-                    ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                    ->whereRaw(
+                        'UPPER(TRIM(estado)) IN ('.implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?')).')',
+                        self::ESTADOS_MATRICULA_VIGENTES
+                    )
                     ->pluck('id');
             } elseif (Schema::hasColumn('matricula', 'idAsignacionPeriodoProgramaJornada')) {
                 $idAppj = null;
@@ -646,7 +745,10 @@ class AsignacionActividadController extends Controller
                 if ($idAppj) {
                     $matriculas = DB::table('matricula')
                         ->where('idAsignacionPeriodoProgramaJornada', $idAppj)
-                        ->whereIn('estado', ['ACTIVO', 'MATRICULADO', 'CURSANDO', 'EN FORMACION'])
+                        ->whereRaw(
+                            'UPPER(TRIM(estado)) IN ('.implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?')).')',
+                            self::ESTADOS_MATRICULA_VIGENTES
+                        )
                         ->pluck('id');
                 }
             }
@@ -654,6 +756,9 @@ class AsignacionActividadController extends Controller
                 ? DB::table($tableMa)->whereIn('idMatricula', $matriculas)->get()
                 : collect();
         }
+
+        $idsVigentes = $this->filtrarMatriculasEstadoVigente($ma->pluck('idMatricula'));
+        $ma = $ma->filter(fn ($m) => $idsVigentes->contains((int) ($m->idMatricula ?? 0)))->values();
 
         $idsMatricula = $ma->pluck('idMatricula')->unique()->filter()->values();
         $matriculasMap = DB::table('matricula')->whereIn('id', $idsMatricula)->get(['id', 'idPersona'])->keyBy('id');
@@ -689,6 +794,47 @@ class AsignacionActividadController extends Controller
         return $corte ? (int) $corte->id : 1;
     }
 
+    /**
+     * Cantidad de preguntas por intento configurada por el instructor (N del banco M).
+     */
+    private function resolverCantidadPreguntasAsignacion(int $idActividad, array $configCuestionarios): ?int
+    {
+        $actividad = Actividad::find($idActividad);
+        if (!$actividad || strtolower(trim((string) ($actividad->tipoActividad ?? ''))) !== 'cuestionario') {
+            return null;
+        }
+
+        $cfg = $configCuestionarios[(string) $idActividad] ?? $configCuestionarios[$idActividad] ?? null;
+        if (!$cfg || !isset($cfg['cantidadPreguntas'])) {
+            return null;
+        }
+
+        $n = (int) $cfg['cantidadPreguntas'];
+
+        return $n > 0 ? $n : null;
+    }
+
+    private function resolverTiempoCuestionarioAsignacion(int $idActividad, array $configCuestionarios): ?int
+    {
+        $actividad = Actividad::find($idActividad);
+        if (!$actividad || strtolower(trim((string) ($actividad->tipoActividad ?? ''))) !== 'cuestionario') {
+            return null;
+        }
+
+        $cfg = $configCuestionarios[(string) $idActividad] ?? $configCuestionarios[$idActividad] ?? null;
+        if (!$cfg || !array_key_exists('tiempoCuestionario', $cfg)) {
+            return null;
+        }
+
+        $tiempo = $cfg['tiempoCuestionario'];
+        if ($tiempo === null || $tiempo === '' || (is_string($tiempo) && trim($tiempo) === '')) {
+            return null;
+        }
+
+        $minutos = (int) $tiempo;
+        return $minutos > 0 ? $minutos : null;
+    }
+
     private function crearCalificacionActividad(
         int $idActividad,
         int $idMatriculaAcademica,
@@ -696,7 +842,8 @@ class AsignacionActividadController extends Controller
         int $idPersona,
         int $idCorte,
         $fecha,
-        $fechaFin
+        $fechaFin,
+        ?int $cantidadPreguntas = null
     ): bool {
         if (!Schema::hasTable('calificacionActividad')) return false;
         try {
@@ -715,8 +862,20 @@ class AsignacionActividadController extends Controller
                 'created_at' => now(),
                 'updated_at' => now(),
             ];
-            DB::table('calificacionActividad')->insert($data);
-            return true;
+            $idCalificacion = (int) DB::table('calificacionActividad')->insertGetId($data);
+            if ($idCalificacion > 0 && $cantidadPreguntas !== null && $cantidadPreguntas > 0) {
+                // Subconjunto propio de este aprendiz (k=0); el banco no se modifica.
+                $ids = CuestionarioAsignacionUtil::seleccionarNPreguntasDelBanco(
+                    (int) $idActividad,
+                    $idCalificacion,
+                    $cantidadPreguntas,
+                    0
+                );
+                CuestionarioAsignacionUtil::guardarMarcadores($idCalificacion, $ids);
+                CuestionarioAsignacionUtil::persistirMetaAsignacion($idCalificacion, $cantidadPreguntas, 0, false);
+            }
+
+            return $idCalificacion > 0;
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('AsignacionActividad: fallo al crear calificacionActividad', [
                 'error' => $e->getMessage(),
@@ -777,7 +936,53 @@ class AsignacionActividadController extends Controller
                 ->values();
         }
 
-        return $ids;
+        return $this->filtrarMatriculasEstadoVigente($ids);
+    }
+
+    /**
+     * Deja solo matrículas vigentes con usuario de plataforma ACTIVO.
+     *
+     * Fuentes:
+     * - Académica: matricula.estado ∈ EN FORMACION / ACTIVO / EN CURSO / CURSANDO / MATRICULADO
+     * - Plataforma: activation_company_users.state_id = 1 (tabla estado → ACTIVO)
+     *
+     * Por eso cambiar solo user_state/idEstado a CANCELADO/INACTIVO excluye al estudiante.
+     *
+     * @param  \Illuminate\Support\Collection|array  $idsMatricula
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    private function filtrarMatriculasEstadoVigente($idsMatricula): \Illuminate\Support\Collection
+    {
+        $ids = collect($idsMatricula)
+            ->map(fn ($v) => (int) $v)
+            ->filter(fn ($v) => $v > 0)
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty() || !Schema::hasTable('matricula') || !Schema::hasColumn('matricula', 'estado')) {
+            return $ids;
+        }
+
+        $placeholders = implode(',', array_fill(0, count(self::ESTADOS_MATRICULA_VIGENTES), '?'));
+
+        $q = DB::table('matricula as m')
+            ->whereIn('m.id', $ids->all())
+            ->whereRaw('UPPER(TRIM(m.estado)) IN ('.$placeholders.')', self::ESTADOS_MATRICULA_VIGENTES);
+
+        // Usuario plataforma ACTIVO (estado.id = 1)
+        if (Schema::hasTable('usuario') && Schema::hasTable('activation_company_users')) {
+            $q->whereExists(function ($sub) {
+                $sub->select(DB::raw(1))
+                    ->from('usuario as u')
+                    ->join('activation_company_users as acu', 'acu.user_id', '=', 'u.id')
+                    ->whereColumn('u.idpersona', 'm.idPersona')
+                    ->where('acu.state_id', Status::ID_ACTIVE);
+            });
+        }
+
+        return $q->pluck('m.id')
+            ->map(fn ($v) => (int) $v)
+            ->values();
     }
 
     /**
