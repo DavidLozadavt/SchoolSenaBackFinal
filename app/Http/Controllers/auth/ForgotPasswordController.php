@@ -24,7 +24,7 @@ class ForgotPasswordController extends Controller
     {
         try {
             $user = \Tymon\JWTAuth\Facades\JWTAuth::parseToken()->authenticate();
-            return $user?->email;
+            return $user?->email ? strtolower(trim($user->email)) : null;
         } catch (\Exception $e) {
             return null;
         }
@@ -90,12 +90,12 @@ class ForgotPasswordController extends Controller
                 'email' => $lockedEmail ? 'nullable|email' : 'required|email'
             ]);
 
-            $email = $lockedEmail ?? $request->email;
+            $email = strtolower(trim($lockedEmail ?? $request->email));
 
             \Log::info('Enviando OTP a:', ['email' => $email]);
 
-            $userExists = DB::table('persona')->where('email', $email)->exists()
-                || DB::table('usuario')->where('email', $email)->exists();
+            $userExists = DB::table('persona')->whereRaw('LOWER(email) = ?', [$email])->exists()
+                || DB::table('usuario')->whereRaw('LOWER(email) = ?', [$email])->exists();
             
             $responseMessage = 'Si el correo existe en nuestro sistema, recibirás un código de verificación en tu correo electrónico.';
             
@@ -108,7 +108,7 @@ class ForgotPasswordController extends Controller
             }
 
             DB::table('otps')
-                ->where('identifier', $email)
+                ->whereRaw('LOWER(identifier) = ?', [$email])
                 ->where('valid', 1)
                 ->update(['valid' => 0]);
 
@@ -127,14 +127,26 @@ class ForgotPasswordController extends Controller
             \Log::info('OTP guardado en BD');
 
             try {
-                Mail::send('mails.verification-otp', ['otp' => $otp], function ($message) use ($email) {
-                    $message->to($email)
+                $fromAddress = config('mail.from.address');
+                $fromName = config('mail.from.name', 'School SENA');
+
+                if (empty($fromAddress)) {
+                    throw new \RuntimeException('MAIL_FROM_ADDRESS no está configurado');
+                }
+
+                Mail::send('mails.verification-otp', ['otp' => $otp], function ($message) use ($email, $fromAddress, $fromName) {
+                    $message->from($fromAddress, $fromName)
+                            ->to($email)
                             ->subject('Código de verificación - Recuperación de contraseña');
                 });
                 
-                \Log::info('Email enviado exitosamente');
+                \Log::info('Email enviado exitosamente', ['email' => $email]);
             } catch (\Exception $e) {
                 \Log::error('Error enviando email: ' . $e->getMessage());
+                return response()->json([
+                    'message' => 'No se pudo enviar el código al correo. Intenta de nuevo más tarde.',
+                    'error' => 'mail_send_failed'
+                ], 502);
             }
 
             return response()->json([
@@ -162,13 +174,13 @@ class ForgotPasswordController extends Controller
                 'otp' => 'required|string|size:6'
             ]);
 
-            $email = $lockedEmail ?? $request->email;
+            $email = strtolower(trim($lockedEmail ?? $request->email));
             $otp = $request->otp;
 
             \Log::info('Datos recibidos:', ['email' => $email, 'otp' => $otp]);
 
             $otpRecord = DB::table('otps')
-                ->where('identifier', $email)
+                ->whereRaw('LOWER(identifier) = ?', [$email])
                 ->where('token', $otp)
                 ->where('valid', 1)
                 ->orderBy('created_at', 'desc')
@@ -176,6 +188,20 @@ class ForgotPasswordController extends Controller
 
             if (!$otpRecord) {
                 \Log::warning('OTP no encontrado o inválido');
+
+                $staleOtp = DB::table('otps')
+                    ->whereRaw('LOWER(identifier) = ?', [$email])
+                    ->where('token', $otp)
+                    ->orderBy('created_at', 'desc')
+                    ->first();
+
+                if ($staleOtp && (int) $staleOtp->valid === 0) {
+                    return response()->json([
+                        'message' => 'Ese código ya no es válido. Usa el del correo más reciente o solicita uno nuevo.',
+                        'error' => 'stale_otp'
+                    ], 400);
+                }
+
                 return response()->json([
                     'message' => 'Código inválido. Verifica los 6 dígitos.',
                     'error' => 'invalid_otp'
@@ -247,7 +273,7 @@ class ForgotPasswordController extends Controller
             'password' => 'required|min:8|confirmed'
         ]);
 
-        $email = $lockedEmail ?? $request->email;
+        $email = strtolower(trim($lockedEmail ?? $request->email));
         $token = $request->token;
         $password = $request->password;
 

@@ -145,6 +145,7 @@ use App\Http\Controllers\ambiente_virtual\AsignacionActividadController;
 use App\Http\Controllers\ambiente_virtual\ActividadesAprendizController;
 use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Http\Controllers\ambiente_virtual\MaterialApoyoFichaController;
+use App\Http\Controllers\ambiente_virtual\PlaneacionPedagogicaController;
 use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
@@ -324,6 +325,7 @@ Route::get('areas-conocimiento', [ContratacionController::class, 'getAreasConoci
 Route::get('areas-conocimiento/programa/{idPrograma}', [ContratacionController::class, 'getAreasConocimientoPrograma']);
 Route::post('areas-conocimiento/programas', [ContratacionController::class, 'getAreasConocimientoProgramas']);
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
+Route::put('areas-conocimiento/{id}', [ContratacionController::class, 'updateAreaConocimiento']);
 Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
 Route::get('programas_docente/{idContrato}', [ContratacionController::class, 'getProgramasDocente']);
@@ -1276,6 +1278,17 @@ Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'g
 // IMPORTANTE: Las rutas específicas deben ir ANTES de las genéricas
 Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
 Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+
+// Planeación pedagógica (docente)
+Route::get('planeacion-pedagogica', [PlaneacionPedagogicaController::class, 'index']);
+Route::post('planeacion-pedagogica', [PlaneacionPedagogicaController::class, 'store']);
+Route::get('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'show'])->whereNumber('id');
+Route::put('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'update'])->whereNumber('id');
+Route::delete('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'destroy'])->whereNumber('id');
+Route::get('planeacion-pedagogica/{id}/pdf', [PlaneacionPedagogicaController::class, 'pdf'])->whereNumber('id');
+Route::post('planeacion-pedagogica/{id}/enviar', [PlaneacionPedagogicaController::class, 'enviar'])->whereNumber('id');
+Route::post('planeacion-pedagogica/{id}/estado', [PlaneacionPedagogicaController::class, 'cambiarEstado'])->whereNumber('id');
+Route::patch('planeacion-pedagogica/clase/{claseId}/ejecutada', [PlaneacionPedagogicaController::class, 'marcarEjecutada'])->whereNumber('claseId');
 Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
 Route::get('fichas/instructor/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
 Route::get('fichas/instructor/{idInstructor}/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);

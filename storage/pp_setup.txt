@@ -1,0 +1,52 @@
+=== CWD ===
+C:\Users\Sirley Diaz\Documents\senavt\school_sena\SchoolSenaBackFinal
+
+=== 1. php artisan migrate --force --path=database/migrations/2026_07_24_110000_create_planeacion_pedagogica_tables.php ===
+
+   INFO  Running migrations.  
+
+  2026_07_24_110000_create_planeacion_pedagogica_tables ................................................. 1,208ms DONE
+
+EXIT: 0
+
+=== 2. php database/scripts/seed_permiso_planeacion_pedagogica.php ===
+Permiso actualizado id=106
+Ya tenía el permiso: DOCENTEUP
+Ya tenía el permiso: INSTRUCTOR SENA
+OK: menú Planeación pedagógica listo (/ambiente-virtual/planeacion-pedagogica)
+
+EXIT: 0
+
+=== 3. SHOW TABLES LIKE 'planeacion%' ===
+(note: mysql CLI not in PATH; queried via PHP/PDO against DB pinza @ 127.0.0.1:3306)
+
+planeacion
+planeacion_pedagogica
+planeacion_pedagogica_clase
+planeacionactividades
+COUNT: 4
+
+=== permissions.description NULLABLE check ===
+Field: description
+Type: varchar(255)
+Null: NO
+Key: 
+Default: NULL
+Extra: 
+
+NOTE: description is NOT NULL (Null=NO). Default is NULL (MySQL quirk). Inserts without an explicit description value will fail. Seed already ran OK (updated existing id=106).
+
+=== 4. php artisan route:list --path=planeacion-pedagogica (first 30 lines) ===
+
+  GET|HEAD  api/planeacion-pedagogica .......................... ambiente_virtual\PlaneacionPedagogicaController@index
+  POST      api/planeacion-pedagogica .......................... ambiente_virtual\PlaneacionPedagogicaController@store
+  PATCH     api/planeacion-pedagogica/clase/{claseId}/ejecutada ambiente_virtual\PlaneacionPedagogicaController@marca…
+  GET|HEAD  api/planeacion-pedagogica/{id} ...................... ambiente_virtual\PlaneacionPedagogicaController@show
+  PUT       api/planeacion-pedagogica/{id} .................... ambiente_virtual\PlaneacionPedagogicaController@update
+  DELETE    api/planeacion-pedagogica/{id} ................... ambiente_virtual\PlaneacionPedagogicaController@destroy
+  POST      api/planeacion-pedagogica/{id}/enviar ............. ambiente_virtual\PlaneacionPedagogicaController@enviar
+  GET|HEAD  api/planeacion-pedagogica/{id}/pdf ................... ambiente_virtual\PlaneacionPedagogicaController@pdf
+
+                                                                                                    Showing [8] routes
+
+EXIT: 0

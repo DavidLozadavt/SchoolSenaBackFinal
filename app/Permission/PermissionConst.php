@@ -36,6 +36,12 @@ class PermissionConst
     /** Aula Virtual - Instructor SENA */
     const AULA_VIRTUAL_INSTRUCTOR = 'AULA_VIRTUAL_INSTRUCTOR';
 
+    /** Horario del instructor */
+    const AULA_VIRTUAL_INSTRUCTOR_HORARIO = 'AULA_VIRTUAL_INSTRUCTOR_HORARIO';
+
+    /** Planeación pedagógica del instructor */
+    const AULA_VIRTUAL_INSTRUCTOR_PLANEACION_PEDAGOGICA = 'AULA_VIRTUAL_INSTRUCTOR_PLANEACION_PEDAGOGICA';
+
     /** Aula Virtual - Aprendiz */
     const AULA_VIRTUAL_APRENDIZ = 'AULA_VIRTUAL_APRENDIZ';
 }
