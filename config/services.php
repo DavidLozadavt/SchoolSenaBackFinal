@@ -37,6 +37,14 @@ return [
         'password' => env('FACTUS_PASSWORD'),
         'timeout' => env('FACTUS_TIMEOUT', 10),
         ],
+<<<<<<< HEAD
+     
+    'livekit' => [
+        'key' => env('LIVEKIT_API_KEY'),
+        'secret' => env('LIVEKIT_API_SECRET'),
+        'url' => env('LIVEKIT_URL'),
+    ],
+=======
 
     /*
     | Pasarela de pagos Wompi — compra de planes de mensajes de WhatsApp.
@@ -61,4 +69,5 @@ return [
     ],
 
 
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
 ];

@@ -9,6 +9,7 @@ use App\Models\TipoFormacion;
 use App\Models\EstadoPrograma;
 use App\Models\Programa;
 use App\Util\KeyUtil;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
@@ -132,7 +133,12 @@ class PensumController extends Controller
                         $q->whereHas('aperturarPrograma.sede', function ($sub) use ($idCentro) {
                             $sub->where('idCentroFormacion', $idCentro);
                         });
-                    }
+                    }, 'aperturarProgramas as aperturas_activas_count' => function ($q) use ($idCentro) {
+                    $q->where('fechaFinalPlanMejoramiento', '>=', Carbon::today()->toDateString())
+                      ->whereHas('sede', function ($sub) use ($idCentro) {
+                          $sub->where('idCentroFormacion', $idCentro);
+                      });
+                }
                 ])
                 ->orderByDesc('fichas_activas_count')
                 ->orderBy('nombrePrograma')

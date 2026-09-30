@@ -194,6 +194,8 @@ class GruposFichaController extends Controller
                 'cantidadParticipantes' => 'required|integer|min:1',
                 'descripcion' => 'nullable|string',
                 'idTipoGrupo' => 'nullable|exists:tipoGrupo,id',
+                'idsMatricula' => 'nullable|array',
+                'idsMatricula.*' => 'integer|exists:matricula,id',
             ]);
 
             $idTipoGrupo = $validated['idTipoGrupo'] ?? TipoGrupo::first()?->id;
@@ -201,6 +203,13 @@ class GruposFichaController extends Controller
                 // Crear tipo "General" si la tabla está vacía
                 $tipo = TipoGrupo::create(['nombreTipoGrupo' => 'General']);
                 $idTipoGrupo = $tipo->id;
+            }
+
+            $idsMatricula = array_values(array_unique(array_map('intval', $validated['idsMatricula'] ?? [])));
+            if (count($idsMatricula) > (int) $validated['cantidadParticipantes']) {
+                return response()->json([
+                    'error' => 'Hay más integrantes seleccionados que el cupo del grupo',
+                ], 422);
             }
 
             $grupo = GrupoFicha::create([
@@ -213,7 +222,27 @@ class GruposFichaController extends Controller
                 'idGradoMateria' => $primerHorario->idGradoMateria,
             ]);
 
-            return response()->json($grupo, 201);
+            $tbl = $this->tablaParticipantes();
+            if ($tbl && !empty($idsMatricula)) {
+                $now = now();
+                foreach ($idsMatricula as $idMatricula) {
+                    $ya = \Illuminate\Support\Facades\DB::table($tbl)
+                        ->where('idGrupo', $grupo->id)
+                        ->where('idMatricula', $idMatricula)
+                        ->exists();
+                    if ($ya) {
+                        continue;
+                    }
+                    \Illuminate\Support\Facades\DB::table($tbl)->insert([
+                        'idGrupo' => $grupo->id,
+                        'idMatricula' => $idMatricula,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                }
+            }
+
+            return response()->json($grupo->load('tipoGrupo'), 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {

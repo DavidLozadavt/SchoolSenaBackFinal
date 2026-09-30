@@ -30,6 +30,20 @@ class PermissionHierarchyController extends Controller
         // Asegurar que el Dashboard (si existe) aparezca primero por visibilidad
         $menuTree = $this->ensureDashboardFirst($menuTree);
 
+        // Planeación pedagógica justo debajo de Horario
+        $menuTree = $this->ensureItemAfter(
+            $menuTree,
+            '/ambiente-virtual/horario',
+            '/ambiente-virtual/planeacion-pedagogica'
+        );
+
+        // Etiqueta de menú: Mis formaciones → Mis clases (instructor)
+        $menuTree = $this->renameMenuTitleByPath(
+            $menuTree,
+            '/ambiente-virtual/historial-raps',
+            'Mis clases'
+        );
+
         return response()->json($menuTree);
     }
 
@@ -141,8 +155,10 @@ class PermissionHierarchyController extends Controller
             'path'              => ['nullable', 'string']
         ]);
 
+        $normalizedName = strtoupper(preg_replace('/\s+/', '_', trim($data['name'])));
+
         $permission = Permission::create([
-            'name'              => $data['name'],
+            'name'              => $normalizedName,
             'guard_name'        => $data['guard_name'] ?? 'web',
             'description'       => $data['description'] ?? null,
             'idPermissionPadre' => $data['idPermissionPadre'] ?? null,
@@ -174,7 +190,36 @@ class PermissionHierarchyController extends Controller
         // Asegurar que el Dashboard (si existe) aparezca primero por visibilidad
         $menuTree = $this->ensureDashboardFirst($menuTree);
 
+        $menuTree = $this->ensureItemAfter(
+            $menuTree,
+            '/ambiente-virtual/horario',
+            '/ambiente-virtual/planeacion-pedagogica'
+        );
+
+        $menuTree = $this->renameMenuTitleByPath(
+            $menuTree,
+            '/ambiente-virtual/historial-raps',
+            'Mis clases'
+        );
+
         return response()->json($menuTree);
+    }
+
+    /**
+     * Renombra el título de un ítem (y anidados) por path.
+     */
+    private function renameMenuTitleByPath(array $menu, string $path, string $title): array
+    {
+        foreach ($menu as $i => $node) {
+            if (($node['path'] ?? '') === $path) {
+                $menu[$i]['title'] = $title;
+            }
+            if (!empty($node['children']) && is_array($node['children'])) {
+                $menu[$i]['children'] = $this->renameMenuTitleByPath($node['children'], $path, $title);
+            }
+        }
+
+        return $menu;
     }
 
     /**
@@ -208,6 +253,44 @@ class PermissionHierarchyController extends Controller
             array_splice($menu, $dashboardIndex, 1);
             array_unshift($menu, $dashboard);
         }
+
+        return $menu;
+    }
+
+    /**
+     * Coloca el ítem con path $afterPath inmediatamente después del ítem con path $beforePath
+     * (solo en el nivel raíz del menú).
+     *
+     * @param array $menu
+     * @return array
+     */
+    private function ensureItemAfter(array $menu, string $beforePath, string $afterPath): array
+    {
+        $beforeIndex = null;
+        $afterIndex = null;
+
+        foreach ($menu as $i => $node) {
+            $path = $node['path'] ?? '';
+            if ($path === $beforePath) {
+                $beforeIndex = $i;
+            }
+            if ($path === $afterPath) {
+                $afterIndex = $i;
+            }
+        }
+
+        if ($beforeIndex === null || $afterIndex === null || $afterIndex === $beforeIndex + 1) {
+            return $menu;
+        }
+
+        $item = $menu[$afterIndex];
+        array_splice($menu, $afterIndex, 1);
+
+        if ($afterIndex < $beforeIndex) {
+            $beforeIndex--;
+        }
+
+        array_splice($menu, $beforeIndex + 1, 0, [$item]);
 
         return $menu;
     }

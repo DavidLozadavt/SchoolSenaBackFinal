@@ -160,6 +160,7 @@ use App\Http\Controllers\ambiente_virtual\AsignacionActividadController;
 use App\Http\Controllers\ambiente_virtual\ActividadesAprendizController;
 use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Http\Controllers\ambiente_virtual\MaterialApoyoFichaController;
+use App\Http\Controllers\ambiente_virtual\PlaneacionPedagogicaController;
 use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
@@ -180,7 +181,11 @@ use App\Http\Controllers\SancionesController;
 use App\Http\Controllers\AnexoActaController;
 use App\Http\Controllers\gestion_solicitudes_instructor\SolicitudMateriaController;
 use App\Http\Controllers\InstructorLiderController;
+<<<<<<< HEAD
+use App\Http\Controllers\ReunionesTemporalesController;
+=======
 use App\Http\Controllers\SeguimientoAprendizController;
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
 
 /*
 |--------------------------------------------------------------------------
@@ -197,6 +202,7 @@ Route::get('sanctum/csrf-cookie', [CsrfCookieController::class, 'show']);
 
 // Integración con ERP
 Route::post('integration/inscribe-institucion', [SchoolBridgeController::class, 'inscribirInstitucion']);
+Route::post('integration/sync-password', [ForgotPasswordController::class, 'syncPassword']);
 
 // Webhook público de WhatsApp Cloud API (Meta) — módulo Seguimiento de Aspirantes.
 // NO requiere autenticación: Meta llama directamente a estas URLs.
@@ -213,12 +219,15 @@ Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioControll
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
 Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
 
+<<<<<<< HEAD
+=======
 // Inscripción pública del aspirante (Seguimiento de Aspirantes) — identifica
 // al aspirante únicamente por tokenPublico, sin login. Reutiliza el módulo
 // de Formularios y su endpoint de upload-adjunto de arriba.
 Route::get('inscripcion-aspirante/{token}', [App\Http\Controllers\AspiranteInscripcionController::class, 'show']);
 Route::post('inscripcion-aspirante/{token}/responder', [App\Http\Controllers\AspiranteInscripcionController::class, 'responder']);
 
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
 // Inscripción pública a eventos (sin auth de School, para usuarios de NexiService)
 Route::post('eventos-multimedia/{id}/register-public', [App\Http\Controllers\EventoController::class, 'registerPublic']);
 Route::get('eventos-multimedia/{id}/check-registration-public', [App\Http\Controllers\EventoController::class, 'checkRegistrationPublic']);
@@ -238,6 +247,7 @@ Route::group([
     Route::post('permissions', [AuthController::class, 'getPermissions']);
     Route::get('user_mobile', [AuthController::class, 'getUserAppMobile']);
     Route::get('get_users_and_groups', [Gestion_usuarioUserController::class, 'getUsersAndGroups']);
+    Route::post('token_livekit', [AuthController::class, 'tokenLivekit']);
 });
 
 //olvidaste contraseña
@@ -307,6 +317,13 @@ Route::post('update_status_user/{id}', [Gestion_usuarioUserController::class, 'u
 
 
 
+// Configuración de Inscripción para Colegios
+Route::middleware('auth:api')->group(function () {
+    Route::get('inscripcion/configuracion', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'getConfig']);
+    Route::post('inscripcion/configuracion', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'saveConfig']);
+    Route::get('inscripcion/formularios', [\App\Http\Controllers\gestion_empresa\InscripcionConfigController::class, 'getFormularios']);
+});
+
 Route::get('users_company', [CompanyController::class, 'getUsersCompany']);
 
 
@@ -346,10 +363,11 @@ Route::get('actividades_riesgo_profesional', [ContratacionController::class, 'ge
 Route::get('contrato-formas-pago', [ContratacionController::class, 'formasPagoContrato']);
 Route::post('store_actividades_riesgo_profesional', [ContratacionController::class, 'storeActividadeRiesgoProfesional']);
 Route::post('actualizar_entidad/{id}', [ContratacionController::class, 'updateEntidadSeguridadSocial']);
-Route::get('areas_conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
+Route::get('areas-conocimiento', [ContratacionController::class, 'getAreasConocimiento']);
 Route::get('areas-conocimiento/programa/{idPrograma}', [ContratacionController::class, 'getAreasConocimientoPrograma']);
 Route::post('areas-conocimiento/programas', [ContratacionController::class, 'getAreasConocimientoProgramas']);
 Route::post('store_area_conocimiento', [ContratacionController::class, 'storeAreaConocimiento']);
+Route::put('areas-conocimiento/{id}', [ContratacionController::class, 'updateAreaConocimiento']);
 Route::get('programas_contratacion', [ContratacionController::class, 'getProgramas'])->middleware('api');
 Route::get('instructores_por_programa/{idPrograma}', [ContratacionController::class, 'getInstructoresPorPrograma']);
 Route::get('programas_docente/{idContrato}', [ContratacionController::class, 'getProgramasDocente']);
@@ -802,6 +820,21 @@ Route::get('configuraciones_pago', [PagoController::class, 'getConfiguracionesPa
 Route::post('store_configuracion_pago', [PagoController::class, 'storeConfiguracionPago']);
 Route::put('update_configuracion_pago/{id}', [PagoController::class, 'updateConfiguracionPago']);
 Route::delete('delete_configuracion_pago/{id}', [PagoController::class, 'destroyConfiguracionPago']);
+Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
+Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
+Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);
+Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
+Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
+Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
+Route::post('solicitudes_inscripcion/{idFactura}/notificar_recepcion', [PagoController::class, 'notificarRecepcionSolicitudInscripcion']);
+Route::delete('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'deleteSolicitudInscripcion']);
+// Ruta pública para el portal del aspirante (sin autenticación requerida)
+Route::get('portal-aspirante/{token}', [PagoController::class, 'getPortalAspirante']);
+Route::post('portal-aspirante/{token}/comprobante', [PagoController::class, 'subirComprobantePortalAspirante']);
+Route::get('portal-aspirante/{token}/factura-pdf', [PagoController::class, 'generarFacturaPdfPortalAspirante']);
+
+
 
 
 
@@ -1282,31 +1315,39 @@ Route::patch('sedesSena/{id}', [ControllersSedeController::class, 'update']);
 Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'getSedesByRegional']); //Para filtrar las sedes por regional
 
 
-//rutas SHOOL SENA para gestión de aperturaPrograma:
-Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
-Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
-Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
-Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
 
 //rutas SHOOL SENA para gestión de Fichas:
 // IMPORTANTE: Las rutas específicas deben ir ANTES de las genéricas
 Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
 Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+
+// Planeación pedagógica (docente)
+Route::get('planeacion-pedagogica', [PlaneacionPedagogicaController::class, 'index']);
+Route::post('planeacion-pedagogica', [PlaneacionPedagogicaController::class, 'store']);
+Route::get('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'show'])->whereNumber('id');
+Route::put('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'update'])->whereNumber('id');
+Route::delete('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'destroy'])->whereNumber('id');
+Route::get('planeacion-pedagogica/{id}/pdf', [PlaneacionPedagogicaController::class, 'pdf'])->whereNumber('id');
+Route::post('planeacion-pedagogica/{id}/enviar', [PlaneacionPedagogicaController::class, 'enviar'])->whereNumber('id');
+Route::post('planeacion-pedagogica/{id}/estado', [PlaneacionPedagogicaController::class, 'cambiarEstado'])->whereNumber('id');
+Route::patch('planeacion-pedagogica/clase/{claseId}/ejecutada', [PlaneacionPedagogicaController::class, 'marcarEjecutada'])->whereNumber('claseId');
 Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
 Route::get('fichas/instructor/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
 Route::get('fichas/instructor/{idInstructor}/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
 Route::get('fichas/estudiante/clases', [FichaController::class, 'clasesEstudiante']);
 Route::get('fichas/clases-asignadas', [FichaController::class, 'todasClasesAsignadas']);
-Route::get('fichas/programa/{idPrograma}/{idCentro}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('fichas/programa/{idApertura}', [FichaController::class, 'fichasPorPrograma']);
+Route::get('tipos-grado', [FichaController::class, 'getTiposGrado']); // trimestre, semestre, etc.
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
+Route::post('fichas/multiples', [FichaController::class, 'storeMultiple']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas', [FichaController::class, 'store']);
 Route::get('fichas/{id}', [FichaController::class, 'show']);
 Route::put('fichas/{id}', [FichaController::class, 'update']);
 Route::delete('fichas/{id}', [FichaController::class, 'destroy']);
-Route::get('/ficha/validar-codigo/{codigo}', [FichaController::class, 'validarCodigo']);
+Route::get('/ficha/validar-codigo', [FichaController::class, 'validarCodigo']);
 
 //proyecto Formativo
 Route::put('/fichasproyecto/{idFicha}/proyecto-formativo', [FichaController::class, 'asignarProyectoFormativo']);
@@ -1433,20 +1474,20 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::get('trimestres-ficha/{idFicha}', [HorarioMateriaController::class, 'getTrimestresFicha']); // trae todos los trimestres con las competencias de la ficha
     Route::post('trimestres-ficha', [GradoProgramaController::class, 'addTrimestreFicha']); // crear nuevo trimestre con minimo una competencia asignada
     Route::post('competencias/trimestre', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // agregar competencias a un trimestre ya creado
-    //Route::post('trimestres-ficha/competencias', [GradoProgramaController::class, 'addCompetenciasTrimestre']); // asignar nuevas competencias a un trimestre
 });
 
 // MATERIAS
 Route::group(['middleware' => 'auth:api'], function () {
-    Route::get('materias-programa', [MateriaController::class, 'getAllCompetencesByProgram']); // materias padre asignadas al programa
+    Route::get('materias-programa', [MateriaController::class, 'getAllCompetences']); // materias padre asignadas al programa
     Route::get('materias/raps', [MateriaController::class, 'getCompetenciasHijas']); // materias hijas (raps-resultados)
     Route::get('materias/hijas', [MateriaController::class, 'getMattersChildren']);
+    Route::get('materias/ficha', [MateriaController::class, 'getAllCompetencesByFicha']); // materias padre asignadas a la ficha
     Route::get('materias/instructores', [MateriaController::class, 'getMateriasInstructores']); // obtener los instructores que pueden ser asignados
     Route::post('materias', [MateriaController::class, 'crearCompetencia']);
     Route::put('materias/finalizar-rap', [HorarioMateriaController::class, 'finalizarRap']);
     Route::put('materias/interrumpir-rap', [HorarioMateriaController::class, 'interrumpirRap']);
     Route::put('materias/{id}', [MateriaController::class, 'update']);
-    Route::delete('grado-materia', [MateriaController::class, 'deleteMateriaTrimestre']); // elimina competencias y raps del trimestre de la ficha
+    Route::delete('grado-materia', [MateriaController::class, 'deleteMateriaFicha']); // elimina competencias y raps del trimestre de la ficha
     Route::get('materias/{id}', [MateriaController::class, 'getById']);
 });
 
@@ -1455,6 +1496,7 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::get('dias', [DiaController::class, 'index']); //,obtener todos los dias
     Route::get('raps/evaluar/contrato', [HorarioMateriaController::class, 'getRapsEvaluarContrato']);
     Route::get('horario/ficha/{idFicha}', [HorarioMateriaController::class, 'getMattersByJornadaPeriodoPrograma']); // obtener el horario de una ficha
+    Route::get('horarios/materia', [HorarioMateriaController::class, 'getHorariosMateria']);
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
     Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
@@ -1772,6 +1814,23 @@ Route::prefix('invitado')->group(function () {
 });
 
 
+<<<<<<< HEAD
+//rutas SHOOL SENA para gestión de aperturaPrograma:
+Route::middleware('auth:api')->group(function () {
+    Route::get('aperturarprograma/disponibles', [AperturarProgramaController::class, 'aperturasDisponibles']);
+    Route::get('aperturaPrograma/grados', [AperturarProgramaController::class, 'indexTipoGrado']);
+    
+    Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
+    Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
+    Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
+    Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
+});
+
+Route::middleware('auth:api')->group(function () {
+    Route::apiResource('reuniones_temporales', ReunionesTemporalesController::class);
+    Route::post('reuniones_temporales/{reunion}/extend', [ReunionesTemporalesController::class, 'extend']);
+});
+=======
 
 Route::middleware('auth:api')->group(function () {
     Route::get('portafolios/instructor/{idContrato}', [PortafolioController::class, 'portafoliosInstructor']);
@@ -1900,3 +1959,4 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('whatsapp-plantillas-meta/{id}', [WhatsappPlantillaMetaController::class, 'destroy']);
     });
 });
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f

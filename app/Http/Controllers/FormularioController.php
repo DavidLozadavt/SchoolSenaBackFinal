@@ -253,6 +253,12 @@ class FormularioController extends Controller
         $user = Auth::user() ?: Auth::guard('api')->user();
         $isEmbed = request()->query('embed') === 'true';
 
+<<<<<<< HEAD
+        if ($formulario->estado !== 'publicado' && !$isAuth && !$isEmbed) {
+            return response()->json(['error' => 'Formulario no disponible'], 403);
+        }
+
+=======
         $totalRespuestas = FormularioRespuesta::where('idFormulario', $formulario->id)->count();
         $formulario->setAttribute('respuestas_count', $totalRespuestas);
 
@@ -281,6 +287,7 @@ class FormularioController extends Controller
         $formulario->setAttribute('is_expired', $isExpired);
         $formulario->setAttribute('motivo_expiracion', $motivoExpiracion);
 
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
         $ultimaRespuesta = null;
         if ($isEmbed) {
             $emailParam = strtolower(trim(request()->query('email', '')));

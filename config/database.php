@@ -104,7 +104,11 @@ return [
             'prefix_indexes' => true,
         ],
 
+<<<<<<< HEAD
+        'mysql_nexiservice' => [
+=======
         'mysql_nexi' => [
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
             'driver' => 'mysql',
             'host' => env('DB_NEXI_HOST', '127.0.0.1'),
             'port' => env('DB_NEXI_PORT', '3306'),

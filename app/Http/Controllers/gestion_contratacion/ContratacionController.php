@@ -3049,6 +3049,64 @@ public function getContratosFlujoVT(Request $request)
     }
 
     /**
+     * Actualiza el nombre de un área de conocimiento existente.
+     */
+    public function updateAreaConocimiento(Request $request, int $id): JsonResponse
+    {
+        try {
+            $area = AreaConocimiento::findOrFail($id);
+
+            $validated = $request->validate([
+                'nombreAreaConocimiento' => 'required|string|max:255',
+            ]);
+
+            $nombreArea = trim($validated['nombreAreaConocimiento']);
+            if ($nombreArea === '') {
+                return response()->json([
+                    'message' => 'El nombre del área de conocimiento es obligatorio',
+                ], 422);
+            }
+
+            $duplicado = AreaConocimiento::where('nombreAreaConocimiento', $nombreArea)
+                ->where('id', '!=', $id)
+                ->exists();
+
+            if ($duplicado) {
+                return response()->json([
+                    'message' => 'Ya existe otra área de conocimiento con ese nombre',
+                    'error' => 'DUPLICADO',
+                ], 409);
+            }
+
+            $area->nombreAreaConocimiento = $nombreArea;
+            $area->save();
+
+            return response()->json([
+                'message' => 'Área de conocimiento actualizada correctamente',
+                'data' => $area->load('programas'),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Error de validación',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'message' => 'Área de conocimiento no encontrada',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error al actualizar área de conocimiento', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+            return response()->json([
+                'message' => 'Error al actualizar área de conocimiento',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Obtiene todos los programas disponibles.
      *
      * @return \Illuminate\Http\JsonResponse

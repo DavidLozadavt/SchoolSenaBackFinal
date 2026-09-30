@@ -941,12 +941,18 @@ protected function crearNotificacionReservaAdmin($agenda, $servicio, $cliente, $
 
     //  Crear notificación para el ADMINISTRADOR
     try {
-        $rolAdmin = Role::where('name', 'Admin') 
+        $rolAdmin = Role::where('name', 'administradorVT') 
             ->where('company_id', $companyId) 
             ->first();
 
         if (!$rolAdmin) {
-            \Log::warning("⚠️ No se encontró rol 'Admin' asociado a la empresa ID {$companyId}. No se enviará notificación.");
+            $rolAdmin = Role::where('name', 'Admin') 
+                ->where('company_id', $companyId) 
+                ->first();
+        }
+
+        if (!$rolAdmin) {
+            \Log::warning("⚠️ No se encontró rol 'administradorVT' o 'Admin' asociado a la empresa ID {$companyId}. No se enviará notificación.");
             return; 
         }
         

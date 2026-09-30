@@ -10,6 +10,7 @@ class AperturarProgramaResource extends JsonResource
     {
         return array_filter([
             'id' => $this->id,
+            'nombre' => $this->nombre,
             'observacion' => $this->observacion,
             'estado' => $this->estado,
 
@@ -24,9 +25,28 @@ class AperturarProgramaResource extends JsonResource
 
             'tipoCalificacion' => $this->tipoCalificacion,
 
+            'pension' => $this->pension,
+            'valorPension' => $this->valorPension,
+            'diasMoraMatricula' => $this->diasMoraMatricula,
+            'porcentajeMoraPension' => $this->porcentajeMoraPension,
+            'diaCobro' => $this->diaCobro,
+
             'periodo' => $this->whenLoaded('periodo'),
             'programa' => $this->whenLoaded('programa'),
             'sede' => $this->whenLoaded('sede'),
-        ], fn ($value) => !is_null($value));
+            'jornada' => $this->whenLoaded('jornada'),
+            'grado' => $this->whenLoaded('grado'),
+            'cortes' => $this->whenLoaded('cortes', function () {
+                return $this->cortes->map(function ($corte) {
+                    return [
+                        'id' => $corte->id,
+                        'numero' => $corte->numero,
+                        'fechaInicial' => $corte->fechaInicial,
+                        'fechaFinal' => $corte->fechaFinal,
+                        'porcentaje' => $corte->porcentaje,
+                    ];
+                });
+            }),
+        ], fn($value) => !is_null($value));
     }
 }

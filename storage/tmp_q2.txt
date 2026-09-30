@@ -1,0 +1,115 @@
+mysql: [Warning] Using a password on the command line interface can be insecure.
+Field	Type	Null	Key	Default	Extra
+id	bigint unsigned	NO	PRI	NULL	auto_increment
+horaInicial	time	YES		NULL	
+horaFinal	time	YES		NULL	
+estado	enum('PENDIENTE','ASIGNADO','FINALIZADO','INTERRUMPIDO','EVALUADO')	NO		PENDIENTE	
+idGradoMateria	bigint unsigned	NO	MUL	NULL	
+idDia	bigint unsigned	YES	MUL	NULL	
+idInfraestructura	bigint unsigned	YES	MUL	NULL	
+idFicha	bigint unsigned	YES	MUL	NULL	
+fechaInicial	date	NO		2026-02-04	
+fechaFinal	date	YES		NULL	
+observacion	text	YES		NULL	
+idContrato	int unsigned	YES	MUL	NULL	
+created_at	timestamp	YES		NULL	
+updated_at	timestamp	YES		NULL	
+festivos	tinyint(1)	YES		0	
+Field	Type	Null	Key	Default	Extra
+id	bigint unsigned	NO	PRI	NULL	auto_increment
+idJornada	bigint unsigned	NO	MUL	NULL	
+idAsignacion	bigint unsigned	NO	MUL	NULL	
+created_at	timestamp	YES		NULL	
+updated_at	timestamp	YES		NULL	
+codigo	varchar(100)	YES	UNI	NULL	
+idInstructorLider	int unsigned	YES		NULL	
+documento	varchar(500)	YES		NULL	
+idAprendizVocero	bigint unsigned	YES	MUL	NULL	
+idAprendizSuplente	bigint unsigned	YES	MUL	NULL	
+idInfraestructura	bigint unsigned	YES	MUL	NULL	
+idSede	bigint unsigned	YES	MUL	NULL	
+idRegional	int unsigned	YES	MUL	NULL	
+porcentajeEjecucion	double(8,2)	NO		100.00	
+idProyectoFormativo	bigint unsigned	YES	MUL	NULL	
+Field	Type	Null	Key	Default	Extra
+id	bigint unsigned	NO	PRI	NULL	auto_increment
+observacion	text	YES		NULL	
+idPeriodo	bigint unsigned	NO		NULL	
+idPrograma	bigint unsigned	NO	MUL	NULL	
+estado	enum('ACTIVO','INACTIVO','OCULTO','PENDIENTE','RECHAZADO','APROBADO','CANCELADO','REPROBADO','CERRADO','ACEPTADO','LEIDO','EN ESPERA','INSCRIPCION','MATRICULADO','ABIERTO','EN CURSO','POR ACTUALIZAR','CURSANDO','ENTREVISTA','SIN ENTREVISTA','JUSTIFICADO')	NO		INACTIVO	
+idSede	bigint unsigned	NO	MUL	NULL	
+pension	tinyint(1)	YES		NULL	
+diaCobro	bigint unsigned	YES		NULL	
+fechaInicialClases	date	YES		NULL	
+fechaFinalClases	date	YES		NULL	
+fechaInicialInscripciones	date	YES		NULL	
+fechaFinalInscripciones	date	YES		NULL	
+fechaInicialMatriculas	date	YES		NULL	
+fechaFinalMatriculas	date	YES		NULL	
+fechaInicialPlanMejoramiento	date	YES		NULL	
+fechaFinalPlanMejoramiento	date	YES		NULL	
+porcentajeMoraMatricula	double(8,2)	YES		NULL	
+valorPension	decimal(40,2)	YES		NULL	
+diasMoraMatricula	bigint unsigned	YES		NULL	
+porcentajeMoraPension	double(8,2)	YES		NULL	
+tipoCalificacion	enum('NUMERICO','DESEMPEÑO')	NO		NUMERICO	
+diasMoraPension	bigint unsigned	YES		NULL	
+created_at	timestamp	YES		NULL	
+updated_at	timestamp	YES		NULL	
+Field	Type	Null	Key	Default	Extra
+id	bigint unsigned	NO	PRI	NULL	auto_increment
+rutaDocumento	text	YES		NULL	
+idGradoPrograma	bigint unsigned	NO	MUL	NULL	
+idMateria	bigint unsigned	NO	MUL	NULL	
+estado	enum('PENDIENTE','FINALIZADO')	NO		PENDIENTE	
+created_at	timestamp	YES		NULL	
+updated_at	timestamp	YES		NULL	
+Field	Type	Null	Key	Default	Extra
+id	bigint unsigned	NO	PRI	NULL	auto_increment
+nombreMateria	varchar(255)	NO	MUL	NULL	
+descripcion	text	YES		NULL	
+rutaDoc	varchar(500)	YES		NULL	
+idEmpresa	int unsigned	YES	MUL	NULL	
+idMateriaPadre	bigint unsigned	YES	MUL	NULL	
+codigo	varchar(20)	YES		NULL	
+created_at	timestamp	YES		NULL	
+updated_at	timestamp	YES		NULL	
+idCompany	int unsigned	NO		NULL	
+porcentaje	float	YES		NULL	
+idAreaConocimiento	bigint unsigned	YES	MUL	NULL	
+horas	decimal(6,2)	YES		NULL	
+creditos	int	YES		NULL	
+idCategoriaFormacion	bigint unsigned	YES	MUL	NULL	
+Field	Type	Null	Key	Default	Extra
+id	bigint unsigned	NO	PRI	NULL	auto_increment
+nombrePrograma	varchar(255)	NO		NULL	
+codigoPrograma	varchar(255)	NO		NULL	
+descripcionPrograma	text	YES		NULL	
+documento	varchar(500)	YES		NULL	
+idNivelEducativo	int unsigned	NO	MUL	NULL	
+idTipoFormacion	int unsigned	NO	MUL	NULL	
+idEstadoPrograma	int unsigned	NO	MUL	NULL	
+idCompany	int unsigned	NO		NULL	
+created_at	timestamp	YES		NULL	
+updated_at	timestamp	YES		NULL	
+idCoordinadorAcademico	int unsigned	YES		NULL	
+idRed	bigint unsigned	YES	MUL	NULL	
+Field	Type	Null	Key	Default	Extra
+id	bigint unsigned	NO	PRI	NULL	auto_increment
+idPrograma	bigint unsigned	NO	MUL	NULL	
+idGrado	bigint unsigned	NO	MUL	NULL	
+cupos	int	YES		NULL	
+ERROR 1054 (42S22) at line 1: Unknown column 'idGrado' in 'field list'
+created_at	timestamp	YES		NULL	
+updated_at	timestamp	YES		NULL	
+fechaInicio	date	YES		NULL	
+fechaFin	date	YES		NULL	
+estado	enum('PENDIENTE','EN CURSO','CANCELADO','INTERRUMPIDO','FINALIZADO')	YES		NULL	
+id	nombreJornada	descripcion	horaInicial	horaFinal	numeroHoras	estado	idCentroFormacion	idTipoJornada	created_at	updated_at
+1	MAÑANA	JORNADA DE LA MAÑANA CCYS	07:00:00	13:00:00	6.00	Activo	1	2	2026-02-24 19:00:00	NULL
+2	MAÑANA	JORNADA MAÑANA CCYS	07:00:00	13:00:00	6.00	Activo	1	4	2026-02-25 12:44:10	2026-02-25 12:44:10
+3	TARDE	JORNADA TARDE CCYS	07:00:00	13:00:00	6.00	Activo	1	4	2026-02-25 12:45:01	2026-02-25 12:45:01
+4	NOCHE	JORNADA NOCHE CCYS	07:00:00	13:00:00	6.00	Activo	1	4	2026-02-25 12:45:37	2026-02-25 12:45:37
+5	MIXTA	MEZCLA ENTRE NOCTURNO Y DIURNOP	08:00:00	13:00:00	5.00	Activo	1	4	2026-04-10 19:19:53	2026-04-10 19:19:53
+6	DIURNA	JORNADA TODO EL DIA	07:00:00	18:00:00	11.00	Activo	1	4	2026-04-11 13:35:33	2026-04-22 14:49:23
+8	TARDE	N/A	13:00:00	19:00:00	6.00	Activo	3	4	2026-05-13 07:19:32	2026-05-13 07:19:32

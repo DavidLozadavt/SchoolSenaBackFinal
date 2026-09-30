@@ -55,16 +55,36 @@ class SchoolBridgeController extends Controller
                 return response()->json(['error' => 'El correo electrónico ya se encuentra registrado en el sistema.'], 422);
             }
 
-            $company = Company::create([
+            $companyId = DB::table('empresa')->insertGetId([
                 'razonSocial' => $request->nombre_institucion,
                 'nit' => $request->nit,
                 'representanteLegal' => $request->nombre_representante,
                 'direccion' => $request->direccion ?? 'No especificada',
                 'email' => $request->email,
                 'digitoVerificacion' => 0,
+<<<<<<< HEAD
+                'idCiudad' => 1,
+                'rutaLogo' => '',
+                'valorIva' => 0.00,
+                'devolucion' => 0,
+                'garantia' => 0,
+                'servicios' => 1,
+                'catalogo' => 0,
+                'productos' => 0,
+                'responsableIva' => 0,
+                'retenciones' => 0,
+                'telefono' => $request->telefono ?? '',
+                'facturaElectronica' => 0,
+                'parafiscalesEmpresa' => 0,
+                'urlDocumento' => '',
+                'created_at' => now(),
+                'updated_at' => now(),
+=======
                 'idCiudad' => 1, // Default o primera ciudad
                 'rutaLogo' => Company::RUTA_LOGO_DEFAULT,
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
             ]);
+            $company = Company::find($companyId);
 
             // 4. Crear el registro en tabla 'persona' para el representante
             // Usamos el nit como identificador de persona si no se tiene
@@ -82,20 +102,39 @@ class SchoolBridgeController extends Controller
                 'idTipoIdentificacion' => 1, // CC
                 'celular' => $request->telefono ?? '0000000',
                 'idCiudadUbicacion' => 1,
+<<<<<<< HEAD
+                'perfil' => 'Admin',
+                'sexo' => 'M',
+                'rh' => '',
+                'firmaDigital' => '',
+                'ciudadExpedicion' => 1,
+                'tipoPersona' => 'natural',
+            ]);
+
+            // 5. Crear el registro en tabla 'usuario' (Credenciales por defecto o sincronizadas)
+            $tempPassword = 'VirtualT2026!';
+=======
                 'perfil' => 'Representante',
                 'sexo' => 'M',
             ]);
 
             // 5. Crear el registro en tabla 'usuario' (Credenciales por defecto)
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
             $user = new User();
             $user->idpersona = $person->id;
             $user->email = $request->email;
             
+<<<<<<< HEAD
+            if ($request->filled('contrasena_hash')) {
+                $user->contrasena = $request->contrasena_hash; // Ya viene encriptada del ERP
+            } else {
+=======
             $tempPassword = null;
             if ($request->filled('contrasena_hash')) {
                 $user->contrasena = $request->contrasena_hash;
             } else {
                 $tempPassword = 'VirtualT2026!';
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
                 $user->contrasena = bcrypt($tempPassword); // Columna principal de contraseña
             }
             $user->save();
@@ -110,8 +149,14 @@ class SchoolBridgeController extends Controller
             $activation->fechaFin = now()->addYears(5)->format('Y-m-d');
             $activation->save();
 
-            // 7. Crear el rol de 'Admin' asignado a este tenant y asignárselo
+            // 7. Asignar el rol real de administrador (ya gestionado desde Gestión de Roles y Permisos)
             $role = Role::firstOrCreate([
+<<<<<<< HEAD
+                'name' => 'ADMINISTRADOR VT',
+                'guard_name' => 'web',
+            ]);
+
+=======
                 'name' => 'Admin',
                 'guard_name' => 'web',
             ]);
@@ -140,6 +185,7 @@ class SchoolBridgeController extends Controller
             $role->syncPermissions($existingPermissions);
 
             // Asignar el rol
+>>>>>>> 0285130cc19333fa73d825bca3d7f5e03e608e1f
             $activation->assignRole($role);
 
             DB::commit();
