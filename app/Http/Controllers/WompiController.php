@@ -273,7 +273,7 @@ class WompiController extends Controller
     $appUrl = rtrim(env('APP_URL'), '/'); // Elimina la barra final si existe
 
     return ($appUrl === 'http://localhost:8000')
-      ? 'http://localhost:4200/gestion-matricula-estudiante'
+      ? 'http://localhost:4210/gestion-matricula-estudiante'
       : 'https://pre-school-plataform.virtualt.org/gestion-matricula-estudiante';
   }
 

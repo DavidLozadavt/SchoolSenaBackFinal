@@ -17,6 +17,8 @@ class User extends Authenticatable  implements JWTSubject
 
     protected $table = "usuario";
 
+    protected $appends = ['name'];
+
     /**
      * The attributes that are mass assignable.
      *
@@ -106,6 +108,20 @@ class User extends Authenticatable  implements JWTSubject
     public function usuario()
     {
         return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function getNameAttribute()
+    {
+        if (!$this->persona) {
+            return '';
+        }
+        $parts = array_filter([
+            $this->persona->nombre1,
+            $this->persona->nombre2,
+            $this->persona->apellido1,
+            $this->persona->apellido2
+        ]);
+        return implode(' ', $parts);
     }
 
 }

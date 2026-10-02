@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -11,6 +12,12 @@ class Reemplazo extends Model
 
     protected $table = 'reemplazo';
 
+    protected static function booted(): void
+    {
+        static::addGlobalScope('nomina', function (Builder $query) {
+            $query->whereNull('idHorarioMateria');
+        });
+    }
 
     public function contratoReemplazo()
     {
@@ -22,12 +29,10 @@ class Reemplazo extends Model
         return $this->belongsTo(Contract::class, 'idContratoTrabajador');
     }
 
-
     public function cargo()
     {
         return $this->belongsTo(Rol::class, 'idCargo');
     }
-
 
     public function pago()
     {

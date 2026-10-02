@@ -52,7 +52,7 @@ class KeyUtil
      * Get last contract active
      * @return Contract|object|\Illuminate\Database\Eloquent\Model|null
      */
-    public static function lastContractActive(): Contract
+    public static function lastContractActive(): ?Contract
     {
         $contract = Contract::where('idpersona', self::user()->idpersona)
             ->where('idEstado', 1)
@@ -62,5 +62,23 @@ class KeyUtil
         return $contract;
     }
 
-       
+    /**
+     * Check if user has any of the given roles
+     */
+    public static function hasRole($roles)
+    {
+        if (is_string($roles)) {
+            $roles = [$roles];
+        }
+        
+        $userRoles = self::roles();
+        foreach ($roles as $role) {
+            foreach ($userRoles as $userRole) {
+                if (stripos($userRole, $role) !== false) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 }

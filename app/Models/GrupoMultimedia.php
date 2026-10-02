@@ -9,14 +9,20 @@ class GrupoMultimedia extends Model
 {
     use HasFactory;
 
+    protected $table = "grupo_multimedia";
 
-    protected $table = "grupoMultimedia";
+    protected $fillable = [
+        'nombreGrupo',
+        'tipo',
+        'descripcion',
+        'idCompany',
+        'idUser',
+    ];
 
     public function gruposMultimedia()
     {
         return $this->hasMany(MultimediaHistorias::class, 'idGrupoMultimedia');
     }
-
 
     public function empresa()
     {
@@ -27,8 +33,4 @@ class GrupoMultimedia extends Model
     {
         return $this->belongsTo(User::class, 'idUser');
     }
-
-
-
-
 }

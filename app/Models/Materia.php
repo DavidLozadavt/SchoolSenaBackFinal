@@ -27,7 +27,8 @@ class Materia extends Model
         'codigo', 
         'creditos', 
         'horas',
-        'idCompany'
+        'idCompany',
+        'idCategoriaFormacion'
     ];
 
     protected $hidden = [
@@ -73,5 +74,10 @@ public function asignacionMateriaProgramas()
 
     public function areaConocimiento () {
         return $this->belongsTo(AreaConocimiento::class, 'idAreaConocimiento');
+    }
+
+    public function categoriaFormacion()
+    {
+        return $this->belongsTo(CategoriaFormacion::class, 'idCategoriaFormacion');
     }
 }

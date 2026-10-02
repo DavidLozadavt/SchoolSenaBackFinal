@@ -1,0 +1,110 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
+
+class Acta extends Model
+{
+    use HasFactory;
+
+    protected $table = 'acta';
+
+    protected $appends = ['rutaDocumentoUrl'];
+
+    protected $fillable = [
+        'nombre',
+        'fecha',
+        'horaInicio',
+        'horaFin',
+        'tipoActa',
+        'observacion',
+        'lugar',
+        'direccion',
+        'idCiudad',
+        'idFicha',
+        'idContrato',
+        'documento',
+    ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array
+     */
+    protected $casts = [
+        'nombre' => 'string',
+        'fecha' => 'date',
+        'horaInicio' => 'string',
+        'horaFin' => 'string',
+        'tipoActa' => 'string',
+        'observacion' => 'string',
+        'lugar' => 'string',
+        'direccion' => 'string',
+        'idCiudad' => 'integer',
+        'idFicha' => 'integer',
+        'idContrato' => 'integer',
+        'documento' => 'string',
+    ];
+
+    // Relaciones
+    public function ciudad()
+    {
+        return $this->belongsTo(City::class, 'idCiudad');
+    }
+
+    public function ficha()
+    {
+        return $this->belongsTo(Ficha::class, 'idFicha');
+    }
+
+    public function contrato()
+    {
+        return $this->belongsTo(Contract::class, 'idContrato');
+    }
+
+    public function agenda()
+    {
+        return $this->hasMany(AgendaActa::class, 'idacta');
+    }
+
+    public function objetivos()
+    {
+        return $this->hasMany(ObjetivoActa::class, 'idacta');
+    }
+
+    public function asistencias()
+    {
+        return $this->hasMany(AsistenciaActa::class, 'idActa');
+    }
+
+    public function conclusiones()
+    {
+        return $this->hasMany(ConclusionActa::class, 'idacta');
+    }
+
+    public function compromisos()
+    {
+        return $this->hasMany(CompromisoActa::class, 'idacta');
+    }
+
+    public function anexos()
+    {
+        return $this->hasMany(AnexoActa::class, 'idacta');
+    }
+
+    public function getRutaDocumentoUrlAttribute()
+    {
+        if (!$this->documento) return null;
+
+        if (str_starts_with($this->documento, 'http')) {
+            return $this->documento;
+        }
+
+        // Igual que Company: url() detecta el dominio del servidor automáticamente
+        $storagePath = str_replace('public/', '/storage/', $this->documento);
+        return url($storagePath);
+    }
+}

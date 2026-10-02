@@ -9,27 +9,34 @@ class MultimediaHistorias extends Model
 {
     use HasFactory;
 
-    protected $table = "multimediaHistorias";
+    protected $table = "multimedia_historias";
     const RUTA_DEFAULT = "/default/logoweb.png";
     const RUTA_MULTIMEDIA = "multimedia-historias";
+
+    protected $fillable = [
+        'idGrupoMultimedia',
+        'idCompany',
+        'idUser',
+        'urlMultimedia',
+        'cancion',
+        'descripcion',
+        'tipo',
+    ];
 
     protected $casts = [
         'idUser' => 'int',
     ];
 
+    protected $appends = ['urlMultimediaFull'];
 
-    protected $appends = ['urlMultimedia'];
-
-
-    public function getUrlMultimediaAttribute()
+    public function getUrlMultimediaFullAttribute()
     {
-        if (
-            isset($this->attributes['urlMultimedia']) &&
-            !empty($this->attributes['urlMultimedia'])
-        ) {
-            return url($this->attributes['urlMultimedia']);
+        $raw = $this->attributes['urlMultimedia'] ?? null;
+        if (!$raw) return url(self::RUTA_DEFAULT);
+        if (str_starts_with($raw, 'http://') || str_starts_with($raw, 'https://')) {
+            return $raw;
         }
-        return url(self::RUTA_DEFAULT);
+        return url($raw);
     }
 
     public function user()
@@ -41,10 +48,9 @@ class MultimediaHistorias extends Model
     {
         return $this->belongsTo(Company::class, 'idCompany');
     }
-    public function gruposMultimedia()
+
+    public function grupoMultimedia()
     {
-        return $this->hasMany(MultimediaHistorias::class, 'idGrupoMultimedia');
+        return $this->belongsTo(GrupoMultimedia::class, 'idGrupoMultimedia');
     }
-
-
 }

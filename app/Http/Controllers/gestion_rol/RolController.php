@@ -8,6 +8,7 @@ use App\Models\Salario;
 use App\Permission\PermissionConst;
 use App\Util\KeyUtil;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Session;
 use Spatie\Permission\Contracts\Permission;
 use Spatie\Permission\Models\Role;
@@ -44,8 +45,11 @@ class RolController extends Controller
 
         $rol = new Rol();
         $rol->guard_name = 'web';
-        $rol->company_id = KeyUtil::idCompany();
-        $rol->name = $request->input('name');;
+        // Migración 2026_02_23 puede haber eliminado company_id de `roles`.
+        if (Schema::hasColumn('roles', 'company_id')) {
+            $rol->company_id = KeyUtil::idCompany();
+        }
+        $rol->name = $request->input('name');
         $rol->save();
 
         $salario = new Salario();
@@ -55,7 +59,12 @@ class RolController extends Controller
         $salario->rol_id = $rol->id;
         $salario->save();
 
-        return response()->json($rol->load(['company']), 201);
+        $with = ['salario'];
+        if (Schema::hasColumn('roles', 'company_id')) {
+            $with[] = 'company';
+        }
+
+        return response()->json($rol->load($with), 201);
     }
 
     /**

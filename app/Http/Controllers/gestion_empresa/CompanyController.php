@@ -144,6 +144,25 @@ class CompanyController extends Controller
 
             $company->save();
 
+            // --- Sincronización desde School a NexiService (Microservicio) ---
+            try {
+                $nexiCompany = \App\Models\NexiCompany::where('nit', $company->nit)->first();
+                if ($nexiCompany && $nexiCompany->idCategoriaEmpresa == 7) {
+                    $nexiCompany->update([
+                        'razonSocial'        => $company->razonSocial,
+                        'digitoVerificacion' => $company->digitoVerificacion ?? 0,
+                        'representanteLegal' => $company->representanteLegal,
+                        'direccion'          => $company->direccion,
+                        'email'              => $company->email,
+                        'telefono'           => $company->telefono,
+                        'rutaLogo'           => $company->rutaLogoUrl,
+                        'updated_at'         => now(),
+                    ]);
+                }
+            } catch (\Throwable $se) {
+                \Log::error('Error sincronizando datos del colegio al NexiService: ' . $se->getMessage());
+            }
+
             return response()->json(['message' => 'Empresa actualizada con éxito', 'company' => $company]);
         } catch (\Throwable $e) {
             return response()->json(['error' => 'Error al actualizar la empresa: ' . $e->getMessage()], 500);

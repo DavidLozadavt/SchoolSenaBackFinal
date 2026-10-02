@@ -4,24 +4,36 @@ namespace App\Http\Controllers\gestion_usuario;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivationCompanyUser;
+use App\Models\Contract;
 use App\Models\GrupoChat;
 use App\Models\Person;
+use App\Models\Status;
 use App\Models\User;
 use App\Util\KeyUtil;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Session as FacadesSession;
 
 class UserController extends Controller
 {
     public function getUsers()
     {
-        $id =  KeyUtil::idCompany();
-        $user = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
-            ->where('company_id', $id)
-            ->get();
+        $id = KeyUtil::idCompany();
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
+            ->where('company_id', $id);
+
+        $currentUser = auth('api')->user() ?? auth()->user();
+        if ($currentUser && !empty($currentUser->idCentroFormacion)) {
+            $query->whereHas('user', function ($q) use ($currentUser) {
+                $q->where('idCentroFormacion', $currentUser->idCentroFormacion);
+            });
+        }
+
+        $user = $query->get();
 
         return response()->json($user);
     }
@@ -32,25 +44,64 @@ class UserController extends Controller
         $id = KeyUtil::idCompany();
         $search = $request->input('search', '');
         $perPage = $request->input('per_page', 15);
+        $stateId = $request->input('state_id', '');
+        $roleId = $request->input('role_id', '');
+        $sortOrder = $request->input('sort_order', '1');
+
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
+            ->where('company_id', $id);
+        $idCentroFormacion = $request->input('idCentroFormacion');
+
+        $currentUser = auth('api')->user() ?? auth()->user();
+        if ($currentUser && !empty($currentUser->idCentroFormacion)) {
+            $idCentroFormacion = $currentUser->idCentroFormacion;
+        }
 
         $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
             ->where('company_id', $id);
 
-        if (!empty($search)) {
-            $query->whereHas('user.persona', function ($q) use ($search) {
-                $q->where('nombre1', 'like', "%{$search}%")
-                    ->orWhere('apellido1', 'like', "%{$search}%")
-                    ->orWhere('nombre2', 'like', "%{$search}%")
-                    ->orWhere('apellido2', 'like', "%{$search}%")
-                    ->orWhere('identificacion', 'like', "%{$search}%");
+        if (!empty($idCentroFormacion)) {
+            $query->whereHas('user', function ($q) use ($idCentroFormacion) {
+                $q->where('idCentroFormacion', $idCentroFormacion);
             });
+        }
+
+        if (!empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->whereHas('user.persona', function ($q2) use ($search) {
+                    $q2->where('nombre1', 'like', "%{$search}%")
+                        ->orWhere('apellido1', 'like', "%{$search}%")
+                        ->orWhere('nombre2', 'like', "%{$search}%")
+                        ->orWhere('apellido2', 'like', "%{$search}%")
+                        ->orWhere('identificacion', 'like', "%{$search}%");
+                })
+                    ->orWhereHas('roles', function ($q2) use ($search) {
+                        $q2->where('name', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        if (!empty($stateId)) {
+            $query->where('state_id', $stateId);
+        }
+
+        if (!empty($roleId)) {
+            $query->whereHas('roles', function ($q) use ($roleId) {
+                $q->where('id', $roleId);
+            });
+        }
+
+        if ($sortOrder === '3') {
+            $query->orderBy('id', 'asc');
+        } else {
+            $query->orderBy('id', 'desc');
         }
 
         $users = $query->paginate($perPage);
 
         return response()->json($users);
     }
-   public function updateActivationCompanyUser(Request $request, $id)
+    public function updateActivationCompanyUser(Request $request, $id)
     {
         $userData = $request->input('user');
         $personaData = $userData['persona'];
@@ -77,8 +128,8 @@ class UserController extends Controller
         $persona->identificacion = $personaData['identificacion'];
         $persona->save();
 
-      // Inicializar variable
-            $passwordUpdated = false;
+        // Inicializar variable
+        $passwordUpdated = false;
 
 // Solo actualizar contraseña si se proporciona
         if ($request->input('contrasena')) {
@@ -143,18 +194,18 @@ class UserController extends Controller
                 ->where('role_id', $docenteUpRoleId)
                 ->update(['role_id' => $docenteRoleId]);
         }
-        
-       // $contrato = $persona->contrato;
-       // if ($contrato) {
-          //  $salario = Salario::where('rol_id', $docenteRoleId)->first();
-            //if (!$salario) {
-              //  $salario = new Salario();
-                //$salario->rol_id = $docenteRoleId;
-                //$salario->valor = 0;
-                //$salario->save();
-            //}
-            //$contrato->salario()->associate($salario);
-            //$contrato->save();
+
+        // $contrato = $persona->contrato;
+        // if ($contrato) {
+        //  $salario = Salario::where('rol_id', $docenteRoleId)->first();
+        //if (!$salario) {
+        //  $salario = new Salario();
+        //$salario->rol_id = $docenteRoleId;
+        //$salario->valor = 0;
+        //$salario->save();
+        //}
+        //$contrato->salario()->associate($salario);
+        //$contrato->save();
         //}
 
         $activacion->load(
@@ -175,21 +226,21 @@ class UserController extends Controller
         return response()->json($response, 200);
     }
 
-    
-   public function checkProfileAccess()
+
+    public function checkProfileAccess()
     {
         $user = auth()->user();
-        
+
         if (!$user) {
             return response()->json(['error' => 'Unauthorized'], 401);
         }
-        
+
         $activationUser = ActivationCompanyUser::where('user_id', $user->id)->first();
-        
+
         if (!$activationUser) {
             return response()->json(['error' => 'User activation not found'], 404);
         }
-        
+
         return response()->json([
             'needs_password_update' => $activationUser->state_id == 18
         ]);
@@ -241,24 +292,71 @@ class UserController extends Controller
         if ($request->hasFile('rutaFotoFile')) {
             return '/storage/' .
                 $request->file('rutaFotoFile')
-                ->store(Person::RUTA_FOTO, ['disk' => 'public']);
+                    ->store(Person::RUTA_FOTO, ['disk' => 'public']);
         }
 
         return $rutaActual;
     }
+
+    private function storeFirmaDigital(Request $request, $firmaActual = null)
+    {
+        if ($request->hasFile('firmaDigitalFile')) {
+
+            return '/storage/' .
+                $request->file('firmaDigitalFile')
+                    ->store('firmas', ['disk' => 'public']);
+        }
+
+        return $firmaActual;
+    }
+
+    /**
+     * El front envía FormData: los campos numéricos opcionales llegan como '' y en MySQL estricto eso provoca error 500.
+     */
+    private function nullableIntFromRequest($value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        return null;
+    }
+
 
 
 
 
     public function asignation(Request $request)
     {
-
         DB::table('model_has_roles')
             ->where('model_id', $request->idActivation)
             ->delete();
         $user = ActivationCompanyUser::find($request->input('idActivation'));
-        $user->assignRole($request->input('roles', []));
-        return $user;
+
+        if (!$user) {
+            return response()->json(['error' => 'Activación no encontrada'], 404);
+        }
+
+        $rolesInput = $request->input('roles', []);
+        $rolesToAssign = [];
+        foreach ($rolesInput as $r) {
+            if (is_string($r) && !is_numeric($r)) {
+                $roleObj = \Spatie\Permission\Models\Role::firstOrCreate([
+                    'name' => $r,
+                    'guard_name' => 'web'
+                ]);
+                $rolesToAssign[] = $roleObj->id;
+            } else {
+                $rolesToAssign[] = (int) $r;
+            }
+        }
+
+        $user->assignRole($rolesToAssign);
+        $user->load('roles');
+        return response()->json($user);
     }
 
 
@@ -340,22 +438,117 @@ class UserController extends Controller
 
     public function updatePersona(Request $request)
     {
-        $persona = Person::findOrFail($request->user()->idpersona);
+        $user = auth('api')->user() ?? $request->user();
+        if (!$user || $user->idpersona === null || $user->idpersona === '') {
+            return response()->json([
+                'message' => 'No autenticado o usuario sin persona asociada'
+            ], 401);
+        }
 
+        $persona = Person::find($user->idpersona);
+        if (!$persona) {
+            return response()->json([
+                'message' => 'Persona no encontrada'
+            ], 404);
+        }
 
-        $persona->rutaFoto = $this->storeLogoPersona($request, $persona->rutaFoto);
+        try {
+            $persona->rutaFoto = $this->storeLogoPersona($request, $persona->rutaFoto);
+            // Firma digital es opcional; la migración puede no estar aplicada en todas las BDs.
+            if (Schema::hasColumn($persona->getTable(), 'firmaDigital')) {
+                $persona->firmaDigital = $this->storeFirmaDigital($request, $persona->firmaDigital);
+            }
 
+            $persona->nombre1 = $request->input('nombre1');
+            $persona->nombre2 = $request->input('nombre2');
+            $persona->apellido1 = $request->input('apellido1');
+            $persona->apellido2 = $request->input('apellido2');
+            $persona->fechaNac = $request->input('fechaNac');
 
-        $persona->email = $request->input('email');
-        $persona->telefonoFijo = $request->input('telefonoFijo');
-        $persona->celular = $request->input('celular');
-        $persona->idCiudadUbicacion = $request->input('idCiudadUbicacion');
-        $persona->direccion = $request->input('direccion');
-        $persona->rh = $request->input('rh');
-        $persona->sexo = $request->input('sexo');
-        $persona->idTipoIdentificacion = $request->input('idtipoIdentificacion');
+            $persona->email = $request->input('email');
+            $persona->telefonoFijo = $request->input('telefonoFijo');
+            $persona->celular = $request->input('celular');
+            $persona->idCiudadUbicacion = $this->nullableIntFromRequest($request->input('idCiudadUbicacion'));
+            $persona->direccion = $request->input('direccion');
+            $persona->rh = $request->input('rh');
+            $persona->sexo = $request->input('sexo');
+            $persona->idTipoIdentificacion = $this->nullableIntFromRequest($request->input('idtipoIdentificacion'));
 
-        $persona->save();
+            $persona->save();
+
+            // --- Sincronización de datos personales desde School a NexiService ---
+            try {
+                $nexiPerson = \App\Models\NexiPerson::where('identificacion', $persona->identificacion)->first();
+                if ($nexiPerson && in_array(strtolower($nexiPerson->categoria), ['colegio', 'institucion', 'institución'])) {
+                    $nexiPerson->update([
+                        'nombre1' => $persona->nombre1,
+                        'nombre2' => $persona->nombre2,
+                        'apellido1' => $persona->apellido1,
+                        'apellido2' => $persona->apellido2,
+                        'fechaNac' => $persona->fechaNac,
+                        'email' => $persona->email,
+                        'telefonoFijo' => $persona->telefonoFijo,
+                        'celular' => $persona->celular,
+                        'direccion' => $persona->direccion,
+                        'rh' => $persona->rh,
+                        'sexo' => $persona->sexo,
+                        'idTipoIdentificacion' => $persona->idTipoIdentificacion,
+                        'updated_at' => now(),
+                    ]);
+                }
+            } catch (\Throwable $se) {
+                \Log::error('Error sincronizando datos personales al NexiService: ' . $se->getMessage());
+            }
+
+            // --- Sincronización de la Razón Social de la Empresa ---
+            try {
+                $company = \App\Models\Company::find(KeyUtil::idCompany());
+                if ($company) {
+                    $fullName = trim("{$persona->nombre1} {$persona->nombre2} {$persona->apellido1} {$persona->apellido2}");
+                    $fullName = preg_replace('/\s+/', ' ', $fullName);
+                    
+                    $company->update([
+                        'razonSocial' => $fullName
+                    ]);
+
+                    $nexiCompany = \App\Models\NexiCompany::where('nit', $company->nit)->first();
+                    if ($nexiCompany && $nexiCompany->idCategoriaEmpresa == 7) {
+                        $nexiCompany->update([
+                            'razonSocial' => $fullName,
+                            'updated_at' => now(),
+                        ]);
+                    }
+                }
+            } catch (\Throwable $se) {
+                \Log::error('Error sincronizando razonSocial al NexiService desde perfil: ' . $se->getMessage());
+            }
+
+            // Perfil profesional vive en `contrato`; si el usuario tiene contrato activo, lo actualiza desde su perfil.
+            if ($request->has('perfilProfesional')) {
+                $contratoActivo = Contract::where('idpersona', $persona->id)
+                    ->where('idEstado', Status::ID_ACTIVE)
+                    ->orderByDesc('fechaContratacion')
+                    ->first();
+
+                if ($contratoActivo) {
+                    $val = $request->input('perfilProfesional');
+                    $trimmed = is_string($val) ? trim($val) : '';
+                    $contratoActivo->perfilProfesional = $trimmed !== '' ? $trimmed : 'N/A';
+                    $contratoActivo->save();
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::error('updatePersona', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            return response()->json([
+                'message' => 'Error al actualizar los datos de la persona.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
 
         return response()->json($persona);
     }
@@ -369,10 +562,18 @@ class UserController extends Controller
      */
     public function getUsersAndGroups(Request $request): JsonResponse
     {
-        $activationCompanyUsers = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
             ->where('company_id', KeyUtil::idCompany())
-            ->active()
-            ->get();
+            ->active();
+
+        $currentUser = auth('api')->user() ?? auth()->user();
+        if ($currentUser && !empty($currentUser->idCentroFormacion)) {
+            $query->whereHas('user', function ($q) use ($currentUser) {
+                $q->where('idCentroFormacion', $currentUser->idCentroFormacion);
+            });
+        }
+
+        $activationCompanyUsers = $query->get();
 
         $loggedUserId = auth()->user()->id;
         $activationUser = ActivationCompanyUser::where('user_id', $loggedUserId)->first();
@@ -387,7 +588,7 @@ class UserController extends Controller
 
         return response()->json([
             'activationCompanyUsers' => $activationCompanyUsers,
-            'groups'                 => $groups,
+            'groups' => $groups,
         ]);
     }
 

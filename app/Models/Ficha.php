@@ -12,7 +12,6 @@ class Ficha extends Model
     protected $table = 'ficha';
 
     protected $fillable = [
-        'idJornada',
         'idAsignacion',
         'codigo',
         'idInstructorLider',
@@ -20,6 +19,7 @@ class Ficha extends Model
         'idInfraestructura',
         'idSede',
         'idRegional',
+        'idGrado',
         'porcentajeEjecucion',
     ];
 
@@ -28,11 +28,6 @@ class Ficha extends Model
     | Relaciones
     |--------------------------------------------------------------------------
     */
-
-    public function jornada()
-    {
-        return $this->belongsTo(Jornada::class, 'idJornada');
-    }
 
     public function asignacion()
     {
@@ -66,5 +61,14 @@ class Ficha extends Model
     public function horarios()
     {
         return $this->hasMany(HorarioMateria::class, 'idFicha', 'id');
+    }
+    public function actas()
+    {
+        return $this->hasMany(Acta::class, 'idFicha');
+    }
+
+    public function grado()
+    {
+        return $this->belongsTo(Grado::class, 'idGrado');
     }
 }

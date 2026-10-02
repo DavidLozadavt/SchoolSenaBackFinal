@@ -83,7 +83,7 @@
                 <tr>
                     <td style="width: 596px; vertical-align: top; padding-left: 0; padding-right: 0; padding-top: 15px; padding-bottom: 15px;" width="596">
                         <!-- Tu logotipo está aquí -->
-                        <img style="width: 220px; max-width: 220px; height: auto; text-align: center; color: #ffffff;" alt="Logo" src="https://admin.virtualt.org/default/logoweb.png" align="center" width="220">
+                        <img style="width: 220px; max-width: 220px; height: auto; text-align: center; color: #ffffff;" alt="Logo" src="https://sena-school.virtualt.org/media/app/logoweb.png" align="center" width="220">
                     </td>
                 </tr>
             </tbody>

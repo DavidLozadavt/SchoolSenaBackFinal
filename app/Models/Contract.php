@@ -22,6 +22,15 @@ class Contract extends Model
     protected $table = "contrato";
     public static $snakeAttributes = false;
 
+    protected $fillable = [
+        'supervisorContrato',
+        'cargoSupervisor',
+        'formaDePago',
+        'objetoContrato',
+        'siif',
+        'descripcionFormaPago'
+    ];
+
     public function persona()
     {
         return $this->belongsTo(Person::class, 'idpersona');
@@ -84,7 +93,7 @@ class Contract extends Model
         return $this->belongsTo(EntidadesSeguridadSocial::class, 'idPension');
     }
 
-    public function pensionMovilidad() 
+    public function pensionMovilidad()
     {
         return $this->belongsTo(EntidadesSeguridadSocial::class, 'idPensionMovilidad');
     }
@@ -185,5 +194,43 @@ class Contract extends Model
     public function horarioMateria()
     {
         return $this->hasMany(HorarioMateria::class, 'idContrato', 'id');
+    }
+    public function asignacionContratoAreaConocimiento()
+    {
+        return $this->hasMany(AsignacionContratoAreaConocimiento::class, 'idContrato', 'id');
+    }
+    public function centroFormacion()
+    {
+        return $this->belongsTo(CentrosFormacion::class, 'idCentroFormacion');
+    }
+    public function comisiones()
+    {
+        return $this->hasMany(ComisionInstructor::class, 'idContrato');
+    }
+    /**
+     * Relación con Actividades del Contrato
+     */
+    public function actividades()
+    {
+        return $this->hasMany(ActividadContrato::class, 'idContrato', 'id');
+    }
+
+    public function gcs()
+    {
+        return $this->hasMany(GC::class, 'idContrato', 'id');
+    }
+
+    public function asignacionSesion(): HasMany
+    {
+        return $this->hasMany(AsignacionSesion::class, 'idContrato', 'id');
+    }
+    public function actas()
+    {
+        return $this->hasMany(Acta::class, 'idContrato');
+    }
+    
+    public function asignacionCategoriaFormacionContrato() : HasMany
+    {
+        return $this->hasMany(AsignacionCategoriaFormacionContrato::class, 'idContrato', 'id');
     }
 }

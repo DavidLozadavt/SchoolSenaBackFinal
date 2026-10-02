@@ -29,67 +29,101 @@ class Person extends Model
         "perfil",
         "sexo",
         "rh",
+        "ciudadExpedicion",
+        "firmaDigital",
     ];
     const RUTA_FOTO = "persona";
     const RUTA_FOTO_DEFAULT = "/default/user.svg";
 
-    protected $appends = ['rutaFotoUrl'];
+    protected $appends = ['rutaFotoUrl', 'ciudadExpedicionInfo', 'firmaDigitalUrl'];
 
     public function getRutaFotoUrlAttribute()
     {
         if (
-            isset($this->attributes['rutaFoto']) &&
-            isset($this->attributes['rutaFoto'][0])
+        isset($this->attributes['rutaFoto']) &&
+        isset($this->attributes['rutaFoto'][0])
         ) {
             return url($this->attributes['rutaFoto']);
         }
         return url(self::RUTA_FOTO_DEFAULT);
     }
 
+    public function getFirmaDigitalUrlAttribute()
+    {
+        if (
+            isset($this->attributes['firmaDigital']) &&
+            isset($this->attributes['firmaDigital'][0])
+        ) {
+            return url($this->attributes['firmaDigital']);
+        }
+        return null;
+    }
+
+    /**
+     * Evita que el JSON mezcle la FK `ciudadExpedicion` con la relación homónima:
+     * el front usa esta clave (snake: ciudad_expedicion_info) para mostrar la ciudad.
+     */
+    public function getCiudadExpedicionInfoAttribute(): ?array
+    {
+        if (! $this->relationLoaded('ciudadExpedicionRel')) {
+            return null;
+        }
+        $city = $this->getRelation('ciudadExpedicionRel');
+        if (! $city) {
+            return null;
+        }
+
+        return [
+            'id' => $city->id,
+            'descripcion' => $city->descripcion ?? '',
+            'codigo' => $city->codigo ?? '',
+        ];
+    }
+
     public function usuario()
     {
-        return $this->hasOne(User::class, 'idpersona');
+        return $this->hasOne(User::class , 'idpersona');
     }
 
     public function ubicacion()
     {
-        return $this->belongsTo(City::class, 'idCiudadUbicacion');
+        return $this->belongsTo(City::class , 'idCiudadUbicacion');
     }
 
     public function ciudad()
     {
-        return $this->belongsTo(City::class, 'idCiudad');
+        return $this->belongsTo(City::class , 'idCiudad');
     }
 
     public function ciudadNac()
     {
-        return $this->belongsTo(City::class, 'idCiudadNac');
+        return $this->belongsTo(City::class , 'idCiudadNac');
     }
 
     public function ciudadUbicacion()
     {
-        return $this->belongsTo(City::class, 'idCiudadUbicacion');
+        return $this->belongsTo(City::class , 'idCiudadUbicacion');
     }
 
     public function tipoIdentificacion()
     {
-        return $this->belongsTo(IdentificationType::class, 'idTipoIdentificacion');
+        return $this->belongsTo(IdentificationType::class , 'idTipoIdentificacion');
     }
 
     public function contrato()
     {
-        return $this->hasMany(Contract::class, 'idpersona');
+        return $this->hasMany(Contract::class , 'idpersona');
     }
 
     public function asignacionesConductor()
     {
-        return $this->hasMany(AsignacionConductor::class, 'idConductor');
+        return $this->hasMany(AsignacionConductor::class , 'idConductor');
     }
 
 
     public function contratoActivo()
     {
-        return $this->hasOne(Contract::class, 'idpersona')
+        return $this->hasOne(Contract::class , 'idpersona')
             ->where('idEstado', 1)
             ->latest('fechaContratacion');
     }
@@ -97,29 +131,37 @@ class Person extends Model
 
     public function observacionesPreocupacionales()
     {
-        return $this->hasMany(ObservacionPreocupacional::class, 'idPersona');
+        return $this->hasMany(ObservacionPreocupacional::class , 'idPersona');
     }
 
 
     public function restricciones()
     {
-        return $this->hasMany(Restriccion::class, 'idPersona');
+        return $this->hasMany(Restriccion::class , 'idPersona');
     }
 
 
     public function personaNatural()
     {
-        return $this->hasOne(InformacionPersonaNatural::class, 'idPersona', 'id');
+        return $this->hasOne(InformacionPersonaNatural::class , 'idPersona', 'id');
     }
 
       public function asignacionPropietario()
     {
-        return $this->hasOne(AsignacionPropietario::class, 'idPropietario', 'id');
+        return $this->hasOne(AsignacionPropietario::class , 'idPropietario', 'id');
     }
 
 
     public function referenciasPersonales()
     {
-        return $this->hasMany(ReferenciaPersonal::class, 'idPersona');
+        return $this->hasMany(ReferenciaPersonal::class , 'idPersona');
+    }
+    public function contracts()
+    {
+        return $this->hasMany(Contract::class , 'idpersona');
+    }
+    public function ciudadExpedicionRel()
+    {
+        return $this->belongsTo(City::class , 'ciudadExpedicion');
     }
 }
