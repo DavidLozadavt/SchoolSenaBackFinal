@@ -506,7 +506,7 @@ class UserController extends Controller
                 if ($company) {
                     $fullName = trim("{$persona->nombre1} {$persona->nombre2} {$persona->apellido1} {$persona->apellido2}");
                     $fullName = preg_replace('/\s+/', ' ', $fullName);
-                    
+
                     $company->update([
                         'razonSocial' => $fullName
                     ]);

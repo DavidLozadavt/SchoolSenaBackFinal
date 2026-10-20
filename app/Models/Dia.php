@@ -17,10 +17,10 @@ class Dia extends Model
 
   public $timestamps = false;
 
-/*   public function jornadas(): BelongsToMany
+  public function jornadas(): BelongsToMany
   {
-    return $this->belongsToMany(Jornada::class, 'asignacionDiaJornada', 'idDia', 'idJornada');
-  } */
+    return $this->belongsToMany(Jornada::class, 'asignaciondiajornada', 'idDia', 'idJornada');
+  }
 
   public function horariosMateria(): HasMany
   {

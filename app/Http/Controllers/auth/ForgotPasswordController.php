@@ -8,7 +8,7 @@ use App\Models\PasswordReset;
 use App\Models\usuario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\DB; 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
@@ -97,9 +97,9 @@ class ForgotPasswordController extends Controller
 
             $userExists = DB::table('persona')->where('email', $email)->exists()
                 || DB::table('usuario')->where('email', $email)->exists();
-            
+
             $responseMessage = 'Si el correo existe en nuestro sistema, recibirás un código de verificación en tu correo electrónico.';
-            
+
             if (!$userExists) {
                 \Log::info('Usuario no existe (respuesta segura)');
                 return response()->json([
@@ -114,7 +114,7 @@ class ForgotPasswordController extends Controller
                 ->update(['valid' => 0]);
 
             $otp = rand(100000, 999999);
-            
+
             \Log::info('OTP generado:', ['otp' => $otp]);
 
             DB::table('otps')->insert([
@@ -132,7 +132,7 @@ class ForgotPasswordController extends Controller
                     $message->to($email)
                             ->subject('Código de verificación - Recuperación de contraseña');
                 });
-                
+
                 \Log::info('Email enviado exitosamente');
             } catch (\Exception $e) {
                 \Log::error('Error enviando email: ' . $e->getMessage());
@@ -191,9 +191,9 @@ class ForgotPasswordController extends Controller
             $createdAt = strtotime($otpRecord->created_at);
             $now = time();
             $minutesPassed = floor(($now - $createdAt) / 60);
-            
+
             \Log::info('Tiempo transcurrido:', ['minutes' => $minutesPassed, 'validity' => $otpRecord->validity]);
-            
+
             if ($minutesPassed > $otpRecord->validity) {
                 \Log::warning('OTP expirado');
                 DB::table('otps')->where('id', $otpRecord->id)->update(['valid' => 0]);
@@ -206,7 +206,7 @@ class ForgotPasswordController extends Controller
             DB::table('otps')->where('id', $otpRecord->id)->update(['valid' => 0]);
 
             $resetToken = Str::random(64);
-            
+
             \Log::info('Token generado:', ['token' => $resetToken]);
 
             DB::table('password_resets')->where('email', $email)->delete();
@@ -229,7 +229,7 @@ class ForgotPasswordController extends Controller
                 'file' => $e->getFile(),
                 'line' => $e->getLine()
             ]);
-            
+
             return response()->json([
                 'message' => 'Error interno del servidor',
                 'error' => 'server_error'
@@ -298,9 +298,9 @@ class ForgotPasswordController extends Controller
         $createdAt = strtotime($resetRecord->created_at);
         $now = time();
         $hoursPassed = floor(($now - $createdAt) / 3600);
-        
+
         \Log::info('Horas desde creación:', ['hours' => $hoursPassed]);
-        
+
         if ($hoursPassed > 24) {
             \Log::warning('Token expirado');
             DB::table('password_resets')->where('email', $email)->delete();
@@ -321,21 +321,21 @@ class ForgotPasswordController extends Controller
         try {
             // Buscar el usuario en la tabla users
             $user = \App\Models\User::where('email', $email)->first();
-            
+
             if ($user) {
                 \Log::info('Usuario encontrado en tabla users:', ['user_id' => $user->id]);
-                
+
                 // Buscar la activación del usuario
                 $activacion = \App\Models\ActivationCompanyUser::where('user_id', $user->id)->first();
-                
+
                 if ($activacion && $activacion->state_id == 18) {
                     \Log::info('Cambiando state_id de 18 a 1 para usuario:', ['user_id' => $user->id]);
-                    
+
                     $activacion->state_id = 1;
                     $activacion->save();
-                    
+
                     \Log::info('State_id actualizado exitosamente');
-                    
+
                     // Devolver response indicando que el proceso se completó
                     DB::table('password_resets')->where('email', $email)->delete();
                     DB::table('otps')->where('identifier', $email)->delete();

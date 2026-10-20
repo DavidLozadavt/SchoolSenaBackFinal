@@ -4,11 +4,15 @@ namespace App\Http\Controllers\gestion_jornadas;
 
 use App\Http\Controllers\Controller;
 use App\Models\Jornada;
+use App\Models\CentrosFormacion;
+use App\Models\Dia;
 use App\Models\TipoJornada;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use Illuminate\Validation\ValidationException;
 
 class JornadaController extends Controller
 {
@@ -20,7 +24,7 @@ class JornadaController extends Controller
                 'nombreJornada' => 'required|string|max:255',
                 'descripcion' => 'nullable|string',
                 'dias' => 'required|array|min:1',
-                'dias.*' => 'in:Lunes,Martes,Miércoles,Jueves,Viernes,Sábado,Domingo',
+                'dias.*' => 'required',
                 'horaInicial' => 'required|date_format:H:i',
                 'horaFinal' => 'required|date_format:H:i',
             ]);
@@ -35,44 +39,46 @@ class JornadaController extends Controller
                 ], 400);
             }
 
-            return DB::transaction(function () use ($validated, $idEmpresa) {
+            $idCentroFormacion = $this->authenticatedCenterId();
+            if (!$idCentroFormacion) {
+                return $this->noAssignedCenterResponse();
+            }
 
-                // 🧠 Grupo de jornada (bandera)
-                $grupoJornada = (Jornada::where('idEmpresa', $idEmpresa)->max('grupoJornada') ?? 0) + 1;
+            if (!$this->centroBelongsToCompany($idCentroFormacion, (int) $idEmpresa)) {
+                return response()->json(['message' => 'El centro no pertenece a la empresa activa'], 403);
+            }
 
-                // ⏱️ Cálculo de horas
-                $hInicio = Carbon::createFromFormat('H:i', $validated['horaInicial']);
-                $hFin = Carbon::createFromFormat('H:i', $validated['horaFinal']);
+            $dayIds = $this->resolveDayIds($validated['dias']);
+            $horaInicial = $validated['horaInicial'];
+            $horaFinal = $validated['horaFinal'];
+            $hInicio = Carbon::createFromFormat('H:i', $horaInicial);
+            $hFin = Carbon::createFromFormat('H:i', $horaFinal);
+            if ($hFin <= $hInicio) {
+                $hFin->addDay();
+            }
+            $numeroHoras = $hInicio->diffInMinutes($hFin) / 60;
 
-                if ($hFin <= $hInicio) {
-                    $hFin->addDay();
-                }
+            $jornada = DB::transaction(function () use ($validated, $dayIds, $idCentroFormacion, $numeroHoras) {
+                $jornada = Jornada::create([
+                    'nombreJornada' => $validated['nombreJornada'],
+                    'descripcion' => $validated['descripcion'] ?? null,
+                    'horaInicial' => $validated['horaInicial'],
+                    'horaFinal' => $validated['horaFinal'],
+                    'numeroHoras' => $numeroHoras,
+                    'estado' => 'Activo',
+                    'idCentroFormacion' => $idCentroFormacion,
+                    'idTipoJornada' => TipoJornada::MATERIAS,
+                ]);
+                $jornada->dias()->sync($dayIds);
 
-                $numeroHoras = $hFin->floatDiffInHours($hInicio);
-
-                $jornadas = [];
-
-                foreach ($validated['dias'] as $dia) {
-                    $jornadas[] = Jornada::create([
-                        'nombreJornada' => $validated['nombreJornada'],
-                        'descripcion' => $validated['descripcion'],
-                        'diaSemana' => $dia,
-                        'horaInicial' => $validated['horaInicial'],
-                        'horaFinal' => $validated['horaFinal'],
-                        'numeroHoras' => $numeroHoras,
-                        'estado' => 'Activo',
-                        'grupoJornada' => $grupoJornada,
-                        'idEmpresa' => $idEmpresa,
-                        'idTipoJornada' => TipoJornada::MATERIAS,
-                    ]);
-                }
-
-                return response()->json([
-                    'message' => 'Jornadas de materias creadas exitosamente',
-                    'grupoJornada' => $grupoJornada,
-                    'jornadas' => $jornadas,
-                ], 201);
+                return $jornada->load('dias:id,dia');
             });
+
+            return response()->json([
+                'message' => 'Jornada de materias creada exitosamente',
+                'grupoJornada' => $jornada->id,
+                'jornadas' => [$this->formatJornada($jornada)],
+            ], 201);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -100,54 +106,19 @@ class JornadaController extends Controller
                 ], 400);
             }
 
-            // Obtener todas las jornadas de materias de la empresa
-            $jornadas = Jornada::where('idEmpresa', $idEmpresa)
-                ->where('idTipoJornada', TipoJornada::MATERIAS)
-                ->orderBy('grupoJornada')
+            $idCentroFormacion = $this->authenticatedCenterId();
+            if (!$idCentroFormacion) {
+                return $this->noAssignedCenterResponse();
+            }
+            if (!$this->centroBelongsToCompany($idCentroFormacion, (int) $idEmpresa)) {
+                return response()->json(['message' => 'El centro no pertenece a la empresa activa'], 403);
+            }
+
+            $jornadas = $this->jornadasDelCentro($idCentroFormacion)
+                ->with('dias:id,dia')
                 ->orderBy('horaInicial')
                 ->get()
-                ->groupBy('grupoJornada')
-                ->map(function ($grupo) {
-
-                    $primera = $grupo->first();
-                    if (!$primera)
-                        return null;
-
-                    $tipoHorario = 'No definido';
-
-                    $tipoHorario = 'No definido';
-
-                    if ($primera->horaInicial) {
-                        try {
-                            // Acepta H:i o H:i:s
-                            $horaInicio = Carbon::parse($primera->horaInicial);
-
-                            if ($horaInicio->between(Carbon::createFromTime(5, 0), Carbon::createFromTime(11, 59))) {
-                                $tipoHorario = 'Mañana';
-                            } elseif ($horaInicio->between(Carbon::createFromTime(12, 0), Carbon::createFromTime(17, 59))) {
-                                $tipoHorario = 'Tarde';
-                            } else {
-                                $tipoHorario = 'Nocturna';
-                            }
-                        } catch (\Exception $e) {
-                            $tipoHorario = 'No definido';
-                        }
-                    }
-
-
-                    return [
-                        'grupoJornada' => $primera->grupoJornada,
-                        'nombreJornada' => $primera->nombreJornada,
-                        'descripcion' => $primera->descripcion,
-                        'horaInicial' => $primera->horaInicial,
-                        'horaFinal' => $primera->horaFinal,
-                        'numeroHoras' => $primera->numeroHoras,
-                        'tipoHorario' => $tipoHorario,
-                        'dias' => $grupo->pluck('diaSemana')->values(),
-                        'estado' => $primera->estado,
-                    ];
-                })
-                ->filter() // eliminar posibles grupos vacíos
+                ->map(fn (Jornada $jornada) => $this->formatJornada($jornada))
                 ->values();
 
             return response()->json([
@@ -168,46 +139,37 @@ class JornadaController extends Controller
     public function eliminarJornadaMaterias(Request $request)
     {
         try {
-            // ✅ Validación del grupoJornada
             $validated = $request->validate([
-                'grupoJornada' => 'required|integer|min:1',
+                'id' => 'required_without:grupoJornada|integer|min:1',
+                'grupoJornada' => 'required_without:id|integer|min:1',
             ]);
-
-            $grupoJornada = $validated['grupoJornada'];
-
-            // 🏢 Empresa activa desde token
-            $payload = JWTAuth::parseToken()->getPayload();
-            $idEmpresa = $payload->get('idCompany');
-
+            $idEmpresa = $this->activeCompanyId();
             if (!$idEmpresa) {
-                return response()->json([
-                    'message' => 'No hay empresa activa seleccionada'
-                ], 400);
+                return $this->noActiveCompanyResponse();
             }
 
-            // Buscar jornadas de ese grupo
-            $jornadas = Jornada::where('idEmpresa', $idEmpresa)
-                ->where('grupoJornada', $grupoJornada)
-                ->get();
-
-            if ($jornadas->isEmpty()) {
-                return response()->json([
-                    'message' => "No se encontraron jornadas para el grupoJornada $grupoJornada"
-                ], 404);
+            $idCentroFormacion = $this->authenticatedCenterId();
+            if (!$idCentroFormacion) {
+                return $this->noAssignedCenterResponse();
+            }
+            if (!$this->centroBelongsToCompany($idCentroFormacion, $idEmpresa)) {
+                return response()->json(['message' => 'El centro no pertenece a la empresa activa'], 403);
             }
 
-            // Eliminación dentro de transacción
-            DB::transaction(function () use ($jornadas) {
-                foreach ($jornadas as $j) {
-                    $j->delete();
-                }
+            $jornadaId = (int) ($validated['id'] ?? $validated['grupoJornada']);
+            $jornada = $this->jornadasDelCentro($idCentroFormacion)->whereKey($jornadaId)->first();
+            if (!$jornada) {
+                return response()->json(['message' => 'No se encontró la jornada'], 404);
+            }
+
+            DB::transaction(function () use ($jornada) {
+                $jornada->dias()->detach();
+                $jornada->delete();
             });
 
-            return response()->json([
-                'message' => "Se eliminaron las jornadas del grupoJornada $grupoJornada exitosamente",
-            ], 200);
+            return response()->json(['message' => 'Jornada eliminada exitosamente']);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Error de validación',
                 'errors' => $e->errors(),
@@ -223,97 +185,76 @@ class JornadaController extends Controller
     public function actualizarJornadaMaterias(Request $request)
     {
         try {
-            // ✅ Validación
             $validated = $request->validate([
-                'grupoJornada' => 'required|integer|min:1',
+                'id' => 'required_without:grupoJornada|integer|min:1',
+                'grupoJornada' => 'required_without:id|integer|min:1',
                 'nombreJornada' => 'required|string|max:255',
                 'descripcion' => 'nullable|string',
                 'dias' => 'required|array|min:1',
-                'dias.*' => 'in:Lunes,Martes,Miércoles,Jueves,Viernes,Sábado,Domingo',
+                'dias.*' => 'required',
                 'horaInicial' => 'required|date_format:H:i',
                 'horaFinal' => 'required|date_format:H:i',
             ]);
-
-            // 🏢 Empresa activa desde token
-            $payload = JWTAuth::parseToken()->getPayload();
-            $idEmpresa = $payload->get('idCompany');
-
+            $idEmpresa = $this->activeCompanyId();
             if (!$idEmpresa) {
-                return response()->json([
-                    'message' => 'No hay empresa activa seleccionada'
-                ], 400);
+                return $this->noActiveCompanyResponse();
             }
 
-            return DB::transaction(function () use ($validated, $idEmpresa) {
+            $idCentroFormacion = $this->authenticatedCenterId();
+            if (!$idCentroFormacion) {
+                return $this->noAssignedCenterResponse();
+            }
+            if (!$this->centroBelongsToCompany($idCentroFormacion, $idEmpresa)) {
+                return response()->json(['message' => 'El centro no pertenece a la empresa activa'], 403);
+            }
 
-                $grupoJornada = $validated['grupoJornada'];
+            $jornadaId = (int) ($validated['id'] ?? $validated['grupoJornada']);
+            $jornada = $this->jornadasDelCentro($idCentroFormacion)->whereKey($jornadaId)->first();
+            if (!$jornada) {
+                return response()->json(['message' => 'No se encontró la jornada'], 404);
+            }
 
-                // Obtener todas las jornadas actuales del grupo
-                $jornadasActuales = Jornada::where('idEmpresa', $idEmpresa)
-                    ->where('grupoJornada', $grupoJornada)
-                    ->get();
+            $dayIds = $this->resolveDayIds($validated['dias']);
+            $diasActuales = $jornada->dias()->pluck('dia')->all();
+            $diasNuevos = Dia::whereIn('id', $dayIds)->pluck('dia')->all();
+            $notificacion = [];
+            $diasAgregados = array_diff($diasNuevos, $diasActuales);
+            $diasEliminados = array_diff($diasActuales, $diasNuevos);
+            if ($diasAgregados) {
+                $notificacion[] = 'Se agregaron días: ' . implode(', ', $diasAgregados);
+            }
+            if ($diasEliminados) {
+                $notificacion[] = 'Se eliminaron días: ' . implode(', ', $diasEliminados);
+            }
 
-                if ($jornadasActuales->isEmpty()) {
-                    return response()->json([
-                        'message' => "No se encontraron jornadas para el grupoJornada $grupoJornada"
-                    ], 404);
-                }
+            $hInicio = Carbon::createFromFormat('H:i', $validated['horaInicial']);
+            $hFin = Carbon::createFromFormat('H:i', $validated['horaFinal']);
+            if ($hFin <= $hInicio) {
+                $hFin->addDay();
+            }
+            $numeroHoras = $hInicio->diffInMinutes($hFin) / 60;
 
-                // ⏱️ Cálculo de horas
-                $hInicio = Carbon::createFromFormat('H:i', $validated['horaInicial']);
-                $hFin = Carbon::createFromFormat('H:i', $validated['horaFinal']);
-                if ($hFin <= $hInicio) $hFin->addDay();
-                $numeroHoras = $hFin->floatDiffInHours($hInicio);
-
-                // Comparar días para notificaciones
-                $diasActuales = $jornadasActuales->pluck('diaSemana')->toArray();
-                $diasNuevos = $validated['dias'];
-
-                $diasAgregados = array_diff($diasNuevos, $diasActuales);
-                $diasEliminados = array_diff($diasActuales, $diasNuevos);
-
-                // Eliminar jornadas que ya no están en los días nuevos
-                Jornada::where('idEmpresa', $idEmpresa)
-                    ->where('grupoJornada', $grupoJornada)
-                    ->whereNotIn('diaSemana', $diasNuevos)
-                    ->delete();
-
-                $actualizadas = [];
-
-                foreach ($diasNuevos as $dia) {
-                    $jornada = Jornada::updateOrCreate(
-                        [
-                            'idEmpresa' => $idEmpresa,
-                            'grupoJornada' => $grupoJornada,
-                            'diaSemana' => $dia
-                        ],
-                        [
-                            'nombreJornada' => $validated['nombreJornada'],
-                            'descripcion' => $validated['descripcion'],
-                            'horaInicial' => $validated['horaInicial'],
-                            'horaFinal' => $validated['horaFinal'],
-                            'numeroHoras' => $numeroHoras,
-                            'estado' => 'Activo',
-                            'idTipoJornada' => TipoJornada::MATERIAS,
-                        ]
-                    );
-                    $actualizadas[] = $jornada;
-                }
-
-                // Preparar mensaje de notificación
-                $notificacion = [];
-                if (!empty($diasAgregados)) $notificacion[] = 'Se agregaron días: ' . implode(', ', $diasAgregados);
-                if (!empty($diasEliminados)) $notificacion[] = 'Se eliminaron días: ' . implode(', ', $diasEliminados);
-
-                return response()->json([
-                    'message' => 'Jornadas actualizadas exitosamente',
-                    'grupoJornada' => $grupoJornada,
-                    'jornadas' => $actualizadas,
-                    'notificacion' => $notificacion
-                ], 200);
+            DB::transaction(function () use ($jornada, $validated, $idCentroFormacion, $dayIds, $numeroHoras) {
+                $jornada->fill([
+                    'nombreJornada' => $validated['nombreJornada'],
+                    'descripcion' => $validated['descripcion'] ?? null,
+                    'horaInicial' => $validated['horaInicial'],
+                    'horaFinal' => $validated['horaFinal'],
+                    'numeroHoras' => $numeroHoras,
+                    'idCentroFormacion' => $idCentroFormacion,
+                ])->save();
+                $jornada->dias()->sync($dayIds);
             });
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+            $jornada->load('dias:id,dia');
+
+            return response()->json([
+                'message' => 'Jornada actualizada exitosamente',
+                'grupoJornada' => $jornada->id,
+                'jornadas' => [$this->formatJornada($jornada)],
+                'notificacion' => $notificacion,
+            ]);
+        } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Error de validación',
                 'errors' => $e->errors(),
@@ -325,51 +266,42 @@ class JornadaController extends Controller
             ], 500);
         }
     }
-    
+
     public function cambiarEstadoJornada(Request $request)
     {
         try {
-            // ✅ Validación simple
             $validated = $request->validate([
-                'grupoJornada' => 'required|integer|min:1',
+                'id' => 'required_without:grupoJornada|integer|min:1',
+                'grupoJornada' => 'required_without:id|integer|min:1',
             ]);
-
-            // 🏢 Empresa activa desde token
-            $payload = JWTAuth::parseToken()->getPayload();
-            $idEmpresa = $payload->get('idCompany');
-
+            $idEmpresa = $this->activeCompanyId();
             if (!$idEmpresa) {
-                return response()->json([
-                    'message' => 'No hay empresa activa seleccionada'
-                ], 400);
+                return $this->noActiveCompanyResponse();
             }
 
-            $grupoJornada = $validated['grupoJornada'];
-
-            // Obtener todas las jornadas del grupo
-            $jornadas = Jornada::where('idEmpresa', $idEmpresa)
-                ->where('grupoJornada', $grupoJornada)
-                ->get();
-
-            if ($jornadas->isEmpty()) {
-                return response()->json([
-                    'message' => "No se encontraron jornadas para el grupoJornada $grupoJornada"
-                ], 404);
+            $idCentroFormacion = $this->authenticatedCenterId();
+            if (!$idCentroFormacion) {
+                return $this->noAssignedCenterResponse();
+            }
+            if (!$this->centroBelongsToCompany($idCentroFormacion, $idEmpresa)) {
+                return response()->json(['message' => 'El centro no pertenece a la empresa activa'], 403);
             }
 
-            // Cambiar estado: si alguna está Activo -> Inactivo, si todas Inactivo -> Activo
-            $nuevoEstado = $jornadas->first()->estado === 'Activo' ? 'Inactivo' : 'Activo';
+            $jornadaId = (int) ($validated['id'] ?? $validated['grupoJornada']);
+            $jornada = $this->jornadasDelCentro($idCentroFormacion)->whereKey($jornadaId)->first();
+            if (!$jornada) {
+                return response()->json(['message' => 'No se encontró la jornada'], 404);
+            }
 
-            Jornada::where('idEmpresa', $idEmpresa)
-                ->where('grupoJornada', $grupoJornada)
-                ->update(['estado' => $nuevoEstado]);
+            $jornada->estado = $jornada->estado === 'Activo' ? 'Inactivo' : 'Activo';
+            $jornada->save();
 
             return response()->json([
-                'message' => "Estado actualizado a $nuevoEstado para todas las jornadas del grupo $grupoJornada",
-                'estado' => $nuevoEstado,
-            ], 200);
+                'message' => "Estado actualizado a {$jornada->estado}",
+                'estado' => $jornada->estado,
+            ]);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Error de validación',
                 'errors' => $e->errors(),
@@ -382,6 +314,108 @@ class JornadaController extends Controller
         }
     }
 
+    private function activeCompanyId(): ?int
+    {
+        $idEmpresa = JWTAuth::parseToken()->getPayload()->get('idCompany');
+
+        return $idEmpresa ? (int) $idEmpresa : null;
+    }
+
+    private function authenticatedCenterId(): ?int
+    {
+        $user = JWTAuth::parseToken()->authenticate();
+        $idCentroFormacion = $user?->idCentroFormacion;
+
+        return $idCentroFormacion ? (int) $idCentroFormacion : null;
+    }
+
+    private function noActiveCompanyResponse()
+    {
+        return response()->json(['message' => 'No hay empresa activa seleccionada'], 400);
+    }
+
+    private function noAssignedCenterResponse()
+    {
+        return response()->json(['message' => 'El usuario autenticado no tiene un centro de formación asignado'], 422);
+    }
+
+    private function jornadasDelCentro(int $idCentroFormacion): Builder
+    {
+        return Jornada::query()
+            ->where('idTipoJornada', TipoJornada::MATERIAS)
+            ->where('idCentroFormacion', $idCentroFormacion);
+    }
+
+    private function centroBelongsToCompany(int $idCentroFormacion, int $idEmpresa): bool
+    {
+        return CentrosFormacion::query()
+            ->whereKey($idCentroFormacion)
+            ->where('idEmpresa', $idEmpresa)
+            ->exists();
+    }
+
+    private function resolveDayIds(array $dias): array
+    {
+        $availableDays = Dia::query()->get(['id', 'dia']);
+        $daysByName = $availableDays->keyBy(fn (Dia $day) => $this->normalizeDay($day->dia));
+        $dayIds = [];
+
+        foreach ($dias as $index => $value) {
+            $day = is_numeric($value)
+                ? $availableDays->firstWhere('id', (int) $value)
+                : $daysByName->get($this->normalizeDay((string) $value));
+
+            if (!$day) {
+                throw ValidationException::withMessages([
+                    "dias.$index" => 'El día seleccionado no existe.',
+                ]);
+            }
+
+            $dayIds[] = (int) $day->id;
+        }
+
+        return array_values(array_unique($dayIds));
+    }
+
+    private function normalizeDay(string $day): string
+    {
+        return strtr(mb_strtoupper(trim($day), 'UTF-8'), [
+            'Á' => 'A',
+            'É' => 'E',
+            'Í' => 'I',
+            'Ó' => 'O',
+            'Ú' => 'U',
+        ]);
+    }
+
+    private function formatJornada(Jornada $jornada): array
+    {
+        $tipoHorario = 'No definido';
+        if ($jornada->horaInicial) {
+            $horaInicio = Carbon::parse($jornada->horaInicial);
+            if ($horaInicio->between(Carbon::createFromTime(5, 0), Carbon::createFromTime(11, 59))) {
+                $tipoHorario = 'Mañana';
+            } elseif ($horaInicio->between(Carbon::createFromTime(12, 0), Carbon::createFromTime(17, 59))) {
+                $tipoHorario = 'Tarde';
+            } else {
+                $tipoHorario = 'Nocturna';
+            }
+        }
+
+        return [
+            'id' => $jornada->id,
+            'grupoJornada' => $jornada->id,
+            'idCentroFormacion' => $jornada->idCentroFormacion,
+            'nombreJornada' => $jornada->nombreJornada,
+            'descripcion' => $jornada->descripcion,
+            'horaInicial' => $jornada->horaInicial,
+            'horaFinal' => $jornada->horaFinal,
+            'numeroHoras' => $jornada->numeroHoras,
+            'tipoHorario' => $tipoHorario,
+            'dias' => $jornada->dias->pluck('dia')->values(),
+            'estado' => $jornada->estado,
+        ];
+    }
 
 
 

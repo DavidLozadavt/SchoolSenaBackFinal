@@ -1179,7 +1179,7 @@ Route::get('get_viajes_for_autorizacion', [AutorizacionController::class, 'getVi
 
 Route::apiResource('grupos_nomina', GrupoNominaController::class);
 
-// configuaracion productos 
+// configuaracion productos
 
 Route::get('products_by_tipo_producto', [ConfiguracionProductosController::class, 'getProductosByTipoProducto']);
 Route::post('update_valor_venta_producto', [ConfiguracionProductosController::class, 'updateValorVentaProducto']);
@@ -1233,7 +1233,7 @@ Route::get('programa/{idPrograma}/fichas', [DocumentoFichaController::class, 'fi
 Route::get('programa/{idPrograma}/documentos-autorizados', [DocumentoFichaController::class, 'documentosAutorizados']);
 Route::put('programa/{idPrograma}/documento/{idTipoDocumento}/autorizar', [DocumentoFichaController::class, 'autorizarDocumento']);
 
-//ruta de Periodos 
+//ruta de Periodos
 Route::post('/periodos', [PeriodosController::class, 'store']);
 Route::get('/periodos', [PeriodosController::class, 'index']);
 Route::put('/periodos/{id}', [PeriodosController::class, 'update']);
@@ -1387,7 +1387,7 @@ Route::get('sedes-institucionales/{id}', [SedeInstitucionalController::class, 's
 
 // Rutas de Infraestructura
 Route::post('tiposInfraestructuras', [InfraestructuraController::class, 'storeTiposInfraestructura']); // Tipo de infraestructura
-Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']); 
+Route::get('/infraestructuras/tipos', [InfraestructuraController::class, 'tipos']);
 Route::get('sedes/{idSede}/infraestructuras', [InfraestructuraController::class, 'index']);
 Route::get('regionalInfraestructuras/{idRegional}', [InfraestructuraController::class, 'infraestructurasPorRegional']);
 Route::post('infraestructuras', [InfraestructuraController::class, 'store']);
