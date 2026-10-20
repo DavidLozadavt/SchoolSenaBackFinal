@@ -43,4 +43,9 @@ return [
         'secret' => env('LIVEKIT_API_SECRET'),
         'url' => env('LIVEKIT_URL'),
     ],
+
+    // Dominio del frontend de School: a donde apunta el QR de las escarapelas.
+    'frontend' => [
+        'url' => env('FRONTEND_URL'),
+    ],
 ];

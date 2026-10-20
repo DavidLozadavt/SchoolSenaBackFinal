@@ -188,7 +188,13 @@ Route::post('integration/sync-password', [ForgotPasswordController::class, 'sync
 // Formularios Públicos
 Route::get('formulario-publico/{slug}', [App\Http\Controllers\FormularioController::class, 'showPublic']);
 Route::post('formulario-publico/{slug}/responder', [App\Http\Controllers\FormularioController::class, 'responder']);
-Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto']);
+// Adjuntos de las preguntas "Subir archivo". Pública como el formulario; limitada
+// por IP para que no sirva de almacenamiento libre.
+Route::post('formulario-publico/upload-adjunto', [App\Http\Controllers\FormularioController::class, 'uploadAdjunto'])->middleware('throttle:30,1');
+// Escarapela del inscrito: pública, protegida por su código aleatorio.
+Route::get('escarapela/{codigo}', [App\Http\Controllers\EscarapelaController::class, 'show'])->where('codigo', '[a-z0-9]{32}');
+Route::get('escarapela/{codigo}/pdf', [App\Http\Controllers\EscarapelaController::class, 'pdf'])->where('codigo', '[a-z0-9]{32}');
+Route::get('escarapela/{codigo}/foto', [App\Http\Controllers\EscarapelaController::class, 'foto'])->where('codigo', '[a-z0-9]{32}');
 
 // Inscripción pública a eventos (sin auth de School, para usuarios de NexiService)
 Route::post('eventos-multimedia/{id}/register-public', [App\Http\Controllers\EventoController::class, 'registerPublic']);
@@ -1659,11 +1665,21 @@ Route::middleware('auth:api')->group(function () {
     // --- FORMULARIOS INTERNOS ---
     Route::get('formularios', [App\Http\Controllers\FormularioController::class, 'index']);
     Route::post('formularios', [App\Http\Controllers\FormularioController::class, 'store']);
+    Route::post('formularios/upload-logo', [App\Http\Controllers\FormularioController::class, 'uploadLogo']);
     Route::get('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'show']);
     Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update']);
     Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy']);
     Route::get('formularios/{id}/respuestas', [App\Http\Controllers\FormularioController::class, 'respuestas']);
     Route::delete('formularios/{id}/respuestas/{respuestaId}', [App\Http\Controllers\FormularioController::class, 'destroyRespuesta']);
+
+    // --- ESCARAPELAS (pestaña "Escarapelas" del panel) ---
+    Route::get('escarapelas/formularios', [App\Http\Controllers\EscarapelaController::class, 'formularios']);
+    Route::get('formularios/{id}/escarapela', [App\Http\Controllers\EscarapelaController::class, 'diseno']);
+    Route::put('formularios/{id}/escarapela', [App\Http\Controllers\EscarapelaController::class, 'configurar']);
+    Route::get('formularios/{id}/escarapelas/datos', [App\Http\Controllers\EscarapelaController::class, 'datosInscritos']);
+    Route::get('formularios/{id}/escarapelas', [App\Http\Controllers\EscarapelaController::class, 'inscritos']);
+    Route::get('formularios/{id}/escarapelas/pdf', [App\Http\Controllers\EscarapelaController::class, 'pdfMasivo']);
+    Route::get('formularios/{id}/escarapelas/{idRespuesta}/pdf', [App\Http\Controllers\EscarapelaController::class, 'pdfInscrito'])->whereNumber('idRespuesta');
 
 });
 
