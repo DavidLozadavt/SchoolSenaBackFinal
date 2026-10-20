@@ -380,6 +380,7 @@ class EventoController extends Controller
     public function inscripciones($id)
     {
         $evento = Evento::findOrFail($id);
+        $this->soloEmpresaDelEvento($evento);
 
         if (!$evento->idFormularioInterno) {
             return response()->json(['preguntas' => [], 'respuestas' => []]);
@@ -407,6 +408,7 @@ class EventoController extends Controller
     public function eliminarInscripcion(Request $request, $id, $respuestaId)
     {
         $evento = Evento::findOrFail($id);
+        $this->soloEmpresaDelEvento($evento);
 
         $respuesta = \App\Models\FormularioRespuesta::where('id', $respuestaId)
             ->when($evento->idFormularioInterno, fn($q) => $q->where('idFormulario', $evento->idFormularioInterno))
@@ -437,14 +439,22 @@ class EventoController extends Controller
         return response()->json(['message' => 'Inscripción eliminada correctamente']);
     }
 
+    /**
+     * Corta con 403 si el evento es de otra institución: sin esto, un usuario de
+     * cualquier empresa podía ver o borrar los inscritos de otra.
+     */
+    private function soloEmpresaDelEvento(Evento $evento): void
+    {
+        if ((int) $evento->idCompany !== (int) KeyUtil::idCompany()) {
+            abort(403, 'Este evento pertenece a otra institución.');
+        }
+    }
+
     private function normalizarTituloPregunta(string $titulo): string
     {
-        return strtolower(
-            preg_replace(
-                '/[^a-z0-9 ]/i', '',
-                iconv('UTF-8', 'ASCII//TRANSLIT', $titulo) ?: $titulo
-            )
-        );
+        // Str::ascii en vez de iconv: con emojis u otros caracteres sin
+        // equivalente ASCII, iconv lanzaba "illegal character" y daba 500.
+        return strtolower(preg_replace('/[^a-z0-9 ]/i', '', \Illuminate\Support\Str::ascii($titulo)));
     }
 
     /**
@@ -488,10 +498,16 @@ class EventoController extends Controller
             $persona->save();
         }
 
-        ParticipanteEvento::updateOrCreate(
-            ['idEvento' => $id, 'idPersona' => $persona->id],
-            ['fechaRegistro' => now(), 'estado' => 'CONFIRMADO']
-        );
+        // La tabla tiene llave compuesta y Eloquent no sabe actualizar ese
+        // modelo: `updateOrCreate` daba 500 cuando la persona ya era participante.
+        $participantes = ParticipanteEvento::where('idEvento', $id)->where('idPersona', $persona->id);
+        $datos = ['fechaRegistro' => now(), 'estado' => 'CONFIRMADO'];
+
+        if ($participantes->exists()) {
+            $participantes->update($datos);
+        } else {
+            ParticipanteEvento::create(['idEvento' => $id, 'idPersona' => $persona->id] + $datos);
+        }
 
         return response()->json(['message' => 'Inscripción confirmada', 'inscrito' => true]);
     }
@@ -515,6 +531,16 @@ class EventoController extends Controller
 
         // Evento con formulario interno: la fuente de verdad son las respuestas del formulario
         if ($evento->idFormularioInterno) {
+            // Inscripción hecha desde NexiService con este login. Antes solo se
+            // comparaba con lo que la persona escribió en el campo "Email": si
+            // tecleaba otro correo, al recargar aparecía como no inscrita.
+            if (\App\Models\FormularioRespuesta::where('idFormulario', $evento->idFormularioInterno)
+                ->where('nexiEmail', strtolower($email))
+                ->exists()
+            ) {
+                return response()->json(['inscrito' => true]);
+            }
+
             $preguntasEmail = \App\Models\FormularioPregunta::where('idFormulario', $evento->idFormularioInterno)
                 ->get()
                 ->filter(function ($p) {
