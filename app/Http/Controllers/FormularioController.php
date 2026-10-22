@@ -301,13 +301,24 @@ class FormularioController extends Controller
         ));
         $userId = $isEmbed ? null : ($user ? $user->id : null);
 
+        // Quien acaba de responder puede corregir su respuesta con la llave que recibió al enviarla.
+        $editada = null;
+        if ($request->filled('idRespuesta')) {
+            $editada = $this->respuestaEditable($request, $formulario);
+            if (!$editada) {
+                return response()->json(['error' => 'No se puede editar esta respuesta.'], 403);
+            }
+        }
+
         try {
             DB::beginTransaction();
 
             // ── Fase 1: mismo login ───────────────────────────────────────
             // Busca directamente por nexiEmail (embed) o userId (School nativo).
             $existingByLogin = null;
-            if ($isEmbed && $emailParam) {
+            if ($editada) {
+                $existingByLogin = $editada;
+            } elseif ($isEmbed && $emailParam) {
                 $existingByLogin = FormularioRespuesta::where('idFormulario', $formulario->id)
                     ->where('nexiEmail', $emailParam)
                     ->first();
@@ -317,7 +328,7 @@ class FormularioController extends Controller
                     ->first();
             }
 
-            if ($existingByLogin && !$request->input('forzar_actualizacion', false)) {
+            if ($existingByLogin && !$editada && !$request->input('forzar_actualizacion', false)) {
                 DB::rollBack();
                 return response()->json([
                     'ya_inscrito'        => true,
@@ -747,6 +758,7 @@ class FormularioController extends Controller
                 'message' => 'Respuesta guardada con éxito',
                 'data' => $respuesta,
                 'escarapela' => $codigoEscarapela ? ['codigo' => $codigoEscarapela] : null,
+                'edicion' => ['id' => $respuesta->id, 'llave' => $this->llaveEdicion($respuesta->id)],
             ];
 
             if (isset($facturaInscripcion) && $facturaInscripcion) {
@@ -837,6 +849,32 @@ class FormularioController extends Controller
      *
      * @return array<int, array{idPregunta: int, titulo: string, valor: string}>
      */
+    /**
+     * Llave para editar una respuesta desde el formulario público. Solo la
+     * recibe quien la envió; va firmada con la clave de la app, así que no se
+     * puede adivinar a partir del id.
+     */
+    private function llaveEdicion(int $idRespuesta): string
+    {
+        return hash_hmac('sha256', "formulario-respuesta:{$idRespuesta}", (string) config('app.key'));
+    }
+
+    /**
+     * Respuesta del formulario que se pide editar con `idRespuesta` y
+     * `llaveEdicion`, o null si la llave no corresponde.
+     */
+    private function respuestaEditable(Request $request, Formulario $formulario): ?FormularioRespuesta
+    {
+        $id = (int) $request->input('idRespuesta');
+        $llave = (string) $request->input('llaveEdicion', '');
+
+        if ($id <= 0 || !hash_equals($this->llaveEdicion($id), $llave)) {
+            return null;
+        }
+
+        return FormularioRespuesta::where('idFormulario', $formulario->id)->find($id);
+    }
+
     private function valoresUnicosRepetidos(Formulario $formulario, array $respuestas, ?int $excluirId = null): array
     {
         $unicas = FormularioPregunta::where('idFormulario', $formulario->id)
