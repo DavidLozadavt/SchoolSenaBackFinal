@@ -387,8 +387,10 @@ class GradoMateriaController extends Controller
             // return response()->json($gradoMateria->idMateria);
             $this->deleteRapHorario($gradoMateria, $asignacionPeriodoJornada);
 
-            // Eliminar el GradoMateria
-            $gradoMateria->delete();
+            // gradoMateria es curricular (programa/trimestre) y puede estar en otras fichas.
+            if ($gradoMateria->horarioMateria()->count() === 0) {
+                $gradoMateria->delete();
+            }
 
             DB::commit();  // Confirmar la transacción
 
@@ -402,35 +404,39 @@ class GradoMateriaController extends Controller
         }
     }
 
+    /**
+     * Limpia solo horarios de RAPs hijos EN ESTA FICHA.
+     * No borra materia ni gradoMateria: se reutilizan en otras fichas/jornadas.
+     */
     private function deleteRapHorario(GradoMateria $gradoMateria, Ficha $ficha): void
     {
-        $competence = Materia::with('subMaterias')->where('id', $gradoMateria->idMateria)->first();
+        $competence = Materia::where('id', $gradoMateria->idMateria)->first();
 
         if (!$competence) {
             return;
         }
 
-        $idPrograma = $ficha->asignacionPeriodoPrograma->idPrograma;
+        $idsRap = Materia::where('idMateriaPadre', $competence->id)->pluck('id');
+        if ($idsRap->isEmpty()) {
+            return;
+        }
 
-        $raps = Materia::with(['grados'])->where('idMateriaPadre', $competence->id)
-            ->whereHas('materiasAgregadas', function ($query) use ($idPrograma) {
-                $query->where('idPrograma', $idPrograma);
-            })
+        $idsGradoMateria = GradoMateria::whereIn('idMateria', $idsRap)->pluck('id');
+        if ($idsGradoMateria->isEmpty()) {
+            return;
+        }
+
+        $horarios = HorarioMateria::whereIn('idGradoMateria', $idsGradoMateria)
+            ->where('idFicha', $ficha->id)
             ->get();
 
-        foreach ($raps as $rap) {
-            //MatriculaAcademica::where('idMateria', $rap->id)->update(['idGradoMateria' => NULL]);
-            foreach ($rap->grados as $grado) {
-
-                $schedule = HorarioMateria::where('idGradoMateria', $grado->id)
-                    ->where('idFicha', $ficha->id)
-                    ->first();
-
-                if ($schedule) {
-                    $schedule->delete();
-                    $grado->delete();
-                }
-            }
+        foreach ($horarios as $horario) {
+            $horario->sesionMaterias()->each(function ($s) {
+                $s->asistencia()->delete();
+                $s->delete();
+            });
+            $horario->detallesRmi()->delete();
+            $horario->delete();
         }
     }
 

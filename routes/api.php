@@ -160,6 +160,8 @@ use App\Http\Controllers\ambiente_virtual\AsignacionActividadController;
 use App\Http\Controllers\ambiente_virtual\ActividadesAprendizController;
 use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Http\Controllers\ambiente_virtual\MaterialApoyoFichaController;
+use App\Http\Controllers\ambiente_virtual\MaterialCompetenciaController;
+use App\Http\Controllers\ambiente_virtual\GestionActividadesController;
 use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
@@ -1328,6 +1330,10 @@ Route::middleware('auth:api')->group(function () {
     Route::post('actividades/{idActividad}/materiales-apoyo/{idMaterialApoyo}/mover-biblioteca', [ActividadController::class, 'moverMaterialApoyoBiblioteca']);
     Route::get('actividades-aprendiz', [ActividadController::class, 'actividadesAprendiz']);
     Route::get('ambiente-virtual/instructor/mis-actividades', [ActividadController::class, 'misActividadesInstructor']);
+    Route::get('ambiente-virtual/instructor/gestion-actividades/filtros', [GestionActividadesController::class, 'filtros']);
+    Route::get('ambiente-virtual/instructor/gestion-actividades', [GestionActividadesController::class, 'catalogo']);
+    Route::get('ambiente-virtual/instructor/gestion-actividades/{idActividad}/fichas-asignadas', [GestionActividadesController::class, 'fichasAsignadas']);
+    Route::get('ambiente-virtual/instructor/gestion-actividades/{idActividad}/fichas-compatibles', [GestionActividadesController::class, 'fichasCompatibles']);
     Route::get('ambiente-virtual/material-apoyo', [ActividadController::class, 'materialApoyoAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta', [ActividadController::class, 'responderActividadAprendiz']);
     Route::post('actividades-aprendiz/{idCalificacionActividad}/respuesta-cuestionario', [ActividadController::class, 'responderCuestionarioAprendiz']);
@@ -1375,6 +1381,16 @@ Route::middleware('auth:api')->group(function () {
     Route::post('fichas/{idFicha}/materiales-apoyo', [MaterialApoyoFichaController::class, 'store']);
     Route::put('fichas/{idFicha}/materiales-apoyo/{id}', [MaterialApoyoFichaController::class, 'update']);
     Route::delete('fichas/{idFicha}/materiales-apoyo/{id}', [MaterialApoyoFichaController::class, 'destroy']);
+
+    // Material de competencia (Actividades competencias RAP): ámbito competencia, no RAP ni instructor
+    Route::get('ambiente-virtual/actividades-competencia/competencias', [MaterialCompetenciaController::class, 'competencias']);
+    Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales', [MaterialCompetenciaController::class, 'index']);
+    Route::post('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales', [MaterialCompetenciaController::class, 'store']);
+    Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales-elegibles', [MaterialCompetenciaController::class, 'elegibles']);
+    Route::post('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/incorporar', [MaterialCompetenciaController::class, 'incorporar']);
+    Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}', [MaterialCompetenciaController::class, 'show']);
+    Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}/descargar', [MaterialCompetenciaController::class, 'descargar']);
+    Route::delete('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}', [MaterialCompetenciaController::class, 'destroy']);
 
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
     Route::get('fichas/{idFicha}/asignacion-actividades/datos', [AsignacionActividadController::class, 'datos']);

@@ -18,7 +18,10 @@ use App\Models\MaterialApoyoRap;
 use App\Models\Pregunta;
 use App\Models\TipoPregunta;
 use App\Models\Respuesta;
+use App\Services\ambiente_virtual\RapAccessService;
+use App\Support\ActividadEliminacionReglas;
 use App\Support\DiagnosticoActividadesRapHistoricas;
+use App\Support\MaterialCompetenciaReglas;
 use App\Util\CuestionarioAsignacionUtil;
 use App\Support\ValidacionCuestionario;
 use App\Util\KeyUtil;
@@ -1739,6 +1742,10 @@ class ActividadController extends Controller
             }
 
             $this->assertIdMateriaEsRap((int) $validated['idMateria']);
+            $this->assertRapPerteneceACompetencia(
+                (int) $validated['idMateria'],
+                (int) $request->input('idCompetencia', 0)
+            );
 
             $actividad = Actividad::create($validated);
             DiagnosticoActividadesRapHistoricas::logCreacionActividad(
@@ -1776,6 +1783,10 @@ class ActividadController extends Controller
 
             if (array_key_exists('idMateria', $validated)) {
                 $this->assertIdMateriaEsRap((int) $validated['idMateria']);
+                $this->assertRapPerteneceACompetencia(
+                    (int) $validated['idMateria'],
+                    (int) $request->input('idCompetencia', 0)
+                );
             }
 
             $actividad->update($validated);
@@ -1930,11 +1941,26 @@ class ActividadController extends Controller
     public function destroy(int $id): JsonResponse
     {
         try {
-            $actividad = Actividad::findOrFail($id);
-            $tieneAsignacion = PlaneacionActividad::where('idActividad', $id)->exists();
-            if ($tieneAsignacion) {
-                return response()->json(['error' => 'No se puede eliminar una actividad que est? asignada a una clase. Qu?tela primero de la clase.'], 422);
+            $actividad = Actividad::query()->find($id);
+            if (! $actividad) {
+                return response()->json(['error' => 'Actividad no encontrada.'], 404);
             }
+            if (! $this->usuarioPuedeEliminarActividad($actividad)) {
+                return response()->json(['error' => 'No autorizado para eliminar esta actividad.'], 403);
+            }
+
+            $inactivo = ActividadEliminacionReglas::esInactivo(
+                $actividad->idEstado !== null ? (int) $actividad->idEstado : null,
+                $this->nombreEstadoActividad($actividad)
+            );
+            $fichas = $this->conteoFichasAsignadasActividad((int) $actividad->id);
+            $tieneClase = Schema::hasTable('planeacionActividades')
+                && PlaneacionActividad::where('idActividad', $id)->exists();
+            $motivo = ActividadEliminacionReglas::motivoNoEliminar($inactivo, $fichas, $tieneClase);
+            if ($motivo !== null) {
+                return response()->json(['error' => $motivo], 422);
+            }
+
             $actividad->delete();
             return response()->json(['message' => 'Actividad eliminada']);
         } catch (\Throwable $e) {
@@ -2303,23 +2329,33 @@ class ActividadController extends Controller
                 return response()->json([]);
             }
 
-            $rows = DB::table('horarioMateria as hm')
+            $filas = DB::table('horarioMateria as hm')
                 ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
                 ->join('materia as m', 'gm.idMateria', '=', 'm.id')
-                ->leftJoin('materia as comp', 'm.idMateriaPadre', '=', 'comp.id')
                 ->where('hm.idFicha', $idFicha)
-                ->whereNotNull('m.idMateriaPadre')
-                ->where('m.idMateriaPadre', '>', 0)
-                ->select(
-                    'm.id',
-                    'm.nombreMateria',
-                    'm.codigo',
-                    'm.idMateriaPadre',
-                    'comp.nombreMateria as competenciaNombre',
-                    'comp.codigo as competenciaCodigo'
-                )
+                ->select('m.id', 'm.idMateriaPadre')
                 ->distinct()
                 ->get();
+
+            $idsRap = (new RapAccessService())->idsRapDesdeFilasHorario($filas, false);
+            if ($idsRap === []) {
+                return response()->json([]);
+            }
+
+            $rows = Materia::query()
+                ->from('materia')
+                ->whereIn('materia.id', $idsRap)
+                ->whereNotNull('materia.idMateriaPadre')
+                ->where('materia.idMateriaPadre', '>', 0)
+                ->leftJoin('materia as comp', 'materia.idMateriaPadre', '=', 'comp.id')
+                ->get([
+                    'materia.id',
+                    'materia.nombreMateria',
+                    'materia.codigo',
+                    'materia.idMateriaPadre',
+                    'comp.nombreMateria as competenciaNombre',
+                    'comp.codigo as competenciaCodigo',
+                ]);
 
             $mapped = $rows->map(static function ($r) {
                 $numero = Materia::numeroOrdenRap($r->codigo ?? null, $r->nombreMateria ?? null);
@@ -2659,6 +2695,81 @@ class ActividadController extends Controller
                 'idRapDestino' => ['El destino debe ser un RAP, no una competencia.'],
             ]);
         }
+    }
+
+    private function assertRapPerteneceACompetencia(int $idRap, int $idCompetencia): void
+    {
+        if ($idCompetencia <= 0) {
+            return;
+        }
+
+        $materia = Materia::query()->find($idRap);
+        $padre = $materia && $materia->idMateriaPadre !== null ? (int) $materia->idMateriaPadre : null;
+        if (! $materia || ! MaterialCompetenciaReglas::rapPerteneceACompetencia($idRap, $padre, $idCompetencia)) {
+            throw ValidationException::withMessages([
+                'idMateria' => ['El RAP seleccionado no pertenece a la competencia.'],
+                'idCompetencia' => ['El RAP seleccionado no pertenece a la competencia.'],
+            ]);
+        }
+    }
+
+    private function usuarioPuedeEliminarActividad(Actividad $actividad): bool
+    {
+        $user = KeyUtil::user();
+        $idPersona = (int) ($user?->idpersona ?? 0);
+        if ($idPersona > 0 && (int) ($actividad->idPersona ?? 0) === $idPersona) {
+            return true;
+        }
+
+        try {
+            foreach (KeyUtil::permissions() as $permiso) {
+                if (strcasecmp((string) $permiso, 'GESTION_USUARIO') === 0) {
+                    return true;
+                }
+            }
+        } catch (\Throwable $e) {
+            return false;
+        }
+
+        return false;
+    }
+
+    private function nombreEstadoActividad(Actividad $actividad): ?string
+    {
+        $idEstado = (int) ($actividad->idEstado ?? 0);
+        if ($idEstado <= 0 || ! Schema::hasTable('estado')) {
+            return null;
+        }
+
+        $nombre = DB::table('estado')->where('id', $idEstado)->value('estado');
+
+        return $nombre !== null ? (string) $nombre : null;
+    }
+
+    private function conteoFichasAsignadasActividad(int $idActividad): int
+    {
+        if ($idActividad <= 0 || ! Schema::hasTable('calificacionActividad')) {
+            return 0;
+        }
+
+        $tablaMa = Schema::hasTable('matriculaAcademica')
+            ? 'matriculaAcademica'
+            : (Schema::hasTable('matriculaacademica') ? 'matriculaacademica' : null);
+        if (! $tablaMa) {
+            return 0;
+        }
+        $colFicha = Schema::hasColumn($tablaMa, 'idFicha')
+            ? 'idFicha'
+            : (Schema::hasColumn($tablaMa, 'idAsignacionPeriodoProgramaJornada')
+                ? 'idAsignacionPeriodoProgramaJornada'
+                : 'idFicha');
+
+        return (int) DB::table('calificacionActividad as ca')
+            ->join($tablaMa.' as ma', 'ca.idAMartriculaAcademica', '=', 'ma.id')
+            ->where('ca.idActividad', $idActividad)
+            ->whereNotNull('ma.'.$colFicha)
+            ->distinct()
+            ->count('ma.'.$colFicha);
     }
 
     /** Replica la detección de planeación en `planeacionActividadesPorFicha`. */
@@ -3024,6 +3135,10 @@ class ActividadController extends Controller
             $idCompany = KeyUtil::idCompany();
 
             $this->assertIdMateriaEsRap((int) $request->idMateria);
+            $this->assertRapPerteneceACompetencia(
+                (int) $request->idMateria,
+                (int) $request->input('idCompetencia', 0)
+            );
 
             $payloadActividad = [
                 'tituloActividad' => $request->titulo,

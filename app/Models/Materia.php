@@ -137,6 +137,11 @@ class Materia extends Model
         return PHP_INT_MAX;
     }
 
+    public function materialesCompetencia(): HasMany
+    {
+        return $this->hasMany(MaterialCompetencia::class, 'idCompetencia');
+    }
+
     public function faseProyectoRaps(): HasMany
     {
         return $this->hasMany(FaseProyectoRap::class, 'idMateria');

@@ -593,11 +593,12 @@ class HorarioMateriaController extends Controller
                 ->where('fechaInicial', $horarioMateria->fechaInicial)
                 ->get();
 
-            // Verificar si alguno de los horarios en este slot tiene asistencias o RMIs con datos
+                // Verificar si alguno de los horarios en este slot tiene asistencias o RMIs con datos
             foreach ($horariosRelacionados as $hr) {
                 // Verificar asistencia real (donde alguien asistió)
                 $hasAsistencia = $hr->sesionMaterias()->whereHas('asistencia', fn($q) => $q->where('asistio', true))->exists();
                 if ($hasAsistencia) {
+                    DB::rollBack();
                     return response()->json([
                         'message' => 'No es posible eliminar este horario porque tiene asistencias registradas en este bloque.'
                     ], 422);
@@ -612,6 +613,7 @@ class HorarioMateriaController extends Controller
                 })->exists();
 
                 if ($hasActiveRmi) {
+                    DB::rollBack();
                     return response()->json([
                         'message' => 'No es posible eliminar este horario porque tiene reportes de RMI activos o archivos asociados.'
                     ], 422);
@@ -631,25 +633,9 @@ class HorarioMateriaController extends Controller
                 // 3. Eliminar detalles RMI (solo si están pendientes, ya validado)
                 $hr->detallesRmi()->delete();
 
-                // 4. Decidir si borrar el registro o dejarlo como placeholder
-                $totalRecordsForRap = HorarioMateria::where('idGradoMateria', $hr->idGradoMateria)->count();
-
-                if ($totalRecordsForRap > 1) {
-                    // Si hay otros horarios para este RAP (otros días u otros clones), borramos este registro físico
-                    $hr->delete();
-                } else {
-                    // Si es el último registro del RAP, lo limpiamos para que quede como slot disponible (placeholder)
-                    $hr->update([
-                        'idDia'             => null,
-                        'idInfraestructura' => null,
-                        'idContrato'        => null,
-                        'fechaFinal'        => null,
-                        'horaInicial'       => null,
-                        'horaFinal'         => null,
-                        'observacion'       => null,
-                        'estado'            => EstadoHorarioMateria::PENDIENTE
-                    ]);
-                }
+                // 4. Quitar el slot. El último de ESTA ficha queda como placeholder curricular.
+                // No se borra materia (RAP/competencia) ni gradoMateria.
+                $hr->eliminarSlotConservandoVinculoFicha();
             }
 
             DB::commit();
@@ -1932,6 +1918,9 @@ class HorarioMateriaController extends Controller
 
             $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
                 ->whereNotIn('estado', [EstadoHorarioMateria::EVALUADO, EstadoHorarioMateria::FINALIZADO])
+                ->when($idFicha, function ($q) use ($idFicha) {
+                    $q->where('idFicha', (int) $idFicha);
+                })
                 ->get();
 
             if ($horarios->isEmpty()) {
@@ -2015,9 +2004,6 @@ class HorarioMateriaController extends Controller
 
                 $gradoMateriaHorario = GradoMateria::find($horario->idGradoMateria);
                 if ($gradoMateriaHorario) {
-                    $gradoMateriaHorario->estado = EstadoHorarioMateria::FINALIZADO;
-                    $gradoMateriaHorario->save();
-
                     // matriculaAcademica.estado NO admite FINALIZADO/EVALUADO (enum distinto).
                     // Marcar como POR EVALUAR para juicios; no tocar ya APROBADO/REPROBADO/CERRADO.
                     if ($horario->idFicha) {
@@ -2032,7 +2018,7 @@ class HorarioMateriaController extends Controller
             $gradoMateria = GradoMateria::with(['materia.padre', 'gradoPrograma.grado'])
                 ->find($idGradoMateria);
 
-            if ($gradoMateria) {
+            if ($gradoMateria && ! $this->gradoMateriaTieneHorariosActivosEnOtrasFichas((int) $idGradoMateria, $idFicha ? (int) $idFicha : null)) {
                 $gradoMateria->estado = EstadoHorarioMateria::FINALIZADO;
                 $gradoMateria->save();
             }
@@ -2043,6 +2029,9 @@ class HorarioMateriaController extends Controller
 
             $horarioConDocente = HorarioMateria::with(['contrato.persona.usuario', 'ficha'])
                 ->where('idGradoMateria', $idGradoMateria)
+                ->when($idFicha, function ($q) use ($idFicha) {
+                    $q->where('idFicha', (int) $idFicha);
+                })
                 ->whereNotNull('idContrato')
                 ->first();
 
@@ -2127,6 +2116,9 @@ class HorarioMateriaController extends Controller
 
             $horarios = HorarioMateria::where('idGradoMateria', $idGradoMateria)
                 ->whereNotIn('estado', [EstadoHorarioMateria::EVALUADO, EstadoHorarioMateria::FINALIZADO])
+                ->when($idFicha, function ($q) use ($idFicha) {
+                    $q->where('idFicha', (int) $idFicha);
+                })
                 ->get();
 
             if ($horarios->isEmpty()) {
@@ -2737,23 +2729,21 @@ class HorarioMateriaController extends Controller
                 ->whereNull('numeroPlanilla');
         })->delete();
 
-        $totalRecordsForRap = HorarioMateria::where('idGradoMateria', $horario->idGradoMateria)->count();
+        // Último slot de ESTA ficha: placeholder. Otras fichas no autorizan borrar el vínculo.
+        $horario->eliminarSlotConservandoVinculoFicha();
+    }
 
-        if ($totalRecordsForRap > 1) {
-            $horario->delete();
-            return;
+    private function gradoMateriaTieneHorariosActivosEnOtrasFichas(int $idGradoMateria, ?int $idFicha): bool
+    {
+        if (! $idFicha) {
+            return false;
         }
 
-        $horario->update([
-            'idDia' => null,
-            'idInfraestructura' => null,
-            'idContrato' => null,
-            'fechaFinal' => null,
-            'horaInicial' => null,
-            'horaFinal' => null,
-            'observacion' => $horario->observacion,
-            'estado' => EstadoHorarioMateria::PENDIENTE,
-        ]);
+        return HorarioMateria::where('idGradoMateria', $idGradoMateria)
+            ->where('idFicha', '!=', $idFicha)
+            ->whereNotIn('estado', [EstadoHorarioMateria::EVALUADO, EstadoHorarioMateria::FINALIZADO])
+            ->whereNotNull('idDia')
+            ->exists();
     }
 
     private function ajustarAsignacionesTrasHueco(
