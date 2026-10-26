@@ -6,7 +6,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Enums\EstadoHorarioMateria;
 use App\Models\AsignacionSesion;
+use App\Support\HorarioMateriaVinculoReglas;
 
 class HorarioMateria extends Model
 {
@@ -136,5 +138,49 @@ class HorarioMateria extends Model
         self::generarRmis($clon);
 
         return $clon;
+    }
+
+    /**
+     * Último horarioMateria de este RAP en ESTA ficha (no en otras).
+     */
+    public function esUltimoHorarioDeFicha(): bool
+    {
+        $restantes = static::query()
+            ->where('idGradoMateria', $this->idGradoMateria)
+            ->where('idFicha', $this->idFicha)
+            ->count();
+
+        return HorarioMateriaVinculoReglas::debeConservarPlaceholder($restantes);
+    }
+
+    /**
+     * Conserva el vínculo curricular ficha-RAP sin clase calendarizada.
+     * No toca materia ni gradoMateria.
+     */
+    public function convertirEnPlaceholderDeFicha(): void
+    {
+        $this->update([
+            'idDia' => null,
+            'idInfraestructura' => null,
+            'idContrato' => null,
+            'fechaFinal' => null,
+            'horaInicial' => null,
+            'horaFinal' => null,
+            'estado' => EstadoHorarioMateria::PENDIENTE,
+        ]);
+    }
+
+    /**
+     * Quita el slot de calendario. Si es el último de la ficha, deja placeholder.
+     * Nunca elimina materia (RAP/competencia) ni gradoMateria.
+     */
+    public function eliminarSlotConservandoVinculoFicha(): void
+    {
+        if ($this->esUltimoHorarioDeFicha()) {
+            $this->convertirEnPlaceholderDeFicha();
+            return;
+        }
+
+        $this->delete();
     }
 }

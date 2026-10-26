@@ -446,13 +446,14 @@ class MateriaController extends Controller
         }
 
         $idPrograma = $ficha->aperturarPrograma->idPrograma;
-        // Buscar los RAPs asignados a esa ficha, trimestre y competencia padre
+        // Vínculo ficha-RAP = horarioMateria de esta ficha, aunque sea placeholder
+        // (sin día/hora). No exigir clase calendarizada para listar el RAP.
         $raps = GradoMateria::where('idGradoPrograma', $idGradoPrograma)
             ->whereHas('materia', function ($q) use ($idMateriaPadre) {
                 $q->where('idMateriaPadre', $idMateriaPadre); // Solo materias hijas de esta competencia
             })
             ->whereHas('horarioMateria', function ($q) use ($idFicha) {
-                $q->where('idFicha', $idFicha); // De la ficha seleccionada
+                $q->where('idFicha', $idFicha);
             })
             ->with([
                 'materia' => function ($q) use ($idPrograma) {

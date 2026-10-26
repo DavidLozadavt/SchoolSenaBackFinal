@@ -2,12 +2,21 @@
 
 namespace Database\Seeders;
 
+use App\Models\Permission;
+use App\Permission\PermissionConst;
+use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 
 class PermissionsSeeder extends Seeder
 {
+    private const MENU_PATH = '/ambiente-virtual/actividades-competencia';
+
+    private const MENU_TITLE = 'Actividades competencias RAP';
+
     public function run(): void
     {
         $permissions = [
@@ -50,6 +59,69 @@ class PermissionsSeeder extends Seeder
                     'created_at' => Carbon::now(),
                 ]
             );
+        }
+
+        $this->registrarMenuActividadesCompetenciasRap(
+            PermissionConst::AULA_VIRTUAL_INSTRUCTOR_ACTIVIDADES_COMPETENCIA,
+            ['INSTRUCTOR SENA'],
+            PermissionConst::AULA_VIRTUAL_INSTRUCTOR
+        );
+        $this->registrarMenuActividadesCompetenciasRap(
+            PermissionConst::AULA_VIRTUAL_APRENDIZ_ACTIVIDADES_COMPETENCIA,
+            ['APRENDIZ', 'APRENDIZ SENA'],
+            PermissionConst::AULA_VIRTUAL_APRENDIZ
+        );
+
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
+    }
+
+    /**
+     * Ítems de menú dinámico (permissions.path + idPermissionPadre), sin migración extra.
+     * El padre real del grupo es AMBIENTE_VIRTUAL (junto a Mis Formaciones / Mis Actividades).
+     *
+     * @param  list<string>  $rolesExtra
+     */
+    private function registrarMenuActividadesCompetenciasRap(string $hijoName, array $rolesExtra, string $fallbackPadreName): void
+    {
+        try {
+            $padre = Permission::query()->where('name', 'AMBIENTE_VIRTUAL')->first()
+                ?? Permission::query()->where('name', $fallbackPadreName)->first();
+            $hijo = Permission::query()->firstOrCreate(
+                ['name' => $hijoName, 'guard_name' => 'web'],
+                [
+                    'description' => self::MENU_TITLE,
+                    'icon' => null,
+                    'path' => self::MENU_PATH,
+                    'idPermissionPadre' => $padre?->id,
+                ]
+            );
+
+            $dirty = false;
+            if ($padre && (int) $hijo->idPermissionPadre !== (int) $padre->id) {
+                $hijo->idPermissionPadre = $padre->id;
+                $dirty = true;
+            }
+            if ($hijo->path !== self::MENU_PATH) {
+                $hijo->path = self::MENU_PATH;
+                $dirty = true;
+            }
+            if ($hijo->description !== self::MENU_TITLE) {
+                $hijo->description = self::MENU_TITLE;
+                $dirty = true;
+            }
+            if ($dirty) {
+                $hijo->save();
+            }
+
+            // No copiar todos los roles de AMBIENTE_VIRTUAL: es compartido instructor/aprendiz.
+            foreach ($rolesExtra as $nombreRol) {
+                $rol = Role::query()->where('name', $nombreRol)->first();
+                if ($rol) {
+                    $rol->givePermissionTo($hijo);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('No se pudo registrar el menú Actividades competencias RAP: '.$e->getMessage());
         }
     }
 }
