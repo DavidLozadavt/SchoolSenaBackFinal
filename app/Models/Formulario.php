@@ -17,7 +17,15 @@ class Formulario extends Model
     protected $casts = [
         'requiereAutenticacion' => 'boolean',
         'fechaLimite' => 'datetime',
+        'escarapelaAlRegistrar' => 'boolean',
+        'escarapelaIndividual' => 'boolean',
+        'escarapelaMasiva' => 'boolean',
+        'escarapelaDiseno' => 'array',
     ];
+
+    // Lleva el logo y el fondo como data URL: pesa demasiado para viajar en
+    // cada listado. Se entrega solo por las rutas de la escarapela.
+    protected $hidden = ['escarapelaDiseno'];
 
     protected static function boot()
     {

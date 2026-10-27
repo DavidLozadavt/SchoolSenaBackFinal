@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Programa extends Model
 {
@@ -79,7 +78,6 @@ class Programa extends Model
     {
         return $this->hasMany(AgregarMateriaPrograma::class, 'idPrograma');
     }
-
     // 🔥 NUEVA RELACIÓN: Programa tiene muchos GradoPrograma
     public function gradoProgramas(): HasMany
     {

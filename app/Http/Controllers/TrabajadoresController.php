@@ -152,7 +152,7 @@ class TrabajadoresController extends Controller
 
 
 
-   public function ejecutarProcedimiento()
+    public function ejecutarProcedimiento()
 {
     try {
         $user = auth()->user();
@@ -165,9 +165,7 @@ class TrabajadoresController extends Controller
             ->first();
 
         if (!$activation) {
-            return response()->json([
-                'error' => 'Usuario no tiene empresa asignada'
-            ], 400);
+            return response()->json(['error' => 'Usuario no tiene empresa asignada'], 400);
         }
 
         $companyId = $activation->company_id;
@@ -177,7 +175,7 @@ class TrabajadoresController extends Controller
 
         $encryptedPassword = bcrypt('123');
 
-        $nomRol = 'DOCENTEUP'; // Cambiar el rol dinamicamente para el docente y el trabajado administrativo PENDIENTE!!
+        $nomRol = 'DOCENTEUP';
 
         DB::statement('CALL cargarTrabajadores(?, ?, ?, ?)', [
             $companyId,
@@ -186,9 +184,7 @@ class TrabajadoresController extends Controller
             $encryptedPassword
         ]);
 
-        return response()->json([
-            'message' => 'Operación realizada con éxito!'
-        ], 200);
+        return response()->json(['message' => 'Operación realizada con éxito!'], 200);
 
     } catch (Throwable $e) {
         Log::error($e->getMessage());
