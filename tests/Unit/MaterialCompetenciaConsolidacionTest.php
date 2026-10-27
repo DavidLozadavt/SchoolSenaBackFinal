@@ -24,7 +24,11 @@ class MaterialCompetenciaConsolidacionTest extends TestCase
         $this->assertFalse(class_exists(\App\Models\MaterialRap::class));
         $this->assertSame('materialCompetencia', (new MaterialCompetencia())->getTable());
         $this->assertTrue(Schema::hasColumn('materialCompetencia', 'idCompetencia'));
+        $this->assertTrue(Schema::hasColumn('materialCompetencia', 'claveOrigen'));
         $this->assertFalse(Schema::hasColumn('materialCompetencia', 'idRap'));
+        $this->assertTrue(
+            DB::table('migrations')->where('migration', '2026_10_22_120000_create_material_competencia_table')->exists()
+        );
     }
 
     public function test_registros_apuntan_a_competencias_reales(): void
@@ -34,6 +38,7 @@ class MaterialCompetenciaConsolidacionTest extends TestCase
         }
 
         $ids = DB::table('materialCompetencia')->pluck('idCompetencia')->map(fn ($id) => (int) $id)->all();
+        $this->assertIsArray($ids);
         foreach ($ids as $idCompetencia) {
             $this->assertGreaterThan(0, $idCompetencia);
             $padre = DB::table('materia')->where('id', $idCompetencia)->value('idMateriaPadre');

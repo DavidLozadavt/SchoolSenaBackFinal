@@ -66,6 +66,12 @@ class MaterialCompetenciaController extends Controller
             $puedeAdministrar = $this->rapAccess->usuarioPuedeAdministrar();
 
             return response()->json($rows->map(fn (MaterialCompetencia $m) => $this->toResource($m, $puedeAdministrar))->values());
+        } catch (QueryException $e) {
+            if ($this->esTablaAusente($e)) {
+                return response()->json(['error' => $this->mensajeMigracion()], 503);
+            }
+
+            return response()->json(['error' => $e->getMessage()], 500);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -125,6 +131,12 @@ class MaterialCompetenciaController extends Controller
             return response()->json($this->toResource($material, true), 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
+        } catch (QueryException $e) {
+            if ($this->esTablaAusente($e)) {
+                return response()->json(['error' => $this->mensajeMigracion()], 503);
+            }
+
+            return response()->json(['error' => $e->getMessage()], 500);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -192,6 +204,12 @@ class MaterialCompetenciaController extends Controller
             return response()->json($this->toResource($material, true), 201);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
+        } catch (QueryException $e) {
+            if ($this->esTablaAusente($e)) {
+                return response()->json(['error' => $this->mensajeMigracion()], 503);
+            }
+
+            return response()->json(['error' => $e->getMessage()], 500);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -320,12 +338,37 @@ class MaterialCompetenciaController extends Controller
 
     private function tablaLista(): bool
     {
-        return Schema::hasTable((new MaterialCompetencia())->getTable());
+        $table = (new MaterialCompetencia())->getTable();
+        if (Schema::hasTable($table)) {
+            return true;
+        }
+
+        try {
+            $db = Schema::getConnection()->getDatabaseName();
+            $row = DB::selectOne(
+                'SELECT 1 AS ok FROM information_schema.tables
+                 WHERE table_schema = ? AND LOWER(table_name) = LOWER(?) AND table_type = ? LIMIT 1',
+                [$db, $table, 'BASE TABLE']
+            );
+
+            return (bool) $row;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     private function mensajeMigracion(): string
     {
         return 'Ejecute la migración de materialCompetencia para habilitar el material por competencia.';
+    }
+
+    private function esTablaAusente(QueryException $e): bool
+    {
+        $msg = $e->getMessage();
+
+        return str_contains($msg, "Base table or view not found")
+            || str_contains($msg, '1146')
+            || str_contains($msg, '42S02');
     }
 
     /**
