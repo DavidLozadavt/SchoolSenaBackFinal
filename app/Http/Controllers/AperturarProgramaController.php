@@ -4,17 +4,20 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\AperturarProgramaResource;
 use App\Models\AperturarPrograma;
+use App\Models\Programa;
 use App\Models\TipoGrado;
+use App\Util\KeyUtil;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AperturarProgramaController extends Controller
 {
     public function index(): JsonResponse
     {
-        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'grado:id,nombreTipoGrado', 'cortes'])->latest()->get();
+        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'cortes'])->latest()->get();
 
         return response()->json(AperturarProgramaResource::collection($data));
     }
@@ -33,7 +36,7 @@ class AperturarProgramaController extends Controller
             'idSede' => 'nullable|exists:sedes,id'
         ]);
 
-        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'jornada:id,nombreJornada', 'grado:id,nombreTipoGrado', 'cortes'])
+        $data = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'cortes'])
             ->latest()
             ->where('fechaFinalPlanMejoramiento', '>=', Carbon::today()->toDateString())
             ->where('idPrograma', $validated['idPrograma'])
@@ -93,9 +96,91 @@ class AperturarProgramaController extends Controller
     }
 
 
+    public function jornadasParaGrados(): JsonResponse
+    {
+        $jornadas = DB::table('jornadas')
+            ->where('estado', 'Activo')
+            ->orderBy('nombreJornada')
+            ->get(['id', 'nombreJornada']);
+
+        $unicas = [];
+        foreach ($jornadas as $jornada) {
+            $nombre = mb_strtoupper(trim((string) $jornada->nombreJornada));
+            if ($nombre === '' || isset($unicas[$nombre])) {
+                continue;
+            }
+            $unicas[$nombre] = [
+                'id' => $jornada->id,
+                'nombre' => $jornada->nombreJornada,
+            ];
+        }
+
+        return response()->json(array_values($unicas));
+    }
+
+    public function aperturaParaGrados(int $idPrograma): JsonResponse
+    {
+        $programa = Programa::where('id', $idPrograma)
+            ->where('idCompany', KeyUtil::idCompany())
+            ->first();
+
+        if (!$programa) {
+            return response()->json([
+                'message' => 'El programa no pertenece a la empresa con la que entraste',
+            ], 404);
+        }
+
+        $apertura = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre'])
+            ->where('idPrograma', $programa->id)
+            ->latest('id')
+            ->first();
+
+        if (!$apertura) {
+            $idSede = $programa->idSede
+                ?: DB::table('sedes')->where('idEmpresa', KeyUtil::idCompany())->value('id');
+            $idPeriodo = DB::table('periodo')->where('idEmpresa', KeyUtil::idCompany())->orderByDesc('id')->value('id')
+                ?: DB::table('periodo')->orderByDesc('id')->value('id');
+
+            if (!$idSede || !$idPeriodo) {
+                return response()->json([
+                    'message' => 'El programa no tiene sede o periodo para crear los grados',
+                ], 422);
+            }
+
+            $inicio = now()->toDateString();
+            $fin = now()->addYear()->toDateString();
+            $apertura = AperturarPrograma::create([
+                'observacion' => 'Apertura para grados',
+                'idPeriodo' => $idPeriodo,
+                'idPrograma' => $programa->id,
+                'estado' => 'ACTIVO',
+                'idSede' => $idSede,
+                'tipoCalificacion' => 'NUMERICO',
+                'fechaInicialClases' => $inicio,
+                'fechaFinalClases' => $fin,
+                'fechaInicialInscripciones' => $inicio,
+                'fechaFinalInscripciones' => $fin,
+                'fechaInicialMatriculas' => $inicio,
+                'fechaFinalMatriculas' => $fin,
+                'fechaInicialPlanMejoramiento' => $inicio,
+                'fechaFinalPlanMejoramiento' => $fin,
+            ]);
+            $apertura->load(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre']);
+        }
+
+        return response()->json(new AperturarProgramaResource($apertura));
+    }
+
     public function show($id): JsonResponse
     {
-        $apertura = AperturarPrograma::with(['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre', 'grado:id,nombreTipoGrado', 'cortes'])->findOrFail($id);
+        $relaciones = ['periodo:id,nombrePeriodo', 'programa:id,nombrePrograma,codigoPrograma', 'sede:id,nombre'];
+        if (Schema::hasTable('cortes')) {
+            $relaciones[] = 'cortes';
+        }
+        if (Schema::hasColumn('aperturarprograma', 'idTipoGrado')) {
+            $relaciones[] = 'grado:id,nombreTipoGrado';
+        }
+        $apertura = AperturarPrograma::with($relaciones)->findOrFail($id);
 
         return response()->json(new AperturarProgramaResource($apertura));
     }

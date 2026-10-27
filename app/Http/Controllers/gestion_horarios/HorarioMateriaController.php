@@ -455,28 +455,18 @@ class HorarioMateriaController extends Controller
 
         try {
             $horarioMateria = HorarioMateria::findOrFail($id);
+            $horariosRelacionados = $this->horariosDelMismoBloque($horarioMateria);
+            $conservoHistorial = false;
 
-            // Buscar todos los horarios que correspondan al mismo slot (incluyendo compartidos/duplicados)
-            $horariosRelacionados = HorarioMateria::where('idFicha', $horarioMateria->idFicha)
-                ->where('idGradoMateria', $horarioMateria->idGradoMateria)
-                ->where('idDia', $horarioMateria->idDia)
-                ->where('horaInicial', $horarioMateria->horaInicial)
-                ->where('horaFinal', $horarioMateria->horaFinal)
-                ->where('fechaInicial', $horarioMateria->fechaInicial)
-                ->get();
-
-            // Verificar si alguno de los horarios en este slot tiene asistencias o RMIs con datos
             foreach ($horariosRelacionados as $hr) {
-                // Verificar asistencia real (donde alguien asistió)
-                $hasAsistencia = $hr->sesionMaterias()->whereHas('asistencia', fn($q) => $q->where('asistio', true))->exists();
-                if ($hasAsistencia) {
-                    return response()->json([
-                        'message' => 'No es posible eliminar este horario porque tiene asistencias registradas en este bloque.'
-                    ], 422);
+                $corte = $this->cortarSesionesDesdeHoy($hr);
+
+                if ($corte['conserva']) {
+                    $conservoHistorial = true;
+                    continue;
                 }
 
-                // Verificar si el RMI tiene reportes activos o archivos subidos
-                $hasActiveRmi = $hr->detallesRmi()->where(function($q) {
+                $hasActiveRmi = $hr->detallesRmi()->where(function ($q) {
                     $q->where('estado', '!=', 'PENDIENTE')
                       ->orWhereNotNull('archivoPago')
                       ->orWhereNotNull('urlInforme')
@@ -484,33 +474,20 @@ class HorarioMateriaController extends Controller
                 })->exists();
 
                 if ($hasActiveRmi) {
+                    DB::rollBack();
                     return response()->json([
                         'message' => 'No es posible eliminar este horario porque tiene reportes de RMI activos o archivos asociados.'
                     ], 422);
                 }
-            }
 
-            foreach ($horariosRelacionados as $hr) {
-                // 1. Eliminar vinculaciones de sesiones especiales (compartido/reemplazo)
                 AsignacionSesion::where('idHorarioMateria', $hr->id)->delete();
-
-                // 2. Eliminar sesiones y sus asistencias (solo si no tienen asistencias reales, ya validado)
-                $hr->sesionMaterias()->each(function($sesion) {
-                    $sesion->asistencia()->delete();
-                    $sesion->delete();
-                });
-
-                // 3. Eliminar detalles RMI (solo si están pendientes, ya validado)
                 $hr->detallesRmi()->delete();
 
-                // 4. Decidir si borrar el registro o dejarlo como placeholder
                 $totalRecordsForRap = HorarioMateria::where('idGradoMateria', $hr->idGradoMateria)->count();
 
                 if ($totalRecordsForRap > 1) {
-                    // Si hay otros horarios para este RAP (otros días u otros clones), borramos este registro físico
                     $hr->delete();
                 } else {
-                    // Si es el último registro del RAP, lo limpiamos para que quede como slot disponible (placeholder)
                     $hr->update([
                         'idDia'             => null,
                         'idInfraestructura' => null,
@@ -526,7 +503,12 @@ class HorarioMateriaController extends Controller
 
             DB::commit();
 
-            return response()->json(null, 204);
+            return response()->json([
+                'message' => $conservoHistorial
+                    ? 'Se quitaron las clases de hoy en adelante. Las que ya se dictaron se quedan y no se pueden eliminar.'
+                    : 'Horario eliminado correctamente.',
+                'conservoHistorial' => $conservoHistorial,
+            ]);
         } catch (Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -534,6 +516,190 @@ class HorarioMateriaController extends Controller
                 'error'   => $e->getMessage()
             ], 500);
         }
+    }
+
+    public function cambiarDesdeHoy(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'horaInicial' => 'required|date_format:H:i',
+            'horaFinal'   => 'required|date_format:H:i|after:horaInicial',
+            'idDia'       => 'nullable|integer|exists:dia,id',
+        ]);
+
+        DB::beginTransaction();
+
+        try {
+            $horario = HorarioMateria::findOrFail($id);
+
+            if (!$horario->idDia || !$horario->fechaFinal) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'Este horario todavía no tiene día ni fechas para cambiar.'
+                ], 422);
+            }
+
+            $idDiaNuevo = (int) ($request->idDia ?: $horario->idDia);
+            $finOriginal = Carbon::parse($horario->fechaFinal)->startOfDay();
+            $hoy = Carbon::today();
+            $corte = $this->cortarSesionesDesdeHoy($horario);
+            $desde = $hoy->copy();
+
+            if ($corte['conserva']) {
+                $desde = Carbon::parse($corte['fechaFinal'])->addDay()->startOfDay();
+            }
+
+            $inicioNuevo = $this->siguienteFechaDelDia($idDiaNuevo, $desde);
+
+            if ($inicioNuevo->gt($finOriginal)) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'Este horario ya no tiene clases de hoy en adelante.'
+                ], 422);
+            }
+
+            $datosNuevo = [
+                'idDia'        => $idDiaNuevo,
+                'horaInicial'  => $request->horaInicial,
+                'horaFinal'    => $request->horaFinal,
+                'fechaInicial' => $inicioNuevo->toDateString(),
+                'fechaFinal'   => $finOriginal->toDateString(),
+                'idFicha'      => $horario->idFicha,
+                'festivos'     => $horario->festivos ?? false,
+            ];
+
+            if ($this->verCruce($datosNuevo, $horario->id)) {
+                DB::rollBack();
+                return response()->json([
+                    'message' => 'El nuevo horario se cruza con otra clase del mismo grado.'
+                ], 422);
+            }
+
+            if (!$corte['conserva']) {
+                $horario->idDia = $idDiaNuevo;
+                $horario->horaInicial = $request->horaInicial;
+                $horario->horaFinal = $request->horaFinal;
+                $horario->fechaInicial = $inicioNuevo->toDateString();
+                $horario->fechaFinal = $finOriginal->toDateString();
+                $horario->save();
+                $this->generatePastSessions($horario);
+                DB::commit();
+
+                return response()->json([
+                    'message' => 'Horario actualizado. Todavía no había clases dictadas.',
+                    'horario' => $horario,
+                ]);
+            }
+
+            $nuevo = new HorarioMateria();
+            $nuevo->idGradoMateria = $horario->idGradoMateria;
+            $nuevo->idFicha = $horario->idFicha;
+            $nuevo->idDia = $idDiaNuevo;
+            $nuevo->idContrato = $horario->idContrato;
+            $nuevo->idInfraestructura = $horario->idInfraestructura;
+            $nuevo->festivos = $horario->festivos;
+            $nuevo->estado = $horario->estado ?: EstadoHorarioMateria::PENDIENTE;
+            $nuevo->observacion = $horario->observacion;
+            $nuevo->horaInicial = $request->horaInicial;
+            $nuevo->horaFinal = $request->horaFinal;
+            $nuevo->fechaInicial = $inicioNuevo->toDateString();
+            $nuevo->fechaFinal = $finOriginal->toDateString();
+
+            $nuevo->save();
+            $this->generatePastSessions($nuevo);
+            DB::commit();
+
+            return response()->json([
+                'message' => 'El horario cambió de hoy en adelante. Las clases ya dictadas quedaron con la hora anterior.',
+                'horarioAnterior' => $horario->fresh(),
+                'horario' => $nuevo,
+            ]);
+        } catch (Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Ocurrió un error al cambiar el horario',
+                'error'   => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    private function horariosDelMismoBloque(HorarioMateria $horarioMateria)
+    {
+        return HorarioMateria::where('idFicha', $horarioMateria->idFicha)
+            ->where('idGradoMateria', $horarioMateria->idGradoMateria)
+            ->where('idDia', $horarioMateria->idDia)
+            ->where('horaInicial', $horarioMateria->horaInicial)
+            ->where('horaFinal', $horarioMateria->horaFinal)
+            ->where('fechaInicial', $horarioMateria->fechaInicial)
+            ->get();
+    }
+
+    private function cortarSesionesDesdeHoy(HorarioMateria $horario): array
+    {
+        $sesiones = $horario->sesionMaterias()->get();
+        $protegidas = $sesiones->filter(fn ($sesion) => $this->sesionQuedaEnHistorial($sesion));
+        $borrables = $sesiones->reject(fn ($sesion) => $this->sesionQuedaEnHistorial($sesion));
+
+        foreach ($borrables as $sesion) {
+            $sesion->asistencia()->delete();
+            $sesion->delete();
+        }
+
+        if ($protegidas->isEmpty()) {
+            return ['conserva' => false, 'fechaFinal' => null];
+        }
+
+        $ultima = $protegidas
+            ->map(fn ($sesion) => Carbon::parse($sesion->fechaSesion)->toDateString())
+            ->sort()
+            ->last();
+
+        $horario->fechaFinal = $ultima;
+        $horario->save();
+
+        AsignacionSesion::where('idHorarioMateria', $horario->id)
+            ->whereDate('fechaFin', '>', $ultima)
+            ->update(['fechaFin' => $ultima]);
+
+        return ['conserva' => true, 'fechaFinal' => $ultima];
+    }
+
+    private function sesionQuedaEnHistorial(SesionMateria $sesion): bool
+    {
+        if (!$sesion->fechaSesion) {
+            return false;
+        }
+
+        $fecha = Carbon::parse($sesion->fechaSesion)->startOfDay();
+        $hoy = Carbon::today();
+
+        if ($fecha->lt($hoy)) {
+            return true;
+        }
+
+        if ($fecha->gt($hoy)) {
+            return false;
+        }
+
+        return $sesion->asistencia()
+            ->where(function ($query) {
+                $query->where('asistio', true)->orWhereNotNull('horaLLegada');
+            })
+            ->exists();
+    }
+
+    private function siguienteFechaDelDia(int $idDia, Carbon $desde): Carbon
+    {
+        $objetivo = $idDia === 7 ? Carbon::SUNDAY : $idDia;
+        $cursor = $desde->copy()->startOfDay();
+
+        for ($i = 0; $i < 7; $i++) {
+            if ($cursor->dayOfWeek === $objetivo) {
+                return $cursor->copy();
+            }
+            $cursor->addDay();
+        }
+
+        return $cursor;
     }
 
     private function getDataHorarioMaterias($data)

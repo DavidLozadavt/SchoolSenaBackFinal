@@ -7,13 +7,16 @@ use App\Http\Controllers\Controller;
 use App\Models\NivelEducativo;
 use App\Models\TipoFormacion;
 use App\Models\EstadoPrograma;
+use App\Models\NivelPrograma;
 use App\Models\Programa;
 use App\Util\KeyUtil;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 
 class PensumController extends Controller
@@ -30,7 +33,12 @@ class PensumController extends Controller
                 'tipos_formacion'    => TipoFormacion::where('activo', 1)
                     ->select('id', 'nombreTipoFormacion as nombre')
                     ->get(),
-                'estados_programa'   => EstadoPrograma::all()
+                'estados_programa'   => EstadoPrograma::all(),
+                'sedes'              => DB::table('sedes')
+                    ->where('idEmpresa', KeyUtil::idCompany())
+                    ->select('id', 'nombre')
+                    ->orderBy('nombre')
+                    ->get(),
             ]
         ], 200);
     }
@@ -69,33 +77,23 @@ class PensumController extends Controller
     public function indexByRed(Request $request, int $idRed)
     {
         try {
-            // Verificamos si se pasó el centro
-            if (!$request->filled('centro')) {
-                return response()->json([
-                    'status' => 'success',
-                    'data' => [] // Retorna vacío si no hay centro
+            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'red', 'sede', 'nivelesPrograma'])
+                ->where('idRed', $idRed)
+                ->where('idCompany', KeyUtil::idCompany());
+
+            if ($request->filled('centro')) {
+                $idCentro = $request->centro;
+                $programas->withCount([
+                    'aperturarProgramas as aperturas_activas_count' => function ($q) use ($idCentro) {
+                        $q->where('fechaFinalPlanMejoramiento', '>=', Carbon::today()->toDateString())
+                            ->whereHas('sede', function ($sub) use ($idCentro) {
+                                $sub->where('idCentroFormacion', $idCentro);
+                            });
+                    },
                 ]);
             }
 
-            $idCentro = $request->centro;
-
-            $programas = Programa::with(['nivel', 'tipoFormacion', 'estado', 'red'])
-                ->where('idRed', $idRed)
-                ->withCount([
-                    'fichasActivas as fichas_activas_count' => function ($q) use ($idCentro) {
-                        $q->whereHas('aperturarPrograma.sede', function ($sub) use ($idCentro) {
-                            $sub->where('idCentroFormacion', $idCentro);
-                        });
-                    }, 'aperturarProgramas as aperturas_activas_count' => function ($q) use ($idCentro) {
-                    $q->where('fechaFinalPlanMejoramiento', '>=', Carbon::today()->toDateString())
-                      ->whereHas('sede', function ($sub) use ($idCentro) {
-                          $sub->where('idCentroFormacion', $idCentro);
-                      });
-                }
-                ])
-                ->orderByDesc('fichas_activas_count')
-                ->orderBy('nombrePrograma')
-                ->get();
+            $programas = $programas->orderBy('nombrePrograma')->get();
 
             return response()->json([
                 'status' => 'success',
@@ -112,6 +110,12 @@ class PensumController extends Controller
 
     public function store(Request $request)
     {
+        if ($request->input('clasePrograma') === 'ACADEMICO') {
+            return $this->guardarAcademico($request);
+        }
+
+        $this->normalizarNiveles($request);
+
         $request->validate([
             'nombrePrograma'   => 'required|string|max:255',
             'codigoPrograma'   => 'required|string|max:255',
@@ -119,6 +123,13 @@ class PensumController extends Controller
             'idNivelEducativo' => 'required|exists:nivelEducativo,id',
             'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
             'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
+            'idSede' => ['required', Rule::exists('sedes', 'id')->where(fn ($q) => $q->where('idEmpresa', KeyUtil::idCompany()))],
+            'duracion' => 'required|integer|min:1',
+            'unidadDuracion' => 'required|in:ANOS,SEMESTRES,CICLOS,MESES,HORAS',
+            'vigenciaDesde' => 'required|date',
+            'niveles' => 'required|array|min:1',
+            'niveles.*.nombre' => 'required|string|max:120',
+            'niveles.*.tipoNivel' => 'required|in:GRADO,SEMESTRE,CICLO,MODULO',
             'documento'        => 'nullable|file|mimes:pdf|max:5120',
         ]);
 
@@ -132,6 +143,11 @@ class PensumController extends Controller
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
                 'idCompany'           => KeyUtil::idCompany(),
+                'idRed' => $request->idRed,
+                'idSede' => $request->idSede,
+                'duracion' => $request->duracion,
+                'unidadDuracion' => $request->unidadDuracion,
+                'vigenciaDesde' => $request->vigenciaDesde,
             ]);
 
             $sanitize = function ($string) {
@@ -182,7 +198,9 @@ class PensumController extends Controller
             }
 
 
-            $nuevoPrograma->load(['nivel', 'tipoFormacion', 'estado']);
+            $this->guardarNiveles($nuevoPrograma->id, $request->input('niveles', []));
+
+            $nuevoPrograma->load(['nivel', 'tipoFormacion', 'estado', 'red', 'sede', 'nivelesPrograma']);
 
             return response()->json([
                 'status' => 'success',
@@ -200,6 +218,12 @@ class PensumController extends Controller
 
     public function update(Request $request, $id)
     {
+        if ($request->input('clasePrograma') === 'ACADEMICO') {
+            return $this->guardarAcademico($request, (int) $id);
+        }
+
+        $this->normalizarNiveles($request);
+
         $request->validate([
             'nombrePrograma'   => 'required|string|max:255',
             'codigoPrograma'   => 'required|string|max:255',
@@ -207,11 +231,18 @@ class PensumController extends Controller
             'idNivelEducativo' => 'required|exists:nivelEducativo,id',
             'idTipoFormacion'  => 'required|exists:tipoFormacion,id',
             'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
+            'idSede' => ['required', Rule::exists('sedes', 'id')->where(fn ($q) => $q->where('idEmpresa', KeyUtil::idCompany()))],
+            'duracion' => 'required|integer|min:1',
+            'unidadDuracion' => 'required|in:ANOS,SEMESTRES,CICLOS,MESES,HORAS',
+            'vigenciaDesde' => 'required|date',
+            'niveles' => 'required|array|min:1',
+            'niveles.*.nombre' => 'required|string|max:120',
+            'niveles.*.tipoNivel' => 'required|in:GRADO,SEMESTRE,CICLO,MODULO',
             'documento'        => 'nullable|file|mimes:pdf|max:5120',
         ]);
 
         try {
-            $programa = Programa::findOrFail($id);
+            $programa = Programa::where('idCompany', KeyUtil::idCompany())->findOrFail($id);
 
             $data = [
                 'nombrePrograma'      => $request->nombrePrograma,
@@ -220,6 +251,11 @@ class PensumController extends Controller
                 'idNivelEducativo'    => $request->idNivelEducativo,
                 'idTipoFormacion'     => $request->idTipoFormacion,
                 'idEstadoPrograma'    => $request->idEstadoPrograma,
+                'idRed' => $request->idRed,
+                'idSede' => $request->idSede,
+                'duracion' => $request->duracion,
+                'unidadDuracion' => $request->unidadDuracion,
+                'vigenciaDesde' => $request->vigenciaDesde,
             ];
 
             if ($request->hasFile('documento')) {
@@ -259,8 +295,9 @@ class PensumController extends Controller
             }
 
             $programa->update($data);
+            $this->guardarNiveles($programa->id, $request->input('niveles', []));
 
-            $programa->load(['nivel', 'tipoFormacion', 'estado']);
+            $programa->load(['nivel', 'tipoFormacion', 'estado', 'red', 'sede', 'nivelesPrograma']);
 
             return response()->json([
                 'status' => 'success',
@@ -278,7 +315,7 @@ class PensumController extends Controller
     public function destroy($id)
     {
         try {
-            $programa = Programa::findOrFail($id);
+            $programa = Programa::where('idCompany', KeyUtil::idCompany())->findOrFail($id);
 
             // construir nombre carpeta
             $sanitize = function ($string) {
@@ -379,6 +416,125 @@ class PensumController extends Controller
                 'status' => 'error',
                 'message' => 'Error al actualizar: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    private function guardarAcademico(Request $request, ?int $id = null)
+    {
+        if (is_string($request->input('niveles'))) {
+            $request->merge(['niveles' => json_decode($request->input('niveles'), true) ?: []]);
+        }
+
+        $unicoNombre = Rule::unique('programa', 'nombrePrograma')->where(fn ($q) => $q->where('clasePrograma', 'ACADEMICO'));
+        $unicoCodigo = Rule::unique('programa', 'codigoPrograma')->where(fn ($q) => $q->where('clasePrograma', 'ACADEMICO'));
+        if ($id) {
+            $unicoNombre = $unicoNombre->ignore($id);
+            $unicoCodigo = $unicoCodigo->ignore($id);
+        }
+
+        $validated = $request->validate([
+            'nombrePrograma' => ['required', 'string', 'max:255', $unicoNombre],
+            'codigoPrograma' => ['required', 'string', 'max:255', $unicoCodigo],
+            'idNivelEducativo' => 'required|exists:nivelEducativo,id',
+            'idTipoFormacion' => 'required|exists:tipoFormacion,id',
+            'idEstadoPrograma' => 'required|exists:estadoPrograma,id',
+            'idSede' => ['required', Rule::exists('sedes', 'id')->where(fn ($q) => $q->where('idEmpresa', KeyUtil::idCompany()))],
+            'duracion' => 'required|integer|min:1',
+            'unidadDuracion' => 'required|in:ANOS,SEMESTRES,CICLOS,MESES,HORAS',
+            'vigenciaDesde' => 'required|date',
+            'idSistemaEvaluacion' => 'nullable|exists:sistemaEvaluacion,id',
+            'idEscalaCalificacion' => 'nullable|exists:escalaCalificacion,id',
+            'idRed' => 'required|integer|exists:red,id',
+            'descripcionPrograma' => 'nullable|string',
+            'documento' => 'nullable|file|mimes:pdf|max:5120',
+            'niveles' => 'required|array|min:1',
+            'niveles.*.nombre' => 'required|string|max:120',
+            'niveles.*.tipoNivel' => 'required|in:GRADO,SEMESTRE,CICLO,MODULO',
+        ], [
+            'nombrePrograma.unique' => 'El nombre del programa académico ya existe.',
+            'codigoPrograma.unique' => 'El código del programa académico ya existe.',
+            'niveles.required' => 'Agrega al menos un nivel del programa.',
+        ]);
+
+        try {
+            $data = [
+                'nombrePrograma' => $validated['nombrePrograma'],
+                'codigoPrograma' => $validated['codigoPrograma'],
+                'descripcionPrograma' => $validated['descripcionPrograma'] ?? null,
+                'idNivelEducativo' => $validated['idNivelEducativo'],
+                'idTipoFormacion' => $validated['idTipoFormacion'],
+                'idEstadoPrograma' => $validated['idEstadoPrograma'],
+                'idSede' => $validated['idSede'],
+                'duracion' => $validated['duracion'],
+                'unidadDuracion' => $validated['unidadDuracion'],
+                'vigenciaDesde' => $validated['vigenciaDesde'],
+                'idSistemaEvaluacion' => $validated['idSistemaEvaluacion'],
+                'idEscalaCalificacion' => $validated['idEscalaCalificacion'],
+                'idRed' => $validated['idRed'],
+                'clasePrograma' => 'ACADEMICO',
+                'idCompany' => KeyUtil::idCompany(),
+            ];
+
+            $programa = $id ? Programa::where('idCompany', KeyUtil::idCompany())->findOrFail($id) : new Programa();
+            if (!$id) {
+                $data['documento'] = null;
+            }
+            $programa->fill($data);
+            $programa->save();
+
+            NivelPrograma::where('idPrograma', $programa->id)->delete();
+            foreach (array_values($request->input('niveles', [])) as $orden => $nivel) {
+                NivelPrograma::create([
+                    'idPrograma' => $programa->id,
+                    'nombre' => $nivel['nombre'],
+                    'tipoNivel' => $nivel['tipoNivel'],
+                    'orden' => $orden + 1,
+                ]);
+            }
+
+            if ($request->hasFile('documento')) {
+                $nombre = preg_replace('/[^a-zA-Z0-9áéíóúÁÉÍÓÚüÜñÑ\-_]/u', '', preg_replace('/\s+/', '_', trim($programa->nombrePrograma)));
+                $ruta = 'programas/documentos';
+                if (!Storage::disk('public')->exists($ruta)) {
+                    Storage::disk('public')->makeDirectory($ruta);
+                }
+                $archivo = Str::limit($nombre, 80) . '_' . $programa->id . '.pdf';
+                $request->file('documento')->storeAs($ruta, $archivo, 'public');
+                $programa->update(['documento' => '/storage/' . $ruta . '/' . $archivo]);
+            }
+
+            $programa->load(['nivel', 'tipoFormacion', 'estado', 'red', 'sede', 'nivelesPrograma']);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => $id ? 'Programa académico actualizado.' : 'Programa académico guardado.',
+                'data' => $programa,
+            ], $id ? 200 : 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al guardar el programa académico: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private function normalizarNiveles(Request $request): void
+    {
+        if (is_string($request->input('niveles'))) {
+            $request->merge(['niveles' => json_decode($request->input('niveles'), true) ?: []]);
+        }
+    }
+
+    private function guardarNiveles(int $idPrograma, array $niveles): void
+    {
+        NivelPrograma::where('idPrograma', $idPrograma)->delete();
+        foreach (array_values($niveles) as $orden => $nivel) {
+            NivelPrograma::create([
+                'idPrograma' => $idPrograma,
+                'nombre' => $nivel['nombre'],
+                'tipoNivel' => $nivel['tipoNivel'],
+                'orden' => $orden + 1,
+            ]);
         }
     }
 }

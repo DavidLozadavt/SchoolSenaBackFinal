@@ -145,6 +145,7 @@ use App\Http\Controllers\ambiente_virtual\AsignacionActividadController;
 use App\Http\Controllers\ambiente_virtual\ActividadesAprendizController;
 use App\Http\Controllers\ambiente_virtual\CalificacionActividadController;
 use App\Http\Controllers\ambiente_virtual\MaterialApoyoFichaController;
+use App\Http\Controllers\ambiente_virtual\PlaneacionPedagogicaController;
 use App\Http\Controllers\MatriculaAcademicaController;
 use App\Http\Controllers\AnotacionesDisciplinariasController;
 use App\Http\Controllers\AsistenciaController;
@@ -1283,6 +1284,15 @@ Route::get('/sedes/regional/{idRegional}', [ControllersSedeController::class, 'g
 // IMPORTANTE: Las rutas específicas deben ir ANTES de las genéricas
 Route::get('fichas/clase-horario/{idHorarioMateria}', [FichaController::class, 'detalleClasePorHorario']);
 Route::get('fichas/instructor/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
+Route::get('planeacion-pedagogica', [PlaneacionPedagogicaController::class, 'index']);
+Route::post('planeacion-pedagogica', [PlaneacionPedagogicaController::class, 'store']);
+Route::get('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'show'])->whereNumber('id');
+Route::put('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'update'])->whereNumber('id');
+Route::delete('planeacion-pedagogica/{id}', [PlaneacionPedagogicaController::class, 'destroy'])->whereNumber('id');
+Route::get('planeacion-pedagogica/{id}/pdf', [PlaneacionPedagogicaController::class, 'pdf'])->whereNumber('id');
+Route::post('planeacion-pedagogica/{id}/enviar', [PlaneacionPedagogicaController::class, 'enviar'])->whereNumber('id');
+Route::post('planeacion-pedagogica/{id}/estado', [PlaneacionPedagogicaController::class, 'cambiarEstado'])->whereNumber('id');
+Route::patch('planeacion-pedagogica/clase/{claseId}/ejecutada', [PlaneacionPedagogicaController::class, 'marcarEjecutada'])->whereNumber('claseId');
 Route::get('fichas/instructor/{idInstructor}/clases-asignadas', [FichaController::class, 'clasesAsignadasInstructor']);
 Route::get('fichas/instructor/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
 Route::get('fichas/instructor/{idInstructor}/historial-sesiones', [FichaController::class, 'historialSesionesInstructor']);
@@ -1293,6 +1303,7 @@ Route::get('tipos-grado', [FichaController::class, 'getTiposGrado']); // trimest
 Route::get('fichas/{idFicha}/instructores-disponibles', [FichaController::class, 'getInstructoresDisponiblesPorFicha']);
 Route::post('fichas/{idFicha}/asignar-instructor-lider', [FichaController::class, 'asignarInstructorLider']);
 Route::post('fichas/multiples', [FichaController::class, 'storeMultiple']);
+Route::put('fichas/{id}/nombre-grado', [FichaController::class, 'actualizarNombreGrado']);
 Route::post('fichas/filtrar', [FichaController::class, 'filtrar']);
 Route::get('fichas', [FichaController::class, 'index']);
 Route::post('fichas', [FichaController::class, 'store']);
@@ -1436,6 +1447,7 @@ Route::group(['middleware' => 'auth:api'], function () {
     Route::post('horarios/materia', [HorarioMateriaController::class, 'store']); //crear horario
     Route::put('asignar/instructor', [HorarioMateriaController::class, 'updateTeacherHorarioMateria']); //asignar instructor a uno o varios horarios
     Route::put('desasignar/instructor', [HorarioMateriaController::class, 'unassignTeacherSchedule']); //desasignar instructor de uno o varios horarios
+    Route::put('horarios/materia/{id}/desde-hoy', [HorarioMateriaController::class, 'cambiarDesdeHoy']);
     Route::delete('horarios/materia/{id}', [HorarioMateriaController::class, 'destroy']); //eliminar horario
 });
 
@@ -1744,6 +1756,8 @@ Route::middleware('auth:api')->group(function () {
 
     Route::get('aperturaPrograma', [AperturarProgramaController::class, 'index']);
     Route::post('aperturaPrograma', [AperturarProgramaController::class, 'store']);
+    Route::get('jornadas-para-grados', [AperturarProgramaController::class, 'jornadasParaGrados']);
+    Route::get('programas/{idPrograma}/apertura-para-grados', [AperturarProgramaController::class, 'aperturaParaGrados']);
     Route::get('aperturaPrograma/{id}', [AperturarProgramaController::class, 'show']);
     Route::patch('aperturaPrograma/{id}', [AperturarProgramaController::class, 'update']);
 });

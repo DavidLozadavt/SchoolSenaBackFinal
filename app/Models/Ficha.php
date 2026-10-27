@@ -20,6 +20,8 @@ class Ficha extends Model
         'idSede',
         'idRegional',
         'idGrado',
+        'idJornada',
+        'clase',
         'porcentajeEjecucion',
     ];
 
@@ -70,5 +72,10 @@ class Ficha extends Model
     public function grado()
     {
         return $this->belongsTo(Grado::class, 'idGrado');
+    }
+
+    public function jornada()
+    {
+        return $this->belongsTo(Jornada::class, 'idJornada');
     }
 }
