@@ -35,7 +35,7 @@ class NivelesProgramaController extends Controller
             $recursos = [
                 'periodos' => $idEmpresa ? Periodo::where('idEmpresa', $idEmpresa)->select('id', 'nombrePeriodo as nombre')->get() : [],
                 'tipos_grado' => TipoGrado::select('id', 'nombreTipoGrado as nombre')->get(),
-                'jornadas_disponibles' => $idEmpresa ? Jornada::where('idEmpresa', $idEmpresa)->where('estado', 1)->select('id', 'nombreJornada as nombre')->get() : [],
+                'jornadas_disponibles' => $idEmpresa ? Jornada::where('idEmpresa', $idEmpresa)->where('estado', 'Activo')->select('id', 'nombreJornada as nombre')->get() : [],
             ];
 
             return response()->json([
@@ -53,7 +53,7 @@ class NivelesProgramaController extends Controller
         $recursos = [
             'periodos' => $idEmpresa ? Periodo::where('idEmpresa', $idEmpresa)->select('id', 'nombrePeriodo as nombre')->get() : [],
             'tipos_grado' => TipoGrado::select('id', 'nombreTipoGrado as nombre')->get(),
-            'jornadas_disponibles' => $idEmpresa ? Jornada::where('idEmpresa', $idEmpresa)->where('estado', 1)->select('id', 'nombreJornada as nombre')->get() : [],
+            'jornadas_disponibles' => $idEmpresa ? Jornada::where('idEmpresa', $idEmpresa)->where('estado', 'Activo')->select('id', 'nombreJornada as nombre')->get() : [],
         ];
 
         return response()->json([

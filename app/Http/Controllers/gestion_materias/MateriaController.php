@@ -24,6 +24,7 @@ use App\Models\GradoMateria;
 use App\Models\GradoPrograma;
 use App\Models\HorarioMateria;
 use App\Models\MatriculaAcademica;
+use App\Models\Status;
 
 use function PHPSTORM_META\map;
 use function PHPUnit\Framework\isEmpty;
@@ -44,9 +45,26 @@ class MateriaController extends Controller
      * @return \Illuminate\Http\Response
      */
 
-    public function getAllCompetences(): JsonResponse
+    public function getAllCompetences(Request $request): JsonResponse
     {
-        $materias = Materia::where('idMateriaPadre', null)->get();
+        $query = Materia::whereNull('idMateriaPadre');
+
+        if ($request->filled('idFicha')) {
+            $ficha = Ficha::find($request->input('idFicha'));
+            $idPrograma = $ficha
+                ? AperturarPrograma::where('id', $ficha->idAsignacion)->value('idPrograma')
+                : null;
+
+            $idsGradoPrograma = GradoPrograma::query()
+                ->when($idPrograma, fn ($q) => $q->where('idPrograma', $idPrograma))
+                ->when($ficha && $ficha->idGrado, fn ($q) => $q->where('idGrado', $ficha->idGrado))
+                ->pluck('id');
+
+            $idsMateria = GradoMateria::whereIn('idGradoPrograma', $idsGradoPrograma)->pluck('idMateria');
+            $query->whereIn('id', $idsMateria);
+        }
+
+        $materias = $query->get();
         $resultado = $materias->map(function ($materia) {
             return [
                 'id' => $materia->id,
@@ -72,7 +90,11 @@ class MateriaController extends Controller
             $gradoPrograma = GradoPrograma::where('idGrado', $ficha->idGrado)
                 ->where('idPrograma', $apertura->idPrograma)
                 ->first();
-            
+
+            if (!$gradoPrograma) {
+                return response()->json([]);
+            }
+
             // obtener materias asociadas al grado (PRIMERO, SEGUNDO, ETC)
             $gradosMateria = GradoMateria::where('idGradoPrograma', $gradoPrograma->id)
                 ->whereHas('materia', function ($query) {
@@ -472,28 +494,31 @@ class MateriaController extends Controller
 
         // buscar materia con el area de conocimiento
         $materia = Materia::where('id', $idMateria)->with('areaConocimiento')->firstOrFail();
+        $idCompany = KeyUtil::idCompany();
 
-        if ($materia->idAreaConocimiento == null) {
-            return response()->json([
-                'message' => 'Competencia sin área de conocimiento',
-                'data' => []
-            ], 400);
-        }
-
-        $areaConocimientoRequerido = $materia->areaConocimiento->id;
-
-        $contratos = Contract::whereHas(
-            'asignacionContratoAreaConocimiento',
-            function ($query) use ($areaConocimientoRequerido) {
-                $query->where('idAreaConocimiento', $areaConocimientoRequerido);
-            }
-        )
+        $contratos = Contract::query()
+            ->where('idEstado', Status::ID_ACTIVE)
+            ->where(function ($query) use ($idCompany) {
+                $query->where('idempresa', $idCompany)->orWhere('idCompany', $idCompany);
+            })
             ->select('id', 'numeroContrato', 'idpersona')
             ->with([
                 'persona:id,nombre1,nombre2,apellido1,apellido2,rutaFoto',
                 'asignacionCategoriaFormacionContrato.categoriaFormacion'
-            ])
-            ->get();
+            ]);
+
+        // Las materias de grado no llevan área SENA. En ese caso salen los docentes activos de la empresa.
+        if ($materia->idAreaConocimiento != null) {
+            $areaConocimientoRequerido = $materia->areaConocimiento->id;
+            $contratos->whereHas(
+                'asignacionContratoAreaConocimiento',
+                function ($query) use ($areaConocimientoRequerido) {
+                    $query->where('idAreaConocimiento', $areaConocimientoRequerido);
+                }
+            );
+        }
+
+        $contratos = $contratos->get();
 
 
         return response()->json([
@@ -504,44 +529,78 @@ class MateriaController extends Controller
 
     public function crearCompetencia(Request $request)
     {
-        try {
-            $datos = $request->all();
+        if ($request->input('creditos') === '') {
+            $request->merge(['creditos' => null]);
+        }
+        if ($request->input('codigo') === '') {
+            $request->merge(['codigo' => null]);
+        }
 
+        $datos = $request->validate([
+            'nombreMateria' => 'required|string|min:2|max:255',
+            'descripcion' => 'nullable|string',
+            'idAreaConocimiento' => 'nullable|exists:area_conocimiento,id',
+            'idMateriaPadre' => 'nullable|exists:materia,id',
+            'creditos' => 'nullable|numeric',
+            'codigo' => 'nullable|string|max:20',
+            'idFicha' => 'nullable|exists:ficha,id',
+        ]);
+
+        try {
             DB::beginTransaction();
-            $materiaPadre = Materia::where('id', $datos['idMateriaPadre'])->first();
+            $materiaPadre = !empty($datos['idMateriaPadre'])
+                ? Materia::find($datos['idMateriaPadre'])
+                : null;
             $idCompany = KeyUtil::idCompany();
-            $idFicha = $datos['idFicha'];
+            $idFicha = $datos['idFicha'] ?? null;
 
             $newMateria = Materia::create([
                 'nombreMateria' => $datos['nombreMateria'],
-                'descripcion' => $datos['descripcion'],
-                'idAreaConocimiento' => $datos['idMateriaPadre'] != null ? $materiaPadre->idAreaConocimiento : $datos['idAreaConocimiento'],
+                'descripcion' => $datos['descripcion'] ?? '',
+                'idAreaConocimiento' => $materiaPadre
+                    ? $materiaPadre->idAreaConocimiento
+                    : ($datos['idAreaConocimiento'] ?? null),
                 'idMateriaPadre' => $datos['idMateriaPadre'] ?? null,
-                'creditos' => $datos['creditos'],
-                'codigo' => $datos['codigo'],
+                'creditos' => $datos['creditos'] ?? null,
+                'codigo' => $datos['codigo'] ?? null,
                 'idCompany' => $idCompany,
                 'idEmpresa' => $idCompany,
             ]);
 
             if ($idFicha) {
                 $ficha = Ficha::with('aperturarPrograma')->find($idFicha);
-                $gradoPrograma = GradoPrograma::where('idGrado', $ficha->idGrado)
-                    ->where('idPrograma', $ficha->aperturarPrograma->idPrograma)
-                    ->firstOrFail();
-                GradoMateria::create([
-                    'idGradoPrograma' => $gradoPrograma->id,
-                    'idMateria' => $newMateria->id,
-                ]);
+                $idPrograma = $ficha?->aperturarPrograma?->idPrograma;
+                if (!$ficha || !$ficha->idGrado || !$idPrograma) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => 'La materia tiene que quedar en un grado. Abre la malla del grado y créala desde ahí.',
+                    ], 422);
+                }
+
+                $gradoPrograma = GradoPrograma::firstOrCreate(
+                    ['idPrograma' => $idPrograma, 'idGrado' => $ficha->idGrado],
+                    [
+                        'fechaInicio' => $ficha->aperturarPrograma->fechaInicialClases,
+                        'fechaFin' => $ficha->aperturarPrograma->fechaFinalClases,
+                        'estado' => 'EN CURSO',
+                    ]
+                );
+                GradoMateria::firstOrCreate(
+                    ['idGradoPrograma' => $gradoPrograma->id, 'idMateria' => $newMateria->id],
+                    ['estado' => 'PENDIENTE']
+                );
             }
 
             DB::commit();
             return response()->json([
-                'message' => 'Competencia creada correctamente'
+                'message' => empty($datos['idMateriaPadre'])
+                    ? 'Materia creada correctamente'
+                    : 'RAP creado correctamente'
             ], 201);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json([
-                'message' => 'No se pudo crear la competencia',
+                'message' => 'No se pudo crear la materia',
                 'error' => $e->getMessage()
             ], 400);
         }

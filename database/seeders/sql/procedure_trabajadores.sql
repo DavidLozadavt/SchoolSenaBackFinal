@@ -1,9 +1,10 @@
-CREATE DEFINER=`root`@`localhost` PROCEDURE `vt_school`.`cargarTrabajadores`(
+CREATE DEFINER=`root`@`localhost` PROCEDURE `cargarTrabajadores`(
     IN companyId INT,
     IN val_centroId INT,
     IN val_rol VARCHAR(100),
     IN encryptedPassword VARCHAR(255)
 )
+SQL SECURITY INVOKER
 BEGIN
     DECLARE done INT DEFAULT 0;
 
@@ -107,15 +108,19 @@ BEGIN
                 );
             END IF;
 
-            -- 4) Roles (crear si no existe)
+            IF nomRol IS NULL OR TRIM(nomRol) = '' THEN
+                SET nomRol = val_rol;
+            END IF;
+
+            -- 4) Roles (crear si no existe). Usa el rol de la fila.
             IF NOT EXISTS (
                 SELECT 1
                 FROM roles
                 WHERE CONVERT(name USING utf8mb4) COLLATE utf8mb4_unicode_ci
-                    = CONVERT(val_rol USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                    = CONVERT(nomRol USING utf8mb4) COLLATE utf8mb4_unicode_ci
             ) THEN
                 INSERT INTO roles (name, guard_name)
-                VALUES (val_rol, 'web');
+                VALUES (nomRol, 'web');
             END IF;
 
             -- 5) Nivel Educativo (crear si no existe)
@@ -183,7 +188,7 @@ BEGIN
 
             -- 9) Activación empresa
             INSERT INTO activation_company_users (user_id, state_id, company_id, fechaInicio, fechaFin)
-            VALUES (userId, 18, companyId, feIni, feFin);
+            VALUES (userId, 1, companyId, feIni, feFin);
 
             SET activationId = LAST_INSERT_ID();
 
@@ -192,7 +197,7 @@ BEGIN
                 SELECT id
                 FROM roles
                 WHERE CONVERT(name USING utf8mb4) COLLATE utf8mb4_unicode_ci
-                    = CONVERT(val_rol USING utf8mb4) COLLATE utf8mb4_unicode_ci
+                    = CONVERT(nomRol USING utf8mb4) COLLATE utf8mb4_unicode_ci
                 LIMIT 1
             );
 

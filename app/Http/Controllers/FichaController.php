@@ -13,6 +13,7 @@ use App\Models\SesionMateria;
 use App\Enums\EstadoSesionMateria;
 use App\Models\CentrosFormacion;
 use App\Models\Grado;
+use App\Models\GradoPrograma;
 use App\Util\KeyUtil;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -43,42 +44,65 @@ class FichaController extends Controller
     public function storeMultiple(Request $request)
     {
         $validated = $request->validate([
-            // Ficha
             'idAsignacion' => 'required|exists:aperturarprograma,id',
-            'cantidadGrados' => 'required|integer|min:1'
+            'cantidadGrados' => 'required|integer|min:1|max:10',
+            'idJornada' => 'required|exists:jornadas,id',
+            'nombres' => 'required|array|min:1|max:10',
+            'nombres.*' => 'required|string|min:2|max:255',
         ]);
 
         $apertura = AperturarPrograma::findOrFail($validated['idAsignacion']);
-        $idRegional = KeyUtil::idCompany();
-
-        $grados = Grado::where('idTipoGrado', $apertura->idTipoGrado??5) // Si no tiene tipo grado asignado, tomar el tipo grado 5 (año)
-            ->orderBy('numeroGrado', 'asc')
-            ->get();
-
-        // encontrar registros dentro de la apertura
-        $gradosExistentes = Ficha::where('idAsignacion', $validated['idAsignacion'])->count();
-
-        if ($gradosExistentes + $validated['cantidadGrados'] > $grados->count()) {
+        $programaDeLaEmpresa = Programa::where('id', $apertura->idPrograma)
+            ->where('idCompany', KeyUtil::idCompany())
+            ->exists();
+        if (!$programaDeLaEmpresa) {
             return response()->json([
-                'message' => 'Demasiados grados para registrar en este programa',
-            ], 400);
+                'message' => 'Esta apertura no pertenece a la empresa con la que entraste',
+            ], 403);
         }
+
+        $idRegional = KeyUtil::idCompany();
+        $idJornada = $validated['idJornada'];
+        $nombres = array_values($validated['nombres']);
 
         DB::beginTransaction();
         try {
-            for ($i = 0; $i < $validated['cantidadGrados']; $i++) {
-                $nombreGrado = $grados[$gradosExistentes + $i]->nombreGrado;
-                $idGrado = $grados[$gradosExistentes + $i]->id;
+            foreach ($nombres as $nombreEscrito) {
+                $nombreGrado = trim($nombreEscrito);
+                $numero = ((int) Grado::max('numeroGrado')) + 1;
+                $grado = Grado::create([
+                    'nombreGrado' => $nombreGrado,
+                    'numeroGrado' => $numero,
+                    'idTipoGrado' => 5,
+                ]);
+
+                GradoPrograma::create([
+                    'idPrograma' => $apertura->idPrograma,
+                    'idGrado' => $grado->id,
+                    'fechaInicio' => $apertura->fechaInicialClases,
+                    'fechaFin' => $apertura->fechaFinalClases,
+                    'estado' => 'EN CURSO',
+                ]);
+
+                $base = $nombreGrado . '-P' . $apertura->idPrograma;
+                $codigo = $base;
+                $sufijo = 2;
+                while (Ficha::where('codigo', $codigo)->exists()) {
+                    $codigo = $nombreGrado . '-' . $sufijo . '-P' . $apertura->idPrograma;
+                    $sufijo++;
+                }
 
                 Ficha::create([
                     'idAsignacion' => $validated['idAsignacion'],
-                    'codigo' => $nombreGrado,
+                    'codigo' => $codigo,
                     'idSede' => $apertura->idSede ?? null,
                     'documento' => null,
                     'idInfraestructura' => null,
                     'porcentajeEjecucion' => 100,
                     'idRegional' => $idRegional ?? null,
-                    'idGrado' => $idGrado,
+                    'idGrado' => $grado->id,
+                    'idJornada' => $idJornada,
+                    'clase' => 'GRADO',
                 ]);
             }
         } catch (\Exception $e) {
@@ -92,8 +116,95 @@ class FichaController extends Controller
         DB::commit();
 
         return response()->json([
-            'message' => 'Grupos creados correctamente',
+            'message' => 'Grados creados correctamente',
         ], 201);
+    }
+
+    public function actualizarNombreGrado(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'nombreGrado' => 'required|string|min:2|max:255',
+            'idJornada' => 'nullable|exists:jornadas,id',
+        ]);
+
+        $ficha = Ficha::findOrFail($id);
+        if ($ficha->clase !== 'GRADO') {
+            return response()->json([
+                'message' => 'El nombre se edita en el grado. La ficha se crea aparte.',
+            ], 422);
+        }
+
+        $apertura = AperturarPrograma::findOrFail($ficha->idAsignacion);
+        $programaDeLaEmpresa = Programa::where('id', $apertura->idPrograma)
+            ->where('idCompany', KeyUtil::idCompany())
+            ->exists();
+        if (!$programaDeLaEmpresa) {
+            return response()->json([
+                'message' => 'Este grado no pertenece a la empresa con la que entraste',
+            ], 403);
+        }
+
+        $nombre = trim($validated['nombreGrado']);
+        $compartido = Ficha::where('idGrado', $ficha->idGrado)->where('id', '!=', $ficha->id)->exists()
+            || GradoPrograma::where('idGrado', $ficha->idGrado)
+                ->where('idPrograma', '!=', $apertura->idPrograma)
+                ->exists();
+
+        DB::beginTransaction();
+        try {
+            if ($compartido || !$ficha->idGrado) {
+                $grado = Grado::create([
+                    'nombreGrado' => $nombre,
+                    'numeroGrado' => ((int) Grado::max('numeroGrado')) + 1,
+                    'idTipoGrado' => 5,
+                ]);
+                $enlace = GradoPrograma::where('idPrograma', $apertura->idPrograma)
+                    ->where('idGrado', $ficha->idGrado)
+                    ->first();
+                if ($enlace) {
+                    $enlace->idGrado = $grado->id;
+                    $enlace->save();
+                } else {
+                    GradoPrograma::create([
+                        'idPrograma' => $apertura->idPrograma,
+                        'idGrado' => $grado->id,
+                        'fechaInicio' => $apertura->fechaInicialClases,
+                        'fechaFin' => $apertura->fechaFinalClases,
+                        'estado' => 'EN CURSO',
+                    ]);
+                }
+                $ficha->idGrado = $grado->id;
+            } else {
+                $grado = Grado::findOrFail($ficha->idGrado);
+                $grado->nombreGrado = $nombre;
+                $grado->save();
+                GradoPrograma::firstOrCreate(
+                    ['idPrograma' => $apertura->idPrograma, 'idGrado' => $grado->id],
+                    [
+                        'fechaInicio' => $apertura->fechaInicialClases,
+                        'fechaFin' => $apertura->fechaFinalClases,
+                        'estado' => 'EN CURSO',
+                    ]
+                );
+            }
+
+            if (!empty($validated['idJornada'])) {
+                $ficha->idJornada = $validated['idJornada'];
+            }
+            $ficha->save();
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'No se pudo editar el grado',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => 'Grado actualizado',
+            'nombreGrado' => $nombre,
+        ]);
     }
 
     // este metodo hace una copia de una ficha seleccionada, pero solo copia las materias asignadas
@@ -250,21 +361,25 @@ class FichaController extends Controller
             'data' => $fichas
         ]);
     }
-    public function fichasPorPrograma(int $idApertura): JsonResponse
+    public function fichasPorPrograma(Request $request, int $idApertura): JsonResponse
     {
+        $porPrograma = $request->boolean('porPrograma');
         $fichas = Ficha::query()
-            ->whereHas('asignacion', function ($query) use ($idApertura) {
-                $query->where('id', $idApertura);
+            ->whereHas('asignacion', function ($query) use ($idApertura, $porPrograma) {
+                $porPrograma
+                    ? $query->where('idPrograma', $idApertura)
+                    : $query->where('id', $idApertura);
             })
             ->with([
                 'sede:id,nombre,idCentroFormacion',
                 'regional:id,razonSocial',
-                'asignacion.jornada:id,nombreJornada',
-                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma,idJornada',
+                'asignacion:id,estado,fechaInicialClases,fechaFinalClases,idPrograma',
                 'asignacion.programa:id,nombrePrograma',
                 'asignacion.programa.grados', //Ya puedo capturar en idgrado
                 'instructorLider:id,idpersona', // Especificar campos para que Laravel resuelva correctamente la relación
                 'instructorLider.persona', // Luego cargar persona completa para que funcione rutaFotoUrl y todos los campos
+                'jornada:id,nombreJornada',
+                'grado:id,nombreGrado,numeroGrado',
             ])
             ->orderBy('created_at', 'desc')
             ->get();
@@ -386,33 +501,39 @@ class FichaController extends Controller
             }
 
             $idPrograma = $ficha->asignacion->idPrograma;
+            $idCompany = KeyUtil::idCompany();
+            $esGrado = $ficha->clase === 'GRADO';
 
             Log::info('Buscando instructores para programa ID: ' . $idPrograma);
-            Log::info('ID Empresa: ' . KeyUtil::idCompany());
+            Log::info('ID Empresa: ' . $idCompany);
 
-            // Primero verificamos si hay contratos con este programa
-            $contratosConPrograma = DB::table('asignacion_contrato_programa')
-                ->where('idPrograma', $idPrograma)
-                ->pluck('idContrato')
-                ->toArray();
+            $instructoresQuery = Contract::with([
+                'persona',
+                'nivelEducativo:id,nombreNivel',
+                'areasConocimiento:id,nombreAreaConocimiento'
+            ])
+                ->where('idEstado', Status::ID_ACTIVE)
+                ->where(function ($query) use ($idCompany) {
+                    $query->where('idempresa', $idCompany)->orWhere('idCompany', $idCompany);
+                });
 
-            Log::info('Contratos con programa ' . $idPrograma . ': ' . count($contratosConPrograma));
-            Log::info('IDs de contratos: ' . json_encode($contratosConPrograma));
+            // En un grado salen los docentes activos de la empresa.
+            // En una ficha SENA siguen saliendo solo los que tienen ese programa en el contrato.
+            if (!$esGrado) {
+                $contratosConPrograma = DB::table('asignacion_contrato_programa')
+                    ->where('idPrograma', $idPrograma)
+                    ->pluck('idContrato')
+                    ->toArray();
 
-            // Usar método directo con whereIn para mayor confiabilidad
-            if (!empty($contratosConPrograma)) {
-                $instructores = Contract::with([
-                    'persona', // Cargar persona completa para que funcione el accessor rutaFotoUrl
-                    'nivelEducativo:id,nombreNivel',
-                    'areasConocimiento:id,nombreAreaConocimiento'
-                ])
-                    ->whereIn('id', $contratosConPrograma)
-                    ->where('idEstado', Status::ID_ACTIVE)
-                    ->where('idempresa', KeyUtil::idCompany())
-                    ->get();
+                Log::info('Contratos con programa ' . $idPrograma . ': ' . count($contratosConPrograma));
+
+                if (empty($contratosConPrograma)) {
+                    $instructores = collect([]);
+                } else {
+                    $instructores = $instructoresQuery->whereIn('id', $contratosConPrograma)->get();
+                }
             } else {
-                // Si no hay contratos con el programa, retornar array vacío
-                $instructores = collect([]);
+                $instructores = $instructoresQuery->get();
             }
 
             Log::info('Instructores encontrados para programa ' . $idPrograma . ': ' . $instructores->count());
@@ -478,21 +599,35 @@ class FichaController extends Controller
 
             $idPrograma = $ficha->asignacion->idPrograma;
             $idInstructorLider = $validated['idInstructorLider'];
+            $idCompany = KeyUtil::idCompany();
+            $esGrado = $ficha->clase === 'GRADO';
 
-            // Verificar que el instructor tenga el programa asignado
             if ($idInstructorLider !== null) {
-            $instructor = Contract::whereHas('programas', function ($query) use ($idPrograma) {
-                $query->where('programa.id', $idPrograma);
-            })
-                ->where('id', $idInstructorLider)
-                ->where('idEstado', Status::ID_ACTIVE)
-                ->first();
+                $instructorQuery = Contract::where('id', $idInstructorLider)
+                    ->where('idEstado', Status::ID_ACTIVE)
+                    ->where(function ($query) use ($idCompany) {
+                        $query->where('idempresa', $idCompany)->orWhere('idCompany', $idCompany);
+                    });
 
-            if (!$instructor) {
-                return response()->json([
-                    'message' => 'El instructor seleccionado no tiene el programa de la ficha asignado en su contrato'
-                ], 422);
-            }
+                if (!$esGrado) {
+                    $instructorQuery->whereHas('programas', function ($query) use ($idPrograma) {
+                        $query->where('programa.id', $idPrograma);
+                    });
+                }
+
+                $instructor = $instructorQuery->first();
+
+                if (!$instructor) {
+                    return response()->json([
+                        'message' => $esGrado
+                            ? 'El docente no tiene un contrato activo en esta empresa'
+                            : 'El instructor seleccionado no tiene el programa de la ficha asignado en su contrato'
+                    ], 422);
+                }
+
+                if ($esGrado) {
+                    $instructor->programas()->syncWithoutDetaching([$idPrograma]);
+                }
             }
 
             // Actualizar la ficha

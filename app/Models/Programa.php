@@ -23,7 +23,14 @@ class Programa extends Model
         'idTipoFormacion',
         'idEstadoPrograma',
         'idCompany',
-        'idRed'
+        'idRed',
+        'clasePrograma',
+        'duracion',
+        'unidadDuracion',
+        'vigenciaDesde',
+        'idSede',
+        'idSistemaEvaluacion',
+        'idEscalaCalificacion',
     ];
 
     public function nivel()
@@ -93,6 +100,16 @@ class Programa extends Model
     public function red()
     {
         return $this->belongsTo(Red::class, 'idRed');
+    }
+
+    public function sede()
+    {
+        return $this->belongsTo(Sede::class, 'idSede');
+    }
+
+    public function nivelesPrograma(): HasMany
+    {
+        return $this->hasMany(NivelPrograma::class, 'idPrograma')->orderBy('orden');
     }
 
     //Para ver el conteo de fichas que tiene un programa:

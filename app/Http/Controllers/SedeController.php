@@ -101,7 +101,8 @@ class SedeController extends Controller
             }
         }
 
-        $sedes = Sede::whereNotNull('idCiudad')
+        $sedes = Sede::where('idEmpresa', KeyUtil::idCompany())
+            ->whereNotNull('idCiudad')
             ->when($idCentro, function ($query) use ($idCentro) {
                 return $query->where('idCentroFormacion', $idCentro);
             })
