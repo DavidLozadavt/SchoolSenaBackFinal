@@ -48,6 +48,8 @@ class UserController extends Controller
         $roleId = $request->input('role_id', '');
         $sortOrder = $request->input('sort_order', '1');
 
+        $query = ActivationCompanyUser::with('company', 'user', 'user.persona', 'roles', 'estado')
+            ->where('company_id', $id);
         $idCentroFormacion = $request->input('idCentroFormacion');
 
         $currentUser = auth('api')->user() ?? auth()->user();
@@ -129,8 +131,8 @@ class UserController extends Controller
         // Inicializar variable
         $passwordUpdated = false;
 
-        // Solo actualizar contraseña si se proporciona dentro del objeto user
-        if (isset($userData['contrasena']) && !empty($userData['contrasena'])) {
+// Solo actualizar contraseña si se proporciona
+        if ($request->input('contrasena')) {
             $user->contrasena = bcrypt($userData['contrasena']);
             $user->save();
             $passwordUpdated = true;
@@ -144,13 +146,53 @@ class UserController extends Controller
             $activacion->save();
         }
 
-        // Actualizar roles según el tipo de usuario (APRENDIZ o INSTRUCTOR)
-        if ($activacion->hasRole('ESTUDIANTEUP')) {
-            $activacion->removeRole('ESTUDIANTEUP');
-            $activacion->assignRole('APRENDIZ');
-        } elseif ($activacion->hasRole('DOCENTEUP')) {
-            $activacion->removeRole('DOCENTEUP');
-            $activacion->assignRole('INSTRUCTOR SENA');
+        $companyId = KeyUtil::idCompany();
+        $estudianteUpRoleId = DB::table('roles')
+            ->where('name', 'APRENDIZUP')
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        $role = DB::table('model_has_roles')
+            ->where('model_id', $activacion->id)
+            ->where('model_type', ActivationCompanyUser::class)
+            ->where('role_id', $estudianteUpRoleId)
+            ->first();
+
+        $estudianteRoleId = DB::table('roles')
+            ->where('name', 'APRENDIZ SENA')
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        if ($role) {
+            DB::table('model_has_roles')
+                ->where('model_id', $activacion->id)
+                ->where('model_type', ActivationCompanyUser::class)
+                ->where('role_id', $estudianteUpRoleId)
+                ->update(['role_id' => $estudianteRoleId]);
+        }
+
+        $docenteUpRoleId = DB::table('roles')
+            ->where('name', 'DOCENTEUP')
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        $roleDocente = DB::table('model_has_roles')
+            ->where('model_id', $activacion->id)
+            ->where('model_type', ActivationCompanyUser::class)
+            ->where('role_id', $docenteUpRoleId)
+            ->first();
+
+        $docenteRoleId = DB::table('roles')
+            ->where('name', 'INSTRUCTOR SENA')
+            ->where('company_id', $companyId)
+            ->value('id');
+
+        if ($roleDocente) {
+            DB::table('model_has_roles')
+                ->where('model_id', $activacion->id)
+                ->where('model_type', ActivationCompanyUser::class)
+                ->where('role_id', $docenteUpRoleId)
+                ->update(['role_id' => $docenteRoleId]);
         }
 
         // $contrato = $persona->contrato;
@@ -289,14 +331,32 @@ class UserController extends Controller
 
     public function asignation(Request $request)
     {
-
         DB::table('model_has_roles')
             ->where('model_id', $request->idActivation)
             ->delete();
         $user = ActivationCompanyUser::find($request->input('idActivation'));
-        $user->assignRole($request->input('roles', []));
+
+        if (!$user) {
+            return response()->json(['error' => 'Activación no encontrada'], 404);
+        }
+
+        $rolesInput = $request->input('roles', []);
+        $rolesToAssign = [];
+        foreach ($rolesInput as $r) {
+            if (is_string($r) && !is_numeric($r)) {
+                $roleObj = \Spatie\Permission\Models\Role::firstOrCreate([
+                    'name' => $r,
+                    'guard_name' => 'web'
+                ]);
+                $rolesToAssign[] = $roleObj->id;
+            } else {
+                $rolesToAssign[] = (int) $r;
+            }
+        }
+
+        $user->assignRole($rolesToAssign);
         $user->load('roles');
-        return $user;
+        return response()->json($user);
     }
 
 
@@ -446,7 +506,7 @@ class UserController extends Controller
                 if ($company) {
                     $fullName = trim("{$persona->nombre1} {$persona->nombre2} {$persona->apellido1} {$persona->apellido2}");
                     $fullName = preg_replace('/\s+/', ' ', $fullName);
-                    
+
                     $company->update([
                         'razonSocial' => $fullName
                     ]);

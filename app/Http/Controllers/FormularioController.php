@@ -17,6 +17,7 @@ use App\Models\AsignacionProcesoPago;
 use App\Models\Factura;
 use App\Models\Proceso;
 use App\Models\TipoFactura;
+use App\Services\EscarapelaService;
 use App\Util\KeyUtil;
 use Carbon\Carbon;
 
@@ -58,6 +59,7 @@ class FormularioController extends Controller
                 'titulo' => $request->titulo,
                 'descripcion' => $request->descripcion,
                 'colorTema' => $request->colorTema ?? '#6366f1',
+                'imagenCabecera' => $request->imagenCabecera,
                 'estado' => $request->estado ?? 'borrador',
                 'requiereAutenticacion' => $request->requiereAutenticacion ?? false,
             ]);
@@ -128,6 +130,8 @@ class FormularioController extends Controller
                 'titulo' => $request->titulo,
                 'descripcion' => $request->descripcion,
                 'colorTema' => $request->colorTema,
+                // El modal de configuración no envía el logo: solo se toca si viene en el request
+                'imagenCabecera' => $request->exists('imagenCabecera') ? $request->imagenCabecera : $formulario->imagenCabecera,
                 'estado' => $request->estado,
                 'requiereAutenticacion' => $request->requiereAutenticacion,
                 'slug' => $newSlug,
@@ -297,13 +301,24 @@ class FormularioController extends Controller
         ));
         $userId = $isEmbed ? null : ($user ? $user->id : null);
 
+        // Quien acaba de responder puede corregir su respuesta con la llave que recibió al enviarla.
+        $editada = null;
+        if ($request->filled('idRespuesta')) {
+            $editada = $this->respuestaEditable($request, $formulario);
+            if (!$editada) {
+                return response()->json(['error' => 'No se puede editar esta respuesta.'], 403);
+            }
+        }
+
         try {
             DB::beginTransaction();
 
             // ── Fase 1: mismo login ───────────────────────────────────────
             // Busca directamente por nexiEmail (embed) o userId (School nativo).
             $existingByLogin = null;
-            if ($isEmbed && $emailParam) {
+            if ($editada) {
+                $existingByLogin = $editada;
+            } elseif ($isEmbed && $emailParam) {
                 $existingByLogin = FormularioRespuesta::where('idFormulario', $formulario->id)
                     ->where('nexiEmail', $emailParam)
                     ->first();
@@ -313,7 +328,7 @@ class FormularioController extends Controller
                     ->first();
             }
 
-            if ($existingByLogin && !$request->input('forzar_actualizacion', false)) {
+            if ($existingByLogin && !$editada && !$request->input('forzar_actualizacion', false)) {
                 DB::rollBack();
                 return response()->json([
                     'ya_inscrito'        => true,
@@ -385,8 +400,24 @@ class FormularioController extends Controller
                 }
             }
 
+            // Preguntas marcadas como "dato único" (p. ej. identificación): no
+            // se acepta un valor que ya esté en otra respuesta del formulario.
+            $duplicados = $this->valoresUnicosRepetidos($formulario, $request->respuestas ?? [], $existingByLogin?->id);
+
+            if ($duplicados) {
+                DB::rollBack();
+
+                $primero = $duplicados[0];
+
+                return response()->json([
+                    'error' => "El dato \"{$primero['valor']}\" ya fue registrado en \"{$primero['titulo']}\". Ingresa uno diferente.",
+                    'campos_duplicados' => array_column($duplicados, 'idPregunta'),
+                ], 422);
+            }
+
             // ── Crear o actualizar ────────────────────────────────────────
             if ($existingByLogin) {
+                // Edición de su propia inscripción: conserva su código de escarapela.
                 $existingByLogin->update(['respuestas' => $request->respuestas ?? []]);
                 $respuesta = $existingByLogin;
             } else {
@@ -399,25 +430,34 @@ class FormularioController extends Controller
                 ]);
             }
 
-            // Auto-inscribir a evento si está asociado
+            // Formulario de un evento (o con escarapela al registrarse): cada
+            // inscrito recibe su código de escarapela.
+            $codigoEscarapela = $respuesta->codigoEscarapela;
+            if (!$codigoEscarapela) {
+                $codigoEscarapela = app(EscarapelaService::class)->codigoPara('mysql', $formulario);
+                if ($codigoEscarapela) {
+                    $respuesta->codigoEscarapela = $codigoEscarapela;
+                    $respuesta->save();
+                }
+            }
+
+            // Auto-inscribir a evento si está asociado. Incrustado en NexiService
+            // no aplica: allí inscribe `register-public` con el correo de esa sesión.
             $evento = Evento::where('idFormularioInterno', $formulario->id)->first();
-            if ($evento && $user) {
+            if ($evento && $user && !$isEmbed) {
                 if ($user->idpersona) {
-                    // Buscamos si el usuario ya es participante
-                    $participante = ParticipanteEvento::where('idEvento', $evento->idEvento)
-                        ->where('idPersona', $user->idpersona)
-                        ->first();
-                    
-                    if (!$participante) {
-                        $participante = ParticipanteEvento::create([
+                    // La tabla tiene llave compuesta: Eloquent no sabe actualizar
+                    // el modelo ($participante->update() daba 500), se hace por consulta.
+                    $participantes = ParticipanteEvento::where('idEvento', $evento->idEvento)
+                        ->where('idPersona', $user->idpersona);
+
+                    if ($participantes->exists()) {
+                        $participantes->update(['estado' => 'CONFIRMADO']);
+                    } else {
+                        ParticipanteEvento::create([
                             'idEvento' => $evento->idEvento,
                             'idPersona' => $user->idpersona,
-                            'estado' => 'CONFIRMADO' // Ajustar al valor real
-                        ]);
-                    } else {
-                        // Actualizamos estado a CONFIRMADO
-                        $participante->update([
-                            'estado' => 'CONFIRMADO' 
+                            'estado' => 'CONFIRMADO',
                         ]);
                     }
                 }
@@ -717,6 +757,8 @@ class FormularioController extends Controller
             $responsePayload = [
                 'message' => 'Respuesta guardada con éxito',
                 'data' => $respuesta,
+                'escarapela' => $codigoEscarapela ? ['codigo' => $codigoEscarapela] : null,
+                'edicion' => ['id' => $respuesta->id, 'llave' => $this->llaveEdicion($respuesta->id)],
             ];
 
             if (isset($facturaInscripcion) && $facturaInscripcion) {
@@ -739,13 +781,39 @@ class FormularioController extends Controller
      */
     public function respuestas($id)
     {
+        // Solo los formularios de la institución en sesión: las respuestas
+        // traen datos personales de los inscritos.
+        $formulario = Formulario::with('preguntas')
+            ->where('idCompany', KeyUtil::idCompany())
+            ->findOrFail($id);
+
         $respuestas = FormularioRespuesta::where('idFormulario', $id)
             ->with(['usuario' => function($query) {
                 $query->with('persona:id,nombre1,nombre2,apellido1,apellido2');
             }])
             ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(function ($r) {
+            ->get();
+
+        $nombresNexi = $this->nombresEnNexiservice($respuestas->pluck('nexiEmail')->filter()->unique()->all());
+        $escarapelas = app(EscarapelaService::class);
+
+        $respuestas = $respuestas
+            ->map(function ($r) use ($nombresNexi, $formulario, $escarapelas) {
+                // Enviada por el link público sin sesión: se identifica con el
+                // nombre que la persona escribió, en vez de "Anónimo".
+                // Fluent y setRelation: un (object) asignado sobre la relación
+                // `usuario` (cargada en null) no salía en el JSON.
+                if (!$r->usuario && !$r->nexiEmail && ($nombre = $escarapelas->nombreEscrito($formulario, $r))) {
+                    $r->setRelation('usuario', new \Illuminate\Support\Fluent([
+                        'name'      => $nombre,
+                        'email'     => null,
+                        'persona'   => null,
+                        'sinSesion' => true,
+                    ]));
+
+                    return $r;
+                }
+
                 if ($r->usuario) {
                     $persona = $r->usuario->persona;
                     $parts = array_filter([
@@ -756,12 +824,14 @@ class FormularioController extends Controller
                     ]);
                     $r->usuario->name = implode(' ', $parts) ?: $r->usuario->email;
                 } elseif ($r->nexiEmail) {
-                    $r->usuario = (object) [
-                        'name'       => $r->nexiEmail,
+                    // Inscrito desde NexiService: no es usuario de School, su
+                    // identidad es el correo de esa sesión.
+                    $r->setRelation('usuario', new \Illuminate\Support\Fluent([
+                        'name'       => $nombresNexi[$r->nexiEmail] ?? $r->nexiEmail,
                         'email'      => $r->nexiEmail,
                         'persona'    => null,
                         'isNexiUser' => true,
-                    ];
+                    ]));
                 }
                 return $r;
             });
@@ -770,10 +840,158 @@ class FormularioController extends Controller
     }
 
     /**
+     * Preguntas con `configuracion.valorUnico` cuyo valor enviado ya existe en
+     * otra respuesta del mismo formulario. Compara sin distinguir mayúsculas ni
+     * espacios sobrantes ("  12345 " = "12345").
+     *
+     * Bloquea la fila del formulario mientras dura la transacción para que dos
+     * envíos simultáneos con el mismo dato no pasen los dos.
+     *
+     * @return array<int, array{idPregunta: int, titulo: string, valor: string}>
+     */
+    /**
+     * Llave para editar una respuesta desde el formulario público. Solo la
+     * recibe quien la envió; va firmada con la clave de la app, así que no se
+     * puede adivinar a partir del id.
+     */
+    private function llaveEdicion(int $idRespuesta): string
+    {
+        return hash_hmac('sha256', "formulario-respuesta:{$idRespuesta}", (string) config('app.key'));
+    }
+
+    /**
+     * Respuesta del formulario que se pide editar con `idRespuesta` y
+     * `llaveEdicion`, o null si la llave no corresponde.
+     */
+    private function respuestaEditable(Request $request, Formulario $formulario): ?FormularioRespuesta
+    {
+        $id = (int) $request->input('idRespuesta');
+        $llave = (string) $request->input('llaveEdicion', '');
+
+        if ($id <= 0 || !hash_equals($this->llaveEdicion($id), $llave)) {
+            return null;
+        }
+
+        return FormularioRespuesta::where('idFormulario', $formulario->id)->find($id);
+    }
+
+    private function valoresUnicosRepetidos(Formulario $formulario, array $respuestas, ?int $excluirId = null): array
+    {
+        $unicas = FormularioPregunta::where('idFormulario', $formulario->id)
+            ->get()
+            ->filter(fn ($pregunta) => !empty($pregunta->configuracion['valorUnico']));
+
+        if ($unicas->isEmpty()) {
+            return [];
+        }
+
+        $normalizar = fn ($valor) => is_scalar($valor)
+            ? mb_strtolower(trim(preg_replace('/\s+/', ' ', (string) $valor)))
+            : '';
+
+        // idPregunta => valor enviado (solo las únicas que traen algo).
+        $enviados = [];
+        foreach ($respuestas as $r) {
+            $id = $r['idPregunta'] ?? null;
+            if ($id !== null && $unicas->contains('id', $id) && $normalizar($r['valor'] ?? null) !== '') {
+                $enviados[(int) $id] = $normalizar($r['valor']);
+            }
+        }
+
+        if (!$enviados) {
+            return [];
+        }
+
+        Formulario::where('id', $formulario->id)->lockForUpdate()->first();
+
+        $repetidos = [];
+        $anteriores = FormularioRespuesta::where('idFormulario', $formulario->id)
+            // Al editar su inscripción, su propio valor no cuenta como repetido.
+            ->when($excluirId, fn ($q) => $q->where('id', '!=', $excluirId))
+            ->select('id', 'respuestas')
+            ->cursor();
+
+        foreach ($anteriores as $anterior) {
+            foreach ((array) $anterior->respuestas as $r) {
+                $id = (int) ($r['idPregunta'] ?? 0);
+                if (isset($enviados[$id]) && $normalizar($r['valor'] ?? null) === $enviados[$id]) {
+                    $repetidos[$id] = true;
+                }
+            }
+
+            if (count($repetidos) === count($enviados)) {
+                break;
+            }
+        }
+
+        $duplicados = [];
+        foreach ($respuestas as $r) {
+            $id = (int) ($r['idPregunta'] ?? 0);
+            if (isset($repetidos[$id])) {
+                $duplicados[] = [
+                    'idPregunta' => $id,
+                    'titulo' => $unicas->firstWhere('id', $id)->titulo,
+                    'valor' => trim((string) $r['valor']),
+                ];
+                unset($repetidos[$id]);
+            }
+        }
+
+        return $duplicados;
+    }
+
+    /**
+     * Nombre en NexiService (vt_inventario) de cada correo, para mostrar quién
+     * se inscribió desde allí. Si esa base no responde se devuelve vacío y la
+     * pantalla muestra el correo: el listado no debe caerse por eso.
+     *
+     * @param  array<int, string>  $emails
+     * @return array<string, string> correo en minúsculas => nombre
+     */
+    private function nombresEnNexiservice(array $emails): array
+    {
+        if (!$emails) {
+            return [];
+        }
+
+        try {
+            return DB::connection('mysql_nexiservice')->table('usuario as u')
+                ->join('persona as p', 'p.id', '=', 'u.idpersona')
+                ->whereIn('u.email', $emails)
+                ->get(['u.email', 'p.nombre1', 'p.nombre2', 'p.apellido1', 'p.apellido2'])
+                ->mapWithKeys(fn ($fila) => [
+                    strtolower($fila->email) => trim(preg_replace('/\s+/', ' ', implode(' ', [
+                        $fila->nombre1, $fila->nombre2, $fila->apellido1, $fila->apellido2,
+                    ]))),
+                ])
+                ->filter()
+                ->all();
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Subir el logo (institución) que se muestra en la cabecera del formulario.
+     */
+    public function uploadLogo(Request $request)
+    {
+        $request->validate([
+            'logo' => 'required|image|mimes:jpeg,jpg,png,webp,gif|max:2048',
+        ]);
+
+        $path = $request->file('logo')->store('formularios/logos', ['disk' => 'public']);
+
+        return response()->json(['success' => true, 'url' => asset('storage/' . $path)]);
+    }
+
+    /**
      * Eliminar una respuesta específica de un formulario.
      */
     public function destroyRespuesta($formularioId, $respuestaId)
     {
+        Formulario::where('idCompany', KeyUtil::idCompany())->findOrFail($formularioId);
+
         $respuesta = FormularioRespuesta::where('idFormulario', $formularioId)
             ->where('id', $respuestaId)
             ->firstOrFail();

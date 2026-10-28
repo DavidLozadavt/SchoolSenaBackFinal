@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Programa extends Model
 {
@@ -23,7 +22,14 @@ class Programa extends Model
         'idTipoFormacion',
         'idEstadoPrograma',
         'idCompany',
-        'idRed'
+        'idRed',
+        'clasePrograma',
+        'duracion',
+        'unidadDuracion',
+        'vigenciaDesde',
+        'idSede',
+        'idSistemaEvaluacion',
+        'idEscalaCalificacion',
     ];
 
     public function nivel()
@@ -72,7 +78,6 @@ class Programa extends Model
     {
         return $this->hasMany(AgregarMateriaPrograma::class, 'idPrograma');
     }
-
     // 🔥 NUEVA RELACIÓN: Programa tiene muchos GradoPrograma
     public function gradoProgramas(): HasMany
     {
@@ -93,6 +98,16 @@ class Programa extends Model
     public function red()
     {
         return $this->belongsTo(Red::class, 'idRed');
+    }
+
+    public function sede()
+    {
+        return $this->belongsTo(Sede::class, 'idSede');
+    }
+
+    public function nivelesPrograma(): HasMany
+    {
+        return $this->hasMany(NivelPrograma::class, 'idPrograma')->orderBy('orden');
     }
 
     //Para ver el conteo de fichas que tiene un programa:

@@ -52,4 +52,17 @@ return [
     'school' => [
         'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
     ],
+
+    // Dominio del frontend de School: a donde apunta el QR de las escarapelas.
+    'frontend' => [
+        'url' => env('FRONTEND_URL'),
+    ],
+
+    // Token compartido con el ERP, la pasarela y RentUs (cabecera X-Bridge-Token).
+    // Se lee aqui y no con env() en el controlador: con config:cache env() devuelve null.
+    'bridge' => [
+        'token' => env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026'),
+        'nexi_url' => env('NEXI_API_URL', 'http://127.0.0.1:8001'),
+        'rentus_url' => env('RENTUS_API_URL', 'http://127.0.0.1:8004'),
+    ],
 ];

@@ -35,7 +35,7 @@ class DatabaseSeeder extends Seeder
         $this->call(PersonSeeder::class);
         $this->call(CommonSeeder::class);
 
-        
+
         $this->call(NivelesEducativosSeeder::class);
         $this->call(TiposFormacionSeeder::class);
         $this->call(EstadosProgramaSeeder::class);
@@ -43,10 +43,9 @@ class DatabaseSeeder extends Seeder
         $this->call([PermissionsSeeder::class,]);
         $this->call([
         TipoGradoSeeder::class,
-        
+
     ]);
         $this->call(TipoInfraestructuraSeeder::class);
         $this->call(TipoPreguntaSeeder::class);
-        $this->call(MultimediaAndEventSeeder::class);
     }
 }

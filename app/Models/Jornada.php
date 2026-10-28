@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Jornada extends Model
 {
@@ -19,30 +21,24 @@ class Jornada extends Model
         'numeroHoras',
         'estado',
         'idCentroFormacion',
-        'idTipoJornada'
+        'idTipoJornada',
     ];
 
     /**
      * Una jornada pertenece a un tipo de jornada
      */
-    public function tipoJornada()
+    public function tipoJornada(): BelongsTo
     {
         return $this->belongsTo(TipoJornada::class, 'idTipoJornada');
     }
 
-    /**
-     * Una jornada pertenece a un centro de formación
-     */
-    public function centroFormacion()
+    public function centroFormacion(): BelongsTo
     {
         return $this->belongsTo(CentrosFormacion::class, 'idCentroFormacion');
     }
 
-    /**
-     * Una jornada tiene muchos días asignados
-     */
-    public function dias()
+    public function dias(): BelongsToMany
     {
-        return $this->belongsToMany(Dia::class, 'asignacionDiaJornada', 'idJornada', 'idDia');
+        return $this->belongsToMany(Dia::class, 'asignaciondiajornada', 'idJornada', 'idDia');
     }
 }

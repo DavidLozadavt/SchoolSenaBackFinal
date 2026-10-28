@@ -17,18 +17,16 @@ class MailService extends Mailable
 
     public $subject;
     public $messageContent;
-    public $senderName;
 
     /**
      * Create a new message instance.
      *
      * @return void
      */
-    public function __construct($subject, $messageContent, $senderName = null)
+    public function __construct($subject, $messageContent)
     {
         $this->subject = $subject;
         $this->messageContent = $messageContent;
-        $this->senderName = $senderName;
     }
 
     /**
@@ -41,7 +39,7 @@ class MailService extends Mailable
         $nameCompany = Company::findOrFail(1); //Cambia el 1 por el ID correspondiente de tu compañía
 
         return new Envelope(
-            from: new Address(config('mail.from.address'), $this->senderName ?: $nameCompany->razonSocial),
+            from: new Address('notificacionesvirtualt@virtualt.org', $nameCompany->razonSocial),
             subject: $this->subject,
         );
     }
