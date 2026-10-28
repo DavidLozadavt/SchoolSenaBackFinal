@@ -38,10 +38,10 @@ class ForgotPasswordController extends Controller
      */
     private function syncPasswordToSiblings(string $email, string $hash): void
     {
-        $bridgeToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
+        $bridgeToken = config('services.bridge.token');
         $targets = [
-            env('NEXI_API_URL', 'http://localhost:8001') . '/api/integration/sync-password',
-            env('RENTUS_API_URL', 'http://localhost:8004') . '/api/integration/sync-password',
+            rtrim((string) config('services.bridge.nexi_url'), '/') . '/api/integration/sync-password',
+            rtrim((string) config('services.bridge.rentus_url'), '/') . '/api/integration/sync-password',
         ];
 
         foreach ($targets as $url) {
@@ -64,7 +64,7 @@ class ForgotPasswordController extends Controller
     public function syncPassword(Request $request)
     {
         $receivedToken = $request->header('X-Bridge-Token');
-        $expectedToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
+        $expectedToken = config('services.bridge.token');
 
         if (empty($receivedToken) || $receivedToken !== $expectedToken) {
             return response()->json(['error' => 'No autorizado.'], 401);

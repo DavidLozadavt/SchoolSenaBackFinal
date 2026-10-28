@@ -24,7 +24,7 @@ class SchoolBridgeController extends Controller
     {
         // 1. Validar el token de seguridad
         $receivedToken = $request->header('X-Bridge-Token');
-        $expectedToken = env('BRIDGE_SECRET_TOKEN', 'VirtualT_Bridge_Secret_2026');
+        $expectedToken = config('services.bridge.token');
 
         if (empty($receivedToken) || $receivedToken !== $expectedToken) {
             return response()->json(['error' => 'No autorizado. Token de seguridad inválido o ausente.'], 401);
@@ -44,106 +44,131 @@ class SchoolBridgeController extends Controller
         try {
             DB::beginTransaction();
 
-            // 3. Crear o actualizar la empresa (colegio/institución) en School
-            $company = Company::where('nit', $request->nit)->first();
-            if ($company) {
-                return response()->json(['error' => 'Ya existe una institución registrada con este NIT.'], 422);
-            }
+            // Con la clave de NexiService el usuario entra a School con las mismas
+            // credenciales. Sin ella (inscripción por formulario) se usa una clave
+            // temporal y se le pide cambiarla al entrar (state_id 18).
+            $conClaveNexi = $request->filled('contrasena_hash');
+            $tempPassword = 'VirtualT2026!';
 
-            // Validar que no se duplique el correo
-            if (Company::where('email', $request->email)->exists() || User::where('email', $request->email)->exists()) {
-                return response()->json(['error' => 'El correo electrónico ya se encuentra registrado en el sistema.'], 422);
-            }
-
-            $companyId = DB::table('empresa')->insertGetId([
+            // 3. Empresa por NIT, igual que inscribe-empresa del ERP business:
+            // si ya existe se actualiza (así se puede reintentar sin error).
+            $datosEmpresa = [
                 'razonSocial' => $request->nombre_institucion,
-                'nit' => $request->nit,
                 'representanteLegal' => $request->nombre_representante,
                 'direccion' => $request->direccion ?? 'No especificada',
                 'email' => $request->email,
-                'digitoVerificacion' => 0,
-                'idCiudad' => 1,
-                'rutaLogo' => '',
-                'valorIva' => 0.00,
-                'devolucion' => 0,
-                'garantia' => 0,
-                'servicios' => 1,
-                'catalogo' => 0,
-                'productos' => 0,
-                'responsableIva' => 0,
-                'retenciones' => 0,
                 'telefono' => $request->telefono ?? '',
-                'facturaElectronica' => 0,
-                'parafiscalesEmpresa' => 0,
-                'urlDocumento' => '',
-                'created_at' => now(),
                 'updated_at' => now(),
-            ]);
-            $company = Company::find($companyId);
+            ];
 
-            // 4. Crear el registro en tabla 'persona' para el representante
-            // Usamos el nit como identificador de persona si no se tiene
-            $person = Person::create([
-                'identificacion' => $request->nit,
-                'nombre1' => $request->nombre_representante,
-                'nombre2' => '',
-                'apellido1' => 'Admin',
-                'apellido2' => '',
-                'fechaNac' => now()->subYears(30)->format('Y-m-d'),
-                'idCiudadNac' => 1,
-                'idCiudad' => 1,
-                'direccion' => $request->direccion ?? 'No especificada',
-                'email' => $request->email,
-                'idTipoIdentificacion' => 1, // CC
-                'celular' => $request->telefono ?? '0000000',
-                'idCiudadUbicacion' => 1,
-                'perfil' => 'Admin',
-                'sexo' => 'M',
-                'rh' => '',
-                'firmaDigital' => '',
-                'ciudadExpedicion' => 1,
-                'tipoPersona' => 'natural',
-            ]);
-
-            // 5. Crear el registro en tabla 'usuario' (Credenciales por defecto o sincronizadas)
-            $tempPassword = 'VirtualT2026!';
-            $user = new User();
-            $user->idpersona = $person->id;
-            $user->email = $request->email;
-            
-            if ($request->filled('contrasena_hash')) {
-                $user->contrasena = $request->contrasena_hash; // Ya viene encriptada del ERP
+            $company = Company::where('nit', $request->nit)->first();
+            if ($company) {
+                DB::table('empresa')->where('id', $company->id)->update($datosEmpresa);
             } else {
-                $user->contrasena = bcrypt($tempPassword); // Columna principal de contraseña
+                // Otra institución (otro NIT) ya usa este correo: no se mezclan.
+                if (Company::where('email', $request->email)->exists()) {
+                    DB::rollBack();
+                    return response()->json(['error' => 'El correo electrónico ya está registrado en otra institución.'], 422);
+                }
+
+                $companyId = DB::table('empresa')->insertGetId($datosEmpresa + [
+                    'nit' => $request->nit,
+                    'digitoVerificacion' => 0,
+                    'idCiudad' => 1,
+                    'rutaLogo' => '',
+                    'valorIva' => 0.00,
+                    'devolucion' => 0,
+                    'garantia' => 0,
+                    'servicios' => 1,
+                    'catalogo' => 0,
+                    'productos' => 0,
+                    'responsableIva' => 0,
+                    'retenciones' => 0,
+                    'facturaElectronica' => 0,
+                    'parafiscalesEmpresa' => 0,
+                    'urlDocumento' => '',
+                    'created_at' => now(),
+                ]);
+                $company = Company::find($companyId);
             }
-            $user->save();
 
-            // 6. Vincular el usuario a la empresa mediante 'activation_company_users'
-            // Con state_id = 18 (Requiere cambiar contraseña en el primer inicio de sesión)
-            $activation = new ActivationCompanyUser();
-            $activation->user_id = $user->id;
-            $activation->company_id = $company->id;
-            $activation->state_id = 18; // Estado: Cambio de contraseña requerido
-            $activation->fechaInicio = now()->format('Y-m-d');
-            $activation->fechaFin = now()->addYears(5)->format('Y-m-d');
-            $activation->save();
+            // 4. Usuario por correo. Si ya existe se le pone la clave de NexiService.
+            $user = User::where('email', $request->email)->first();
+            $usuarioNuevo = !$user;
 
-            // 7. Asignar el rol real de administrador (ya gestionado desde Gestión de Roles y Permisos)
+            if ($user) {
+                if ($conClaveNexi) {
+                    $user->contrasena = $request->contrasena_hash;
+                    $user->save();
+                }
+            } else {
+                // Persona del representante (identificada con el NIT).
+                $person = Person::where('identificacion', $request->nit)->first() ?? Person::create([
+                    'identificacion' => $request->nit,
+                    'nombre1' => $request->nombre_representante,
+                    'nombre2' => '',
+                    'apellido1' => 'Admin',
+                    'apellido2' => '',
+                    'fechaNac' => now()->subYears(30)->format('Y-m-d'),
+                    'idCiudadNac' => 1,
+                    'idCiudad' => 1,
+                    'direccion' => $request->direccion ?? 'No especificada',
+                    'email' => $request->email,
+                    'idTipoIdentificacion' => 1, // CC
+                    'celular' => $request->telefono ?? '0000000',
+                    'idCiudadUbicacion' => 1,
+                    'perfil' => 'Admin',
+                    'sexo' => 'M',
+                    'rh' => '',
+                    'firmaDigital' => '',
+                    'ciudadExpedicion' => 1,
+                    'tipoPersona' => 'natural',
+                ]);
+
+                $user = new User();
+                $user->idpersona = $person->id;
+                $user->email = $request->email;
+                $user->contrasena = $conClaveNexi ? $request->contrasena_hash : bcrypt($tempPassword);
+                $user->save();
+            }
+
+            // 5. Vínculo usuario-institución. Activo (1) si trae la clave de NexiService;
+            // si no, 18 = debe cambiar la clave temporal al entrar.
+            $activation = ActivationCompanyUser::where('user_id', $user->id)
+                ->where('company_id', $company->id)
+                ->first();
+
+            if (!$activation) {
+                $activation = new ActivationCompanyUser();
+                $activation->user_id = $user->id;
+                $activation->company_id = $company->id;
+                $activation->state_id = $conClaveNexi ? 1 : 18;
+                $activation->fechaInicio = now()->format('Y-m-d');
+                $activation->fechaFin = now()->addYears(5)->format('Y-m-d');
+                $activation->save();
+            } elseif ($conClaveNexi && (int) $activation->state_id === 18) {
+                $activation->state_id = 1;
+                $activation->save();
+            }
+
+            // 6. Rol de administrador de la institución
             $role = Role::firstOrCreate([
                 'name' => 'ADMINISTRADOR VT',
                 'guard_name' => 'web',
             ]);
 
-            $activation->assignRole($role);
+            if (!$activation->hasRole($role)) {
+                $activation->assignRole($role);
+            }
 
             DB::commit();
 
-            return response()->json([
+            return response()->json(array_filter([
                 'message' => 'Institución e inquilino administrador creados con éxito.',
                 'company_id' => $company->id,
                 'user_id' => $user->id,
-                'temp_password' => $tempPassword
-            ], 201);
+                'temp_password' => ($usuarioNuevo && !$conClaveNexi) ? $tempPassword : null,
+            ], fn ($v) => $v !== null), 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
