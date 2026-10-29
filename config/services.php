@@ -60,7 +60,7 @@ return [
     ],
 
     'school' => [
-        'frontend_url' => env('FRONTEND_URL', 'https://school-vt.virtualt.org'),
+        'frontend_url' => config('FRONTEND_URL', 'https://school-vt.virtualt.org'),
     ],
 
     // Dominio del frontend de School: a donde apunta el QR de las escarapelas.
