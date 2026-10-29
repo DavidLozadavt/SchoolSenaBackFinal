@@ -471,7 +471,7 @@ Route::post('transaction_pse', $wompiLegacyDeprecated);
 Route::post('cryptographic_hash', $wompiLegacyDeprecated);
 
 // ============================================================
-// WOMPI MULTIEMPRESA (ERP → School)
+// WOMPI MULTIEMPRESA (llaves de cada empresa)
 // ============================================================
 // Webhook de Wompi (público, sin auth — Wompi llama directamente)
 Route::post('webhooks/wompi', [WompiWebhookController::class, 'handle']);
@@ -797,6 +797,11 @@ Route::delete('delete_configuracion_pago/{id}', [PagoController::class, 'destroy
 // Facturas académicas y bandeja de solicitudes: datos personales y pagos, solo con sesión
 // (aceptan idCompany por parámetro, así que sin auth cualquiera listaba los aspirantes).
 Route::middleware('auth:api')->group(function () {
+    // Llaves de Wompi de la institución en sesión (Configuración de pagos)
+    Route::get('pasarela-pago', [\App\Http\Controllers\gestion_pago\PasarelaPagoController::class, 'show']);
+    Route::put('pasarela-pago', [\App\Http\Controllers\gestion_pago\PasarelaPagoController::class, 'update']);
+    Route::post('pasarela-pago/probar', [\App\Http\Controllers\gestion_pago\PasarelaPagoController::class, 'probar'])->middleware('throttle:10,1');
+
     Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
     Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
     Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);

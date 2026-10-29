@@ -6,11 +6,8 @@ use App\Services\WompiConfigProvider;
 
 /**
  * EmpresaPasarelaPagoService
- * Fachada del School para interactuar con la configuración
- * de pasarela de pagos almacenada en el ERP.
- *
- * School NUNCA guarda credenciales localmente.
- * Todo se obtiene dinámicamente desde el ERP vía WompiConfigProvider.
+ * Fachada del School para la pasarela de pagos de cada institución.
+ * Las llaves las registra la empresa en Configuración de pagos (ver WompiConfigProvider).
  */
 class EmpresaPasarelaPagoService
 {
@@ -141,14 +138,5 @@ class EmpresaPasarelaPagoService
             ];
         }
         return null;
-    }
-
-    /**
-     * Invalida la caché de la configuración de una empresa.
-     * Útil cuando se actualizan credenciales en el ERP.
-     */
-    public function invalidarCache(int $idEmpresa): void
-    {
-        $this->wompiConfig->clearCache($idEmpresa);
     }
 }
