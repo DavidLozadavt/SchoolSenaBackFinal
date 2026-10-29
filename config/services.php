@@ -44,12 +44,7 @@ return [
         'url' => env('LIVEKIT_URL'),
     ],
 
-    'erp' => [
-        'base_url' => env('ERP_BASE_URL', 'http://localhost:8001/api'),
-        'service_token' => env('ERP_SERVICE_TOKEN'),
-    ],
-
-    // Respaldo local de la pasarela Wompi cuando el ERP no responde (ver WompiConfigProvider).
+    // Llaves Wompi de respaldo, solo en local cuando la empresa no registró las suyas (ver WompiConfigProvider).
     'wompi' => [
         'public_key' => env('WOMPI_PUBLIC_KEY', env('WOMPI_PUBLIC_KEY_TEST')),
         'private_key' => env('WOMPI_PRIVATE_KEY', env('WOMPI_PRIVATE_KEY_TEST')),

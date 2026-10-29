@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Webhook y utilidades WOMPI multiempresa (credenciales vía ERP).
+ * Webhook y utilidades WOMPI multiempresa (llaves de cada empresa en empresaPasarelaPago).
  * El registro financiero delega en PagoController::aplicarPagoFacturaAcademicaInterno().
  */
 class WompiWebhookController extends Controller
