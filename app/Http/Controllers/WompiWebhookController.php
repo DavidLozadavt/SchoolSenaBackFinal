@@ -238,6 +238,18 @@ class WompiWebhookController extends Controller
 
         if (!Schema::hasColumn('wompiAuditoriaPago', 'transactionId')) {
             unset($row['transactionId'], $row['referencia'], $row['idFactura'], $row['idEmpresa']);
+        } else {
+            // transactionId es único: un reintento tras un ERROR reutiliza la fila en vez de fallar al insertar.
+            $existenteId = DB::table('wompiAuditoriaPago')
+                ->where('transactionId', $data['transactionId'])
+                ->value('id');
+
+            if ($existenteId) {
+                unset($row['created_at']);
+                DB::table('wompiAuditoriaPago')->where('id', $existenteId)->update($row);
+
+                return (int) $existenteId;
+            }
         }
 
         return DB::table('wompiAuditoriaPago')->insertGetId($row);

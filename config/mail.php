@@ -120,7 +120,7 @@ return [
 
     'brand' => [
         'name' => env('MAIL_BRAND_NAME', 'School · Virtual Technology'),
-        'logo' => env('MAIL_BRAND_LOGO', 'https://sena-school.virtualt.org/media/app/logoweb-white.png'),
+        'logo' => env('MAIL_BRAND_LOGO', 'https://school-vt.virtualt.org/media/app/logoweb-white.png'),
         'url' => env('MAIL_BRAND_URL', 'https://virtualt.org'),
         'soporte' => env('MAIL_BRAND_SOPORTE', 'soporte@virtualt.org'),
     ],

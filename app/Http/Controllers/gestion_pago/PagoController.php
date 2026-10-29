@@ -2175,7 +2175,7 @@ class PagoController extends Controller
         }
 
         $company     = \App\Models\Company::find($idCompany);
-        $frontendUrl = rtrim(config('services.school.frontend_url', 'http://localhost:5173'), '/');
+        $frontendUrl = rtrim(config('services.school.frontend_url'), '/');
         $redirectUrl = "{$frontendUrl}/portal-aspirante/{$token}?pago=retorno";
 
         return response()->json([
@@ -2312,7 +2312,7 @@ class PagoController extends Controller
             $procesoPayload = ['nombreProceso' => $proceso->nombreProceso];
         }
 
-        $frontendUrl = rtrim(config('services.school.frontend_url', 'http://localhost:5173'), '/');
+        $frontendUrl = rtrim(config('services.school.frontend_url'), '/');
 
         $pdf = Pdf::loadView('pdf.factura-academica', [
             'factura'           => $facturaPayload,
@@ -2401,7 +2401,7 @@ class PagoController extends Controller
 
         // ── Generar URL del portal público ────────────────────────────────
         $token       = $this->generarTokenPortalAspirante($idFactura, $idCompany);
-        $frontendUrl = rtrim(env('FRONTEND_URL', 'https://sena-school.virtualt.org'), '/');
+        $frontendUrl = rtrim(config('services.school.frontend_url'), '/');
         $portalUrl   = "{$frontendUrl}/portal-aspirante/{$token}";
 
         // ── Enviar correo con la plantilla HTML enriquecida ───────────────
