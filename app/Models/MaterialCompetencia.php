@@ -40,6 +40,7 @@ class MaterialCompetencia extends Model
         'tipoMaterial',
         'urlDocumento',
         'urlAdicional',
+        'urlVideo',
         'activo',
     ];
 
@@ -65,6 +66,11 @@ class MaterialCompetencia extends Model
     public function materialApoyoActividad()
     {
         return $this->belongsTo(MaterialApoyoActividad::class, 'idMaterialApoyoActividad');
+    }
+
+    public function recursos()
+    {
+        return $this->hasMany(MaterialCompetenciaRecurso::class, 'idMaterialCompetencia')->orderBy('orden')->orderBy('id');
     }
 
     public function esDirecto(): bool

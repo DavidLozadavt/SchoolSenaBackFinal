@@ -89,6 +89,23 @@ class MaterialCompetenciaReglas
         return null;
     }
 
+    public static function puedeTrasladarOrigen(?string $origen): bool
+    {
+        return $origen === self::ORIGEN_DIRECTO;
+    }
+
+    public static function motivoBloqueoTraslado(?string $origen): ?string
+    {
+        if ($origen === self::ORIGEN_ACTIVIDAD) {
+            return 'Este material está vinculado a una actividad. No se puede mover a otra competencia porque la actividad, sus evidencias y calificaciones permanecerían en el RAP original.';
+        }
+        if ($origen === self::ORIGEN_MATERIAL_APOYO) {
+            return 'Este material está vinculado a una actividad. No se puede mover a otra competencia porque el material de apoyo debe permanecer con su actividad original.';
+        }
+
+        return null;
+    }
+
     public static function esMismaAsociacion(
         string $origenA,
         ?int $idActividadA,

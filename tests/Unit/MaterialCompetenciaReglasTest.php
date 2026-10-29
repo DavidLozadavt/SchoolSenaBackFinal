@@ -87,4 +87,14 @@ class MaterialCompetenciaReglasTest extends TestCase
         $this->assertNotNull($apoyoA);
         $this->assertNotNull($apoyoB);
     }
+
+    public function test_solo_la_subida_directa_puede_trasladarse_de_competencia(): void
+    {
+        $this->assertTrue(MaterialCompetenciaReglas::puedeTrasladarOrigen(MaterialCompetenciaReglas::ORIGEN_DIRECTO));
+        $this->assertFalse(MaterialCompetenciaReglas::puedeTrasladarOrigen(MaterialCompetenciaReglas::ORIGEN_ACTIVIDAD));
+        $this->assertFalse(MaterialCompetenciaReglas::puedeTrasladarOrigen(MaterialCompetenciaReglas::ORIGEN_MATERIAL_APOYO));
+        $this->assertNull(MaterialCompetenciaReglas::motivoBloqueoTraslado(MaterialCompetenciaReglas::ORIGEN_DIRECTO));
+        $this->assertNotEmpty(MaterialCompetenciaReglas::motivoBloqueoTraslado(MaterialCompetenciaReglas::ORIGEN_ACTIVIDAD));
+        $this->assertNotEmpty(MaterialCompetenciaReglas::motivoBloqueoTraslado(MaterialCompetenciaReglas::ORIGEN_MATERIAL_APOYO));
+    }
 }

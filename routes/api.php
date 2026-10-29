@@ -1382,14 +1382,19 @@ Route::middleware('auth:api')->group(function () {
     Route::put('fichas/{idFicha}/materiales-apoyo/{id}', [MaterialApoyoFichaController::class, 'update']);
     Route::delete('fichas/{idFicha}/materiales-apoyo/{id}', [MaterialApoyoFichaController::class, 'destroy']);
 
-    // Material de competencia (Actividades competencias RAP): ámbito competencia, no RAP ni instructor
+    // Material de apoyo por competencia (menú Material de Apoyo). Rutas internas sin cambio de tablas.
     Route::get('ambiente-virtual/actividades-competencia/competencias', [MaterialCompetenciaController::class, 'competencias']);
+    Route::get('ambiente-virtual/actividades-competencia/materiales', [MaterialCompetenciaController::class, 'indexTodos']);
     Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales', [MaterialCompetenciaController::class, 'index']);
     Route::post('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales', [MaterialCompetenciaController::class, 'store']);
     Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales-elegibles', [MaterialCompetenciaController::class, 'elegibles']);
     Route::post('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/incorporar', [MaterialCompetenciaController::class, 'incorporar']);
     Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}', [MaterialCompetenciaController::class, 'show']);
+    Route::post('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}/mover', [MaterialCompetenciaController::class, 'mover']);
+    Route::match(['put', 'post'], 'ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}', [MaterialCompetenciaController::class, 'update']);
     Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}/descargar', [MaterialCompetenciaController::class, 'descargar']);
+    Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}/recursos/{idRecurso}/descargar', [MaterialCompetenciaController::class, 'descargarRecurso']);
+    Route::delete('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}/recursos/{idRecurso}', [MaterialCompetenciaController::class, 'destroyRecurso']);
     Route::delete('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales/{id}', [MaterialCompetenciaController::class, 'destroy']);
 
     // Asignación masiva de actividades (estudiantes/grupos + fecha inicio/fin)
