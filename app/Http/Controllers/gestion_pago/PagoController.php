@@ -1906,6 +1906,31 @@ class PagoController extends Controller
 
 
     /**
+     * Métodos de pago que se informan al aspirante (PDF y correo de la factura).
+     * Wompi solo aparece si la institución tiene la pasarela configurada.
+     *
+     * @return array<int, array{nombre: string, detalle: string}>
+     */
+    private function metodosPagoPortalAspirante(int $idCompany): array
+    {
+        $metodos = [];
+
+        $publicConfig = app(\App\Services\EmpresaPasarelaPagoService::class)->getPublicConfig($idCompany);
+        if ($publicConfig && !empty($publicConfig['publicKey'])) {
+            if (!empty($publicConfig['habilitarPSE'])) {
+                $metodos[] = ['nombre' => 'Wompi – PSE', 'detalle' => 'Débito desde su cuenta bancaria, en línea desde el portal del aspirante.'];
+            }
+            if (!empty($publicConfig['habilitarTarjetas'])) {
+                $metodos[] = ['nombre' => 'Wompi – Tarjeta débito/crédito', 'detalle' => 'Pago en línea desde el portal del aspirante.'];
+            }
+        }
+
+        $metodos[] = ['nombre' => 'Pago presencial o transferencia', 'detalle' => 'Cargue el comprobante en el portal del aspirante para su validación.'];
+
+        return $metodos;
+    }
+
+    /**
      * Genera un token HMAC firmado para acceso público al portal del aspirante.
      * No requiere base de datos — el token codifica idFactura e idCompany.
      */
@@ -1968,7 +1993,6 @@ class PagoController extends Controller
         $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
         $solicitud      = $this->formatearSolicitudInscripcion($facturaPayload, $factura, $proceso, $idCompany);
         $estudiante     = $this->formatearEstudianteSolicitud($factura, $idCompany);
-        $company        = \App\Models\Company::find($idCompany);
 
         /** @var \App\Services\EmpresaPasarelaPagoService $pasarelaService */
         $pasarelaService = app(\App\Services\EmpresaPasarelaPagoService::class);
@@ -1982,7 +2006,8 @@ class PagoController extends Controller
             'solicitud'          => $solicitud,
             'factura'            => $facturaPayload,
             'estudiante'         => $estudiante,
-            'nombreInstitucion'  => $company?->razonSocial ?? 'La institución',
+            // Marca de la plataforma: el nombre de la empresa en BD no siempre es el que debe ver el aspirante.
+            'nombreInstitucion'  => config('mail.brand.name'),
             // Agregando la estructura JSON requerida explícitamente en el root de la respuesta
             'detalleFactura'     => $facturaPayload['detalles'] ?? [],
             'transaccion'        => $transaccion,
@@ -2134,6 +2159,21 @@ class PagoController extends Controller
             return response()->json(['error' => 'No se pudo inicializar el pago. Contacte a la institución.'], 500);
         }
 
+        // Se guarda la referencia para poder confirmar el pago consultando a Wompi (verificar-pago).
+        if (Schema::hasTable('wompiAuditoriaPago') && Schema::hasColumn('wompiAuditoriaPago', 'referencia')) {
+            DB::table('wompiAuditoriaPago')->insert([
+                'idFactura'  => $idFactura,
+                'idEmpresa'  => $idCompany,
+                'referencia' => $reference,
+                'amount'     => $amountInCents / 100,
+                'currency'   => $currency,
+                'status'     => 'INICIADO',
+                'provider'   => 'WOMPI',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
         $company     = \App\Models\Company::find($idCompany);
         $frontendUrl = rtrim(config('services.school.frontend_url', 'http://localhost:5173'), '/');
         $redirectUrl = "{$frontendUrl}/portal-aspirante/{$token}?pago=retorno";
@@ -2148,6 +2188,93 @@ class PagoController extends Controller
             'companyName'         => $company?->razonSocial ?? 'La institución',
             'habilitarPSE'        => $habilitarPSE,
             'habilitarTarjetas'   => $habilitarTarjetas,
+        ]);
+    }
+
+    /**
+     * POST /api/portal-aspirante/{token}/verificar-pago
+     * Consulta en Wompi las referencias iniciadas para la factura y aplica la que esté APROBADA.
+     * Respaldo del webhook: confirma el pago cuando el aspirante vuelve al portal.
+     */
+    public function verificarPagoPortalAspirante(string $token)
+    {
+        $datos = $this->verificarTokenPortalAspirante($token);
+        if (!$datos) {
+            return response()->json(['error' => 'Enlace de acceso inválido o expirado.'], 403);
+        }
+
+        $idCompany = $datos['idCompany'];
+        $idFactura = $datos['idFactura'];
+
+        $factura = Factura::with(['detalles', 'tercero', 'transacciones.pago.estado'])
+            ->where('id', $idFactura)
+            ->where('idCompany', $idCompany)
+            ->first();
+
+        if (!$factura) {
+            return response()->json(['error' => 'Factura no encontrada.'], 404);
+        }
+
+        $facturaPayload = $this->formatearFacturaAcademica($factura, $this->inferirProcesoFacturaAcademica($factura));
+        if ((float) ($facturaPayload['saldoPendiente'] ?? 0) <= 0) {
+            return response()->json(['estado' => 'APROBADO', 'message' => 'La factura ya está pagada.']);
+        }
+
+        if (!Schema::hasTable('wompiAuditoriaPago') || !Schema::hasColumn('wompiAuditoriaPago', 'referencia')) {
+            return response()->json(['estado' => 'SIN_PAGOS', 'message' => 'No hay pagos en línea registrados.']);
+        }
+
+        $referencias = DB::table('wompiAuditoriaPago')
+            ->where('idFactura', $idFactura)
+            ->where('idEmpresa', $idCompany)
+            ->where('status', 'INICIADO')
+            ->orderByDesc('id')
+            ->limit(10)
+            ->pluck('referencia');
+
+        if ($referencias->isEmpty()) {
+            return response()->json(['estado' => 'SIN_PAGOS', 'message' => 'No hay pagos en línea iniciados para esta factura.']);
+        }
+
+        /** @var \App\Services\EmpresaPasarelaPagoService $pasarelaService */
+        $pasarelaService = app(\App\Services\EmpresaPasarelaPagoService::class);
+        /** @var \App\Http\Controllers\WompiWebhookController $wompiController */
+        $wompiController = app(\App\Http\Controllers\WompiWebhookController::class);
+
+        $estado = 'PENDIENTE';
+        foreach ($referencias as $referencia) {
+            foreach ($pasarelaService->consultarTransaccionesPorReferencia($idCompany, $referencia) as $transaccion) {
+                $status = $transaccion['status'] ?? null;
+
+                if ($status === 'APPROVED') {
+                    $resultado = $wompiController->procesarTransaccionAprobada($transaccion, [], 'WOMPI_PORTAL');
+                    $ok = $resultado['httpStatus'] < 400;
+                    if ($ok) {
+                        DB::table('wompiAuditoriaPago')
+                            ->where('referencia', $referencia)
+                            ->where('status', 'INICIADO')
+                            ->update(['status' => 'CERRADO', 'updated_at' => now()]);
+                    }
+
+                    return response()->json([
+                        'estado'  => $ok ? 'APROBADO' : 'ERROR',
+                        'message' => $ok
+                            ? 'Pago confirmado. Su factura quedó pagada.'
+                            : ($resultado['body']['reason'] ?? 'No se pudo registrar el pago.'),
+                    ], $ok ? 200 : $resultado['httpStatus']);
+                }
+
+                if (in_array($status, ['DECLINED', 'VOIDED', 'ERROR'], true)) {
+                    $estado = 'RECHAZADO';
+                }
+            }
+        }
+
+        return response()->json([
+            'estado'  => $estado,
+            'message' => $estado === 'RECHAZADO'
+                ? 'El último intento de pago fue rechazado. Puede intentarlo de nuevo.'
+                : 'Aún no hay un pago aprobado en Wompi para esta factura.',
         ]);
     }
 
@@ -2177,19 +2304,24 @@ class PagoController extends Controller
         $proceso        = $this->inferirProcesoFacturaAcademica($factura);
         $facturaPayload = $this->formatearFacturaAcademica($factura, $proceso);
         $estudiante     = $this->formatearEstudianteSolicitud($factura, $idCompany);
-        $company        = \App\Models\Company::find($idCompany);
-        $nombreInstitucion = $company?->razonSocial ?? 'La Institución';
+        // El aspirante ve la marca de la plataforma (School by Virtual Technology), no el nombre de la empresa en BD.
+        $nombreInstitucion = config('mail.brand.name');
 
         $procesoPayload = null;
         if ($proceso instanceof \App\Models\Proceso) {
             $procesoPayload = ['nombreProceso' => $proceso->nombreProceso];
         }
 
+        $frontendUrl = rtrim(config('services.school.frontend_url', 'http://localhost:5173'), '/');
+
         $pdf = Pdf::loadView('pdf.factura-academica', [
             'factura'           => $facturaPayload,
             'estudiante'        => $estudiante,
             'proceso'           => $procesoPayload,
             'nombreInstitucion' => $nombreInstitucion,
+            'logoArchivo'       => public_path('default/logo-school.png'),
+            'metodosPago'       => $this->metodosPagoPortalAspirante($idCompany),
+            'portalUrl'         => "{$frontendUrl}/portal-aspirante/{$token}",
         ])->setPaper('a4', 'portrait');
 
         $filename = 'factura-academica-' . ($factura->numeroFactura ?? $idFactura) . '.pdf';
@@ -2286,10 +2418,12 @@ class PagoController extends Controller
                 'fechaLimite'       => $fechaLimite,
                 'portalUrl'         => $portalUrl,
                 'nombreInstitucion' => $nombreInstitucion,
-            ], function ($mail) use ($emailAspirante, $subject, $nombreInstitucion) {
+                'metodosPago'       => $this->metodosPagoPortalAspirante($idCompany),
+            ], function ($mail) use ($emailAspirante, $subject) {
+                // Remitente de la plataforma: el nombre de la empresa en BD no siempre es el que debe ver el aspirante.
                 $mail->to($emailAspirante)
                      ->subject($subject)
-                     ->from(config('mail.from.address'), $nombreInstitucion);
+                     ->from(config('mail.from.address'), config('mail.from.name'));
             });
         } catch (\Exception $e) {
             \Log::error('Error enviando correo inscripción: ' . $e->getMessage());

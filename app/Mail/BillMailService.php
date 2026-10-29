@@ -2,7 +2,6 @@
 
 namespace App\Mail;
 
-use App\Models\Company;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
@@ -40,10 +39,9 @@ class BillMailService extends Mailable
      */
     public function envelope(): Envelope
     {
-        $nameCompany = Company::findOrFail(1);
-
+        // Lo envía la plataforma (planes de suscripción), no una institución.
         return new Envelope(
-            from: new Address('notificacionesvirtualt@virtualt.org', $nameCompany->razonSocial),
+            from: new Address('notificacionesvirtualt@virtualt.org', config('mail.from.name')),
             subject: $this->subject,
         );
     }

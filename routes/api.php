@@ -806,6 +806,7 @@ Route::delete('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'de
 // Ruta pública para el portal del aspirante (sin autenticación requerida)
 Route::get('portal-aspirante/{token}', [PagoController::class, 'getPortalAspirante']);
 Route::post('portal-aspirante/{token}/iniciar-pago', [PagoController::class, 'iniciarPagoPortalAspirante']);
+Route::post('portal-aspirante/{token}/verificar-pago', [PagoController::class, 'verificarPagoPortalAspirante'])->middleware('throttle:20,1');
 Route::post('portal-aspirante/{token}/comprobante', [PagoController::class, 'subirComprobantePortalAspirante']);
 Route::get('portal-aspirante/{token}/factura-pdf', [PagoController::class, 'generarFacturaPdfPortalAspirante']);
 

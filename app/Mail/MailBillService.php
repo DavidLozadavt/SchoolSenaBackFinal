@@ -43,7 +43,7 @@ class MailBillService extends Mailable
         $nameCompany = $company->razonSocial;
 
         return new Envelope(
-            from: new Address('', $nameCompany),
+            from: new Address(config('mail.from.address'), $nameCompany),
             subject: $this->subject,
         );
     }

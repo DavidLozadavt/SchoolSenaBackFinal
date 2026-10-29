@@ -67,14 +67,36 @@ class WompiWebhookController extends Controller
             return response()->json(['status' => 'error', 'reason' => 'invalid_signature'], 401);
         }
 
+        $resultado = $this->procesarTransaccionAprobada($transaction, $event, 'WOMPI_WEBHOOK');
+
+        return response()->json($resultado['body'], $resultado['httpStatus']);
+    }
+
+    /**
+     * Aplica sobre la factura una transacción Wompi APROBADA (webhook o verificación desde el portal).
+     * Idempotente por transactionId.
+     *
+     * @return array{httpStatus: int, body: array}
+     */
+    public function procesarTransaccionAprobada(array $transaction, array $event = [], string $origen = 'WOMPI_WEBHOOK'): array
+    {
+        $reference = $transaction['reference'] ?? null;
+        $parsed = $this->pasarelaPagoService->parsearReferencia($reference ?? '');
+        if (!$parsed || ($transaction['status'] ?? null) !== 'APPROVED') {
+            return ['httpStatus' => 422, 'body' => ['status' => 'error', 'reason' => 'invalid_transaction']];
+        }
+
+        $idFactura = (int) $parsed['idFactura'];
+        $idEmpresa = (int) $parsed['idEmpresa'];
+
         $transactionId = (string) ($transaction['id'] ?? '');
         if ($transactionId === '') {
-            return response()->json(['status' => 'error', 'reason' => 'missing_transaction_id'], 422);
+            return ['httpStatus' => 422, 'body' => ['status' => 'error', 'reason' => 'missing_transaction_id']];
         }
 
         if ($this->transaccionYaProcesada($transactionId)) {
             Log::info("WompiWebhook: transacción {$transactionId} ya procesada, ignorando duplicado.");
-            return response()->json(['status' => 'already_processed'], 200);
+            return ['httpStatus' => 200, 'body' => ['status' => 'already_processed']];
         }
 
         $monto = round((($transaction['amount_in_cents'] ?? 0) / 100), 2);
@@ -102,26 +124,26 @@ class WompiWebhookController extends Controller
                 $this->resolverMedioPago($paymentMethodType),
                 $this->resolverTipoPagoContado(),
                 $monto > 0 ? $monto : null,
-                'WOMPI_WEBHOOK:' . $transactionId
+                $origen . ':' . $transactionId
             );
 
             if ($resultado['httpStatus'] >= 400) {
                 $this->actualizarAuditoria($auditoriaId, 'ERROR', $resultado['payload']['error'] ?? 'Error al aplicar pago');
 
-                return response()->json([
+                return ['httpStatus' => $resultado['httpStatus'], 'body' => [
                     'status' => 'error',
                     'reason' => $resultado['payload']['error'] ?? 'payment_failed',
-                ], $resultado['httpStatus']);
+                ]];
             }
 
             $this->actualizarAuditoria($auditoriaId, 'PROCESADO');
 
             Log::info("WompiWebhook: pago aplicado sobre factura {$idFactura} (empresa {$idEmpresa}). Monto: {$monto}");
 
-            return response()->json([
+            return ['httpStatus' => 200, 'body' => [
                 'status'  => 'ok',
                 'message' => $resultado['payload']['message'] ?? 'Pago registrado correctamente',
-            ]);
+            ]];
         } catch (\Throwable $e) {
             Log::error('WompiWebhook: error al procesar pago: ' . $e->getMessage(), [
                 'idFactura' => $idFactura,
@@ -130,7 +152,7 @@ class WompiWebhookController extends Controller
 
             $this->actualizarAuditoria($auditoriaId, 'ERROR', substr($e->getMessage(), 0, 500));
 
-            return response()->json(['status' => 'error', 'reason' => 'processing_error'], 500);
+            return ['httpStatus' => 500, 'body' => ['status' => 'error', 'reason' => 'processing_error']];
         }
     }
 

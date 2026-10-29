@@ -49,6 +49,16 @@ return [
         'service_token' => env('ERP_SERVICE_TOKEN'),
     ],
 
+    // Respaldo local de la pasarela Wompi cuando el ERP no responde (ver WompiConfigProvider).
+    'wompi' => [
+        'public_key' => env('WOMPI_PUBLIC_KEY', env('WOMPI_PUBLIC_KEY_TEST')),
+        'private_key' => env('WOMPI_PRIVATE_KEY', env('WOMPI_PRIVATE_KEY_TEST')),
+        'integrity_secret' => env('WOMPI_INTEGRITY_SECRET', env('WOMPI_TEST_INTEGRITY')),
+        'events_secret' => env('WOMPI_EVENTS_SECRET', env('WOMPI_TEST_EVENTS')),
+        'habilitar_pse' => env('WOMPI_HABILITAR_PSE', true),
+        'habilitar_tarjetas' => env('WOMPI_HABILITAR_TARJETAS', true),
+    ],
+
     'school' => [
         'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
     ],

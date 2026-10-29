@@ -31,7 +31,7 @@ class WompiConfigProvider
         $erpEmpresaId = $this->resolveErpEmpresaId($idEmpresa);
         $cacheKey = "wompi_public_config_{$idEmpresa}_{$erpEmpresaId}";
 
-        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($erpEmpresaId, $idEmpresa) {
+        $config = Cache::remember($cacheKey, $this->cacheTtl, function () use ($erpEmpresaId, $idEmpresa) {
             try {
                 $response = Http::timeout(10)->get(
                     "{$this->erpBaseUrl}/empresa/{$erpEmpresaId}/pasarela-pago/publica"
@@ -52,6 +52,8 @@ class WompiConfigProvider
                 return null;
             }
         });
+
+        return $config ?: $this->localPublicConfig();
     }
 
     public function getPrivateConfig(int $idEmpresa): ?array
@@ -59,7 +61,7 @@ class WompiConfigProvider
         $erpEmpresaId = $this->resolveErpEmpresaId($idEmpresa);
         $cacheKey = "wompi_private_config_{$idEmpresa}_{$erpEmpresaId}";
 
-        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($erpEmpresaId, $idEmpresa) {
+        $config = Cache::remember($cacheKey, $this->cacheTtl, function () use ($erpEmpresaId, $idEmpresa) {
             try {
                 $response = Http::timeout(10)
                     ->withHeaders($this->erpServiceHeaders())
@@ -80,6 +82,41 @@ class WompiConfigProvider
                 return null;
             }
         });
+
+        return $config ?: $this->localPrivateConfig();
+    }
+
+    /**
+     * Respaldo para desarrollo local: si el ERP no entrega la pasarela, se usan
+     * las llaves de services.wompi (WOMPI_* en .env). Sin llave pública no aplica.
+     */
+    protected function localPublicConfig(): ?array
+    {
+        $publicKey = config('services.wompi.public_key');
+        if (!$publicKey) {
+            return null;
+        }
+
+        return [
+            'publicKey'         => $publicKey,
+            'habilitarPSE'      => (bool) config('services.wompi.habilitar_pse', true),
+            'habilitarTarjetas' => (bool) config('services.wompi.habilitar_tarjetas', true),
+        ];
+    }
+
+    protected function localPrivateConfig(): ?array
+    {
+        $integritySecret = config('services.wompi.integrity_secret');
+        if (!$integritySecret) {
+            return null;
+        }
+
+        return [
+            'publicKey'       => config('services.wompi.public_key'),
+            'privateKey'      => config('services.wompi.private_key'),
+            'integritySecret' => $integritySecret,
+            'eventsSecret'    => config('services.wompi.events_secret'),
+        ];
     }
 
     public function clearCache(int $idEmpresa): void
