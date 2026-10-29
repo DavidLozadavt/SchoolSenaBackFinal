@@ -178,24 +178,25 @@ class WompiConfigProvider
         return hash('sha256', $raw);
     }
 
+    /**
+     * Checksum de eventos según Wompi: valores de signature.properties (en su orden,
+     * leídos de data) + timestamp + secreto de eventos, en SHA256. Wompi lo envía en mayúsculas.
+     */
     public function validateWebhookSignature(array $event, string $eventsSecret): bool
     {
-        $transaction = $event['data']['transaction'] ?? null;
-        if (!$transaction) {
+        $properties = $event['signature']['properties'] ?? null;
+        $receivedSignature = (string) ($event['signature']['checksum'] ?? '');
+        if (!is_array($properties) || $properties === [] || $receivedSignature === '' || !isset($event['timestamp'])) {
             return false;
         }
 
-        $raw = implode('', [
-            $transaction['id']              ?? '',
-            $transaction['status']          ?? '',
-            $transaction['amount_in_cents'] ?? '',
-            $eventsSecret,
-        ]);
+        $raw = '';
+        foreach ($properties as $property) {
+            $raw .= (string) data_get($event['data'] ?? [], $property, '');
+        }
+        $raw .= $event['timestamp'] . $eventsSecret;
 
-        $expectedSignature = hash('sha256', $raw);
-        $receivedSignature = $event['signature']['checksum'] ?? '';
-
-        return hash_equals($expectedSignature, $receivedSignature);
+        return hash_equals(hash('sha256', $raw), strtolower($receivedSignature));
     }
 
     /**

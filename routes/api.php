@@ -794,15 +794,19 @@ Route::get('configuraciones_pago', [PagoController::class, 'getConfiguracionesPa
 Route::post('store_configuracion_pago', [PagoController::class, 'storeConfiguracionPago']);
 Route::put('update_configuracion_pago/{id}', [PagoController::class, 'updateConfiguracionPago']);
 Route::delete('delete_configuracion_pago/{id}', [PagoController::class, 'destroyConfiguracionPago']);
-Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
-Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
-Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);
-Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
-Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
-Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
-Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
-Route::post('solicitudes_inscripcion/{idFactura}/notificar_recepcion', [PagoController::class, 'notificarRecepcionSolicitudInscripcion']);
-Route::delete('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'deleteSolicitudInscripcion']);
+// Facturas académicas y bandeja de solicitudes: datos personales y pagos, solo con sesión
+// (aceptan idCompany por parámetro, así que sin auth cualquiera listaba los aspirantes).
+Route::middleware('auth:api')->group(function () {
+    Route::post('generar_factura_valores_economicos', [PagoController::class, 'generarFacturaValoresEconomicos']);
+    Route::get('facturas_academicas', [PagoController::class, 'getFacturasAcademicas']);
+    Route::get('facturas_academicas/{id}', [PagoController::class, 'getFacturaAcademica']);
+    Route::post('facturas_academicas/{id}/registrar_pago', [PagoController::class, 'registrarPagoFacturaAcademica']);
+    Route::get('solicitudes_inscripcion', [PagoController::class, 'getSolicitudesInscripcion']);
+    Route::get('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'getSolicitudInscripcion']);
+    Route::post('solicitudes_inscripcion/{idFactura}/aprobar_validacion', [PagoController::class, 'aprobarValidacionSolicitudInscripcion']);
+    Route::post('solicitudes_inscripcion/{idFactura}/notificar_recepcion', [PagoController::class, 'notificarRecepcionSolicitudInscripcion']);
+    Route::delete('solicitudes_inscripcion/{idFactura}', [PagoController::class, 'deleteSolicitudInscripcion']);
+});
 // Ruta pública para el portal del aspirante (sin autenticación requerida)
 Route::get('portal-aspirante/{token}', [PagoController::class, 'getPortalAspirante']);
 Route::post('portal-aspirante/{token}/iniciar-pago', [PagoController::class, 'iniciarPagoPortalAspirante']);
