@@ -39,10 +39,10 @@ class PermissionConst
     /** Aula Virtual - Aprendiz */
     const AULA_VIRTUAL_APRENDIZ = 'AULA_VIRTUAL_APRENDIZ';
 
-    /** Menú Actividades competencias RAP (instructor) */
+    /** Menú Material de Apoyo (instructor) */
     const AULA_VIRTUAL_INSTRUCTOR_ACTIVIDADES_COMPETENCIA = 'AULA_VIRTUAL_INSTRUCTOR_ACTIVIDADES_COMPETENCIA';
 
-    /** Menú Actividades competencias RAP (aprendiz) */
+    /** Menú Material de Apoyo (aprendiz) */
     const AULA_VIRTUAL_APRENDIZ_ACTIVIDADES_COMPETENCIA = 'AULA_VIRTUAL_APRENDIZ_ACTIVIDADES_COMPETENCIA';
 
     const GESTION_SEGUIMIENTO_ASPIRANTES = 'GESTION_SEGUIMIENTO_ASPIRANTES';

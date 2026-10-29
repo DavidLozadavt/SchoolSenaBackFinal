@@ -15,7 +15,7 @@ class PermissionsSeeder extends Seeder
 {
     private const MENU_PATH = '/ambiente-virtual/actividades-competencia';
 
-    private const MENU_TITLE = 'Actividades competencias RAP';
+    private const MENU_TITLE = 'Material de Apoyo';
 
     public function run(): void
     {
@@ -121,7 +121,7 @@ class PermissionsSeeder extends Seeder
                 }
             }
         } catch (\Throwable $e) {
-            Log::warning('No se pudo registrar el menú Actividades competencias RAP: '.$e->getMessage());
+            Log::warning('No se pudo registrar el menú Material de Apoyo: '.$e->getMessage());
         }
     }
 }
