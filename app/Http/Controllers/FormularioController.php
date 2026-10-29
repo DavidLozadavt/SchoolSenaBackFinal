@@ -495,6 +495,23 @@ class FormularioController extends Controller
                     if (is_array($val)) $val = implode(', ', $val);
                     $titleLower = $this->normalizarTituloPregunta($preg->titulo);
 
+                    // Preguntas del tutor/acudiente: van primero porque sus títulos también
+                    // contienen "nombre completo", "documento", "correo"... y caerían en las del estudiante.
+                    if (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente')) {
+                        if (str_contains($titleLower, 'nombre')) {
+                            $tutorName = $val;
+                        } elseif (str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion') || str_contains($titleLower, 'cédula') || str_contains($titleLower, 'cedula')) {
+                            $tutorDocNum = $val;
+                        } elseif (str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) {
+                            $tutorEmail = $val;
+                        } elseif (str_contains($titleLower, 'teléfono') || str_contains($titleLower, 'telefono') || str_contains($titleLower, 'celular') || str_contains($titleLower, 'móvil') || str_contains($titleLower, 'movil')) {
+                            $tutorPhone = $val;
+                        } elseif (str_contains($titleLower, 'parentesco') || str_contains($titleLower, 'relación') || str_contains($titleLower, 'relacion')) {
+                            $tutorParentesco = $val;
+                        }
+                        continue;
+                    }
+
                     // Student name
                     if ((str_contains($titleLower, 'nombre') && (str_contains($titleLower, 'estudiante') || str_contains($titleLower, 'aspirante') || str_contains($titleLower, 'participante') || str_contains($titleLower, 'alumno'))) || str_contains($titleLower, 'nombre completo') || str_contains($titleLower, 'nombres y apellidos')) {
                         if (!str_contains($titleLower, 'tutor') && !str_contains($titleLower, 'acudiente')) {
@@ -537,25 +554,9 @@ class FormularioController extends Controller
                     elseif (str_contains($titleLower, 'programa') || str_contains($titleLower, 'curso') || str_contains($titleLower, 'carrera') || str_contains($titleLower, 'interés') || str_contains($titleLower, 'interes')) {
                         $programName = $val;
                     }
-                    // Tutor name
-                    elseif (str_contains($titleLower, 'nombre') && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
-                        $tutorName = $val;
-                    }
-                    // Tutor relationship
+                    // Tutor relationship (pregunta sin la palabra tutor/acudiente, ej. "Parentesco")
                     elseif (str_contains($titleLower, 'parentesco') || str_contains($titleLower, 'relación') || str_contains($titleLower, 'relacion')) {
                         $tutorParentesco = $val;
-                    }
-                    // Tutor doc num
-                    elseif ((str_contains($titleLower, 'documento') || str_contains($titleLower, 'identificación') || str_contains($titleLower, 'identificacion') || str_contains($titleLower, 'cédula') || str_contains($titleLower, 'cedula')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
-                        $tutorDocNum = $val;
-                    }
-                    // Tutor phone
-                    elseif ((str_contains($titleLower, 'teléfono') || str_contains($titleLower, 'telefono') || str_contains($titleLower, 'celular') || str_contains($titleLower, 'móvil') || str_contains($titleLower, 'movil')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
-                        $tutorPhone = $val;
-                    }
-                    // Tutor email
-                    elseif ((str_contains($titleLower, 'correo') || str_contains($titleLower, 'email') || str_contains($titleLower, 'e-mail')) && (str_contains($titleLower, 'tutor') || str_contains($titleLower, 'acudiente'))) {
-                        $tutorEmail = $val;
                     }
                 }
 
@@ -663,9 +664,7 @@ class FormularioController extends Controller
                     }
                 }
 
-                $fichaId = \App\Models\Ficha::value('id') ?? 1;
-
-                // 4. Crear o actualizar matrícula en estado INSCRIPCION
+                // 4. Crear o actualizar matrícula en estado INSCRIPCION (sin ficha: se asigna al matricular)
                 $observacionMatricula = 'FormResponseID:' . $respuesta->id;
                 $matricula = \App\Models\Matricula::where('observacion', $observacionMatricula)
                     ->where('idCompany', $formulario->idCompany)
@@ -686,15 +685,25 @@ class FormularioController extends Controller
                         'idCompany' => $formulario->idCompany,
                         'fecha' => \Carbon\Carbon::now(),
                         'idGrado' => $gradoId,
-                        'idFicha' => $fichaId,
+                        'idFicha' => null,
                         'observacion' => $observacionMatricula,
                     ]);
                 }
 
-                // 5. Generar factura individual (idempotente) con valores económicos del proceso
-                $proceso = $this->resolverProcesoInscripcionFormulario($programName, (int) $formulario->idCompany);
+                // 5. Generar factura individual (idempotente) con valores económicos del proceso.
+                // Si la respuesta ya tiene factura (p. ej. el aspirante editó su inscripción), se reutiliza.
+                $facturaInscripcion = Factura::where('idFormularioRespuesta', $respuesta->id)
+                    ->where('idCompany', $formulario->idCompany)
+                    ->orderBy('id')
+                    ->first();
 
-                if ($proceso) {
+                $proceso = $facturaInscripcion
+                    ? null
+                    : $this->resolverProcesoInscripcionFormulario($programName, (int) $formulario->idCompany);
+
+                if ($facturaInscripcion) {
+                    // Ya existe: no se genera otra.
+                } elseif ($proceso) {
                     /** @var PagoController $pagoController */
                     $pagoController = app(PagoController::class);
                     $resultadoFactura = $pagoController->crearFacturaIndividualInscripcion(

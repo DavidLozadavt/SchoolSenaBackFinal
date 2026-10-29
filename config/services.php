@@ -44,6 +44,25 @@ return [
         'url' => env('LIVEKIT_URL'),
     ],
 
+    'erp' => [
+        'base_url' => env('ERP_BASE_URL', 'http://localhost:8001/api'),
+        'service_token' => env('ERP_SERVICE_TOKEN'),
+    ],
+
+    // Respaldo local de la pasarela Wompi cuando el ERP no responde (ver WompiConfigProvider).
+    'wompi' => [
+        'public_key' => env('WOMPI_PUBLIC_KEY', env('WOMPI_PUBLIC_KEY_TEST')),
+        'private_key' => env('WOMPI_PRIVATE_KEY', env('WOMPI_PRIVATE_KEY_TEST')),
+        'integrity_secret' => env('WOMPI_INTEGRITY_SECRET', env('WOMPI_TEST_INTEGRITY')),
+        'events_secret' => env('WOMPI_EVENTS_SECRET', env('WOMPI_TEST_EVENTS')),
+        'habilitar_pse' => env('WOMPI_HABILITAR_PSE', true),
+        'habilitar_tarjetas' => env('WOMPI_HABILITAR_TARJETAS', true),
+    ],
+
+    'school' => [
+        'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+    ],
+
     // Dominio del frontend de School: a donde apunta el QR de las escarapelas.
     'frontend' => [
         'url' => env('FRONTEND_URL'),

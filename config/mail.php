@@ -107,4 +107,22 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Identidad visual de los correos
+    |--------------------------------------------------------------------------
+    |
+    | Logo con letras blancas para el encabezado oscuro del layout
+    | mails.layouts.corporate. Debe ser una URL pública: los clientes de
+    | correo no cargan imágenes de localhost.
+    |
+    */
+
+    'brand' => [
+        'name' => env('MAIL_BRAND_NAME', 'School · Virtual Technology'),
+        'logo' => env('MAIL_BRAND_LOGO', 'https://sena-school.virtualt.org/media/app/logoweb-white.png'),
+        'url' => env('MAIL_BRAND_URL', 'https://virtualt.org'),
+        'soporte' => env('MAIL_BRAND_SOPORTE', 'soporte@virtualt.org'),
+    ],
+
 ];
