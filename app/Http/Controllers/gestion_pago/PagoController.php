@@ -2400,9 +2400,9 @@ class PagoController extends Controller
         $nombreInstitucion = $company?->razonSocial ?? 'La institución';
 
         // ── Generar URL del portal público ────────────────────────────────
-        $token       = $this->generarTokenPortalAspirante($idFactura, $idCompany);
-        $frontendUrl = rtrim(config('services.school.frontend_url'), '/');
-        $portalUrl   = "{$frontendUrl}/portal-aspirante/{$token}";
+        // URL fija a propósito: el correo siempre debe llevar al dominio de producción.
+        $token     = $this->generarTokenPortalAspirante($idFactura, $idCompany);
+        $portalUrl = "https://school-vt.virtualt.org/portal-aspirante/{$token}";
 
         // ── Enviar correo con la plantilla HTML enriquecida ───────────────
         $subject = "Solicitud de inscripción recibida – {$nombrePrograma}";
