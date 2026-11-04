@@ -8,6 +8,7 @@ use App\Models\Ficha;
 use App\Models\MaterialApoyoRap;
 use App\Models\Materia;
 use App\Models\Person;
+use App\Services\ambiente_virtual\RapAccessService;
 use App\Util\KeyUtil;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,10 +17,19 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
-/** CRUD de biblioteca de conocimiento (tabla materialApoyoRap), listado por programa vía ficha→asignación. */
+/**
+ * CRUD de biblioteca de conocimiento (tabla materialApoyoRap).
+ * La vista general (menú Biblioteca) lista por Competencia/RAP.
+ * Las rutas por ficha se conservan para el detalle de clase.
+ * idFicha en la tabla es contexto legado de persistencia, no el dueño del recurso.
+ */
 class MaterialApoyoFichaController extends Controller
 {
     use ValidatesMaterialDocumentUpload;
+
+    public function __construct(private RapAccessService $rapAccess)
+    {
+    }
 
     /**
      * Fichas que comparten el mismo programa que la ficha dada (idAsignacion → idPrograma).
@@ -67,6 +77,10 @@ class MaterialApoyoFichaController extends Controller
         return in_array('GESTION_USUARIO', $permKeys, true);
     }
 
+    /**
+     * Listado legado por ficha (detalle de clase histórico).
+     * El menú Biblioteca usa indexGeneral: Competencia/RAP, sin selector de ficha.
+     */
     public function index(int $idFicha): JsonResponse
     {
         try {
@@ -136,6 +150,152 @@ class MaterialApoyoFichaController extends Controller
         }
     }
 
+    /**
+     * Biblioteca general del instructor: recursos de sus RAP, sin filtrar por ficha seleccionada.
+     */
+    public function indexGeneral(Request $request): JsonResponse
+    {
+        try {
+            $gate = $this->asegurarInstructorBiblioteca();
+            if ($gate instanceof JsonResponse) {
+                return $gate;
+            }
+
+            $tabla = (new MaterialApoyoRap())->getTable();
+            if (! Schema::hasTable($tabla)) {
+                return response()->json([]);
+            }
+
+            $idsRap = $this->rapAccess->idsRapAccesibles();
+            if ($idsRap === []) {
+                return response()->json([]);
+            }
+
+            $query = MaterialApoyoRap::query()->whereIn('idRap', $idsRap);
+
+            $idCompetencia = (int) $request->query('idCompetencia', 0);
+            $idRap = (int) $request->query('idRap', 0);
+            $buscar = trim((string) $request->query('buscar', ''));
+            if ($idRap > 0) {
+                $query->where('idRap', $idRap);
+            }
+            if ($idCompetencia > 0) {
+                $query->whereHas('rap', function ($q) use ($idCompetencia) {
+                    $q->where('idMateriaPadre', $idCompetencia);
+                });
+            }
+            if ($buscar !== '') {
+                $like = '%'.$buscar.'%';
+                $query->where(function ($q) use ($like) {
+                    $q->where('titulo', 'like', $like)
+                        ->orWhere('descripcion', 'like', $like);
+                });
+            }
+
+            $rows = $query->orderByDesc('id')->get()->unique('id')->values();
+
+            return response()->json($rows->map(fn ($m) => $this->toResource($m))->values());
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function rapsGeneral(): JsonResponse
+    {
+        try {
+            $gate = $this->asegurarInstructorBiblioteca();
+            if ($gate instanceof JsonResponse) {
+                return $gate;
+            }
+
+            $raps = $this->rapAccess->rapsAccesibles();
+
+            return response()->json(array_values(array_map(static function (array $r) {
+                return [
+                    'id' => (int) ($r['id'] ?? 0),
+                    'nombre' => (string) ($r['nombreMateria'] ?? ''),
+                    'codigo' => $r['codigo'] ?? null,
+                    'idCompetencia' => isset($r['idCompetencia']) ? (int) $r['idCompetencia'] : 0,
+                    'nombreCompetencia' => $r['competenciaNombre'] ?? null,
+                    'codigoCompetencia' => $r['competenciaCodigo'] ?? null,
+                ];
+            }, $raps)));
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function storeGeneral(Request $request): JsonResponse
+    {
+        try {
+            $gate = $this->asegurarInstructorBiblioteca();
+            if ($gate instanceof JsonResponse) {
+                return $gate;
+            }
+
+            $idRap = (int) $request->input('idRap', 0);
+            if ($idRap <= 0) {
+                return response()->json(['error' => 'Indique el RAP del recurso.'], 422);
+            }
+            if (! $this->rapAccess->usuarioPuedeAccederRap($idRap)) {
+                return response()->json(['error' => 'No autorizado para este RAP.'], 403);
+            }
+
+            $rap = Materia::find($idRap);
+            if (! $rap) {
+                return response()->json(['error' => 'El RAP indicado no existe.'], 404);
+            }
+            if (! $request->filled('idMateria')) {
+                $request->merge(['idMateria' => $this->competenciaId($rap)]);
+            }
+
+            $idFicha = $this->idFichaContextoParaRap($idRap);
+            if ($idFicha <= 0) {
+                return response()->json(['error' => 'No hay contexto académico para guardar el recurso.'], 422);
+            }
+
+            return $this->store($request, $idFicha);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function updateGeneral(Request $request, int $id): JsonResponse
+    {
+        try {
+            $gate = $this->asegurarInstructorBiblioteca();
+            if ($gate instanceof JsonResponse) {
+                return $gate;
+            }
+            $material = $this->materialGeneralOFail($id);
+            if ($material instanceof JsonResponse) {
+                return $material;
+            }
+
+            return $this->update($request, (int) $material->idFicha, $id);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function destroyGeneral(int $id): JsonResponse
+    {
+        try {
+            $gate = $this->asegurarInstructorBiblioteca();
+            if ($gate instanceof JsonResponse) {
+                return $gate;
+            }
+            $material = $this->materialGeneralOFail($id);
+            if ($material instanceof JsonResponse) {
+                return $material;
+            }
+
+            return $this->destroy((int) $material->idFicha, $id);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function store(Request $request, int $idFicha): JsonResponse
     {
         try {
@@ -144,6 +304,7 @@ class MaterialApoyoFichaController extends Controller
                 return response()->json(['error' => 'Ejecute migraciones para habilitar material de apoyo por ficha y RAP.'], 503);
             }
 
+            $this->inspectMaterialUploads($request);
             $validator = Validator::make($request->all(), array_merge([
                 'idMateria' => 'required|integer|exists:materia,id',
                 'idRap' => 'required|integer|exists:materia,id',
@@ -151,15 +312,15 @@ class MaterialApoyoFichaController extends Controller
                 'descripcion' => 'nullable|string|max:3000',
                 'tipoMaterial' => 'nullable|string|in:'.implode(',', MaterialApoyoRap::TIPOS_MATERIAL),
                 'urlAdicional' => 'nullable|string|max:500',
-                'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
                 'urlVideo' => 'nullable|string|max:500',
-            ], $this->materialDocumentoFileRules(true)), array_merge($this->materialDocumentoValidationMessages(), [
-                'video.max' => 'El archivo no puede superar los 50 MB.',
-            ]));
+            ], $this->materialDocumentoFileRules(true), $this->materialVideoFileRules(true)), array_merge(
+                $this->materialDocumentoValidationMessages(),
+                $this->materialVideoValidationMessages(),
+                $this->phpUploadValidationMessages($request)
+            ));
             $validator->after(function ($v) use ($request) {
-                if ($request->hasFile('documento')) {
-                    $this->assertMaterialDocumentoFile($v, $request->file('documento'));
-                }
+                $this->assertMaterialDocumentoFile($v, $request->file('documento'));
+                $this->assertMaterialVideoFile($v, $request->file('video'));
             });
             $validator->validate();
 
@@ -182,7 +343,9 @@ class MaterialApoyoFichaController extends Controller
             }
 
             if (! $path && empty($request->urlAdicional) && empty($urlVideoValue)) {
-                return response()->json(['errors' => ['Se requiere al menos un recurso: documento, enlace o video']], 422);
+                return response()->json(['errors' => [
+                    'recursos' => ['Ingrese al menos un recurso: documento, enlace o video.'],
+                ]], 422);
             }
 
             $user = KeyUtil::user();
@@ -211,7 +374,11 @@ class MaterialApoyoFichaController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            $msg = $e->getMessage();
+            if (stripos($msg, 'storage') !== false || stripos($msg, 'unable to write') !== false) {
+                return response()->json(['error' => 'No fue posible guardar el archivo.'], 500);
+            }
+            return response()->json(['error' => $msg], 500);
         }
     }
 
@@ -228,22 +395,23 @@ class MaterialApoyoFichaController extends Controller
                 return response()->json(['error' => 'No autorizado para editar este material.'], 403);
             }
 
+            $this->inspectMaterialUploads($request);
             $validator = Validator::make($request->all(), array_merge([
                 'titulo' => 'sometimes|required|string|max:255',
                 'descripcion' => 'nullable|string|max:3000',
                 'tipoMaterial' => 'nullable|string|in:'.implode(',', MaterialApoyoRap::TIPOS_MATERIAL),
                 'urlAdicional' => 'nullable|string|max:500',
-                'video' => 'nullable|file|mimes:mp4,webm,mov,avi|max:51200',
                 'urlVideo' => 'nullable|string|max:500',
                 'idMateria' => 'sometimes|required|integer|exists:materia,id',
                 'idRap' => 'sometimes|required|integer|exists:materia,id',
-            ], $this->materialDocumentoFileRules(true)), array_merge($this->materialDocumentoValidationMessages(), [
-                'video.max' => 'El archivo no puede superar los 50 MB.',
-            ]));
+            ], $this->materialDocumentoFileRules(true), $this->materialVideoFileRules(true)), array_merge(
+                $this->materialDocumentoValidationMessages(),
+                $this->materialVideoValidationMessages(),
+                $this->phpUploadValidationMessages($request)
+            ));
             $validator->after(function ($v) use ($request) {
-                if ($request->hasFile('documento')) {
-                    $this->assertMaterialDocumentoFile($v, $request->file('documento'));
-                }
+                $this->assertMaterialDocumentoFile($v, $request->file('documento'));
+                $this->assertMaterialVideoFile($v, $request->file('video'));
             });
             $validator->validate();
 
@@ -297,7 +465,9 @@ class MaterialApoyoFichaController extends Controller
             }
 
             if (! $material->urlDocumento && empty($material->urlAdicional) && empty($material->urlVideo)) {
-                return response()->json(['errors' => ['Se requiere al menos un recurso: documento, enlace o video']], 422);
+                return response()->json(['errors' => [
+                    'recursos' => ['Ingrese al menos un recurso: documento, enlace o video.'],
+                ]], 422);
             }
 
             $material->save();
@@ -306,7 +476,11 @@ class MaterialApoyoFichaController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json(['errors' => $e->errors()], 422);
         } catch (\Throwable $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            $msg = $e->getMessage();
+            if (stripos($msg, 'storage') !== false || stripos($msg, 'unable to write') !== false) {
+                return response()->json(['error' => 'No fue posible guardar el archivo.'], 500);
+            }
+            return response()->json(['error' => $msg], 500);
         }
     }
 
@@ -335,7 +509,7 @@ class MaterialApoyoFichaController extends Controller
 
     private function toResource(MaterialApoyoRap $m): array
     {
-        $rapModel = Materia::query()->select(['id', 'nombreMateria', 'idMateriaPadre'])->find($m->idRap);
+        $rapModel = Materia::query()->select(['id', 'nombreMateria', 'codigo', 'idMateriaPadre'])->find($m->idRap);
         $rap = null;
         $idCompetencia = 0;
         if ($rapModel) {
@@ -343,20 +517,23 @@ class MaterialApoyoFichaController extends Controller
             $rap = [
                 'id' => (int) $rapModel->id,
                 'nombre' => $rapModel->nombreMateria,
+                'codigo' => $rapModel->codigo,
                 'idCompetencia' => $idCompetencia,
             ];
         }
 
-        $matModel = Materia::query()->select(['id', 'nombreMateria', 'idMateriaPadre'])->find($m->idMateria);
+        $matModel = Materia::query()->select(['id', 'nombreMateria', 'codigo', 'idMateriaPadre'])->find($m->idMateria);
         $materiaNombre = $matModel?->nombreMateria;
         if ($idCompetencia <= 0 && $matModel) {
             $idCompetencia = ! empty($matModel->idMateriaPadre)
                 ? (int) $matModel->idMateriaPadre
                 : (int) $matModel->id;
         }
-        $competenciaNombre = $idCompetencia > 0
-            ? Materia::query()->whereKey($idCompetencia)->value('nombreMateria')
-            : $materiaNombre;
+        $compModel = $idCompetencia > 0
+            ? Materia::query()->select(['nombreMateria', 'codigo'])->find($idCompetencia)
+            : null;
+        $competenciaNombre = $compModel?->nombreMateria ?? $materiaNombre;
+        $competenciaCodigo = $compModel?->codigo;
 
         $creador = null;
         if ($m->idPersona) {
@@ -394,6 +571,7 @@ class MaterialApoyoFichaController extends Controller
             'idCompetencia' => $idCompetencia > 0 ? $idCompetencia : null,
             'materiaNombre' => $materiaNombre,
             'competenciaNombre' => $competenciaNombre,
+            'competenciaCodigo' => $competenciaCodigo ?? null,
             'rap' => $rap,
             'creador' => $creador,
             'created_at' => $m->created_at,
@@ -408,7 +586,9 @@ class MaterialApoyoFichaController extends Controller
         if (! Storage::disk('public')->exists($dir)) {
             Storage::disk('public')->makeDirectory($dir, 0755, true);
         }
-        $filename = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName());
+        $original = preg_replace('/[^a-zA-Z0-9._-]/', '_', $file->getClientOriginalName()) ?: 'archivo';
+        $original = trim((string) $original, '._') ?: 'archivo';
+        $filename = time().'_'.bin2hex(random_bytes(4)).'_'.$original;
 
         return $file->storeAs($dir, $filename, 'public');
     }
@@ -424,6 +604,52 @@ class MaterialApoyoFichaController extends Controller
         if (Storage::disk('public')->exists($path)) {
             Storage::disk('public')->delete($path);
         }
+    }
+
+    private function asegurarInstructorBiblioteca(): ?JsonResponse
+    {
+        if (! $this->rapAccess->usuarioPuedeAdministrar()) {
+            return response()->json(['error' => 'No autorizado para administrar la biblioteca de conocimiento.'], 403);
+        }
+
+        return null;
+    }
+
+    /**
+     * idFicha legado para persistir en materialApoyoRap. No se expone como filtro de la vista general.
+     */
+    private function idFichaContextoParaRap(int $idRap): int
+    {
+        $ids = $this->rapAccess->idsFichasHorarioDeRap($idRap);
+        if ($ids !== []) {
+            return (int) $ids[0];
+        }
+        $fichas = $this->rapAccess->fichasInstructor();
+        if ($fichas === []) {
+            return 0;
+        }
+
+        return (int) ($fichas[0]['id'] ?? 0);
+    }
+
+    /**
+     * @return MaterialApoyoRap|JsonResponse
+     */
+    private function materialGeneralOFail(int $id)
+    {
+        if ($id <= 0 || ! Schema::hasTable((new MaterialApoyoRap())->getTable())) {
+            return response()->json(['error' => 'El recurso indicado no existe.'], 404);
+        }
+        $material = MaterialApoyoRap::query()->whereKey($id)->first();
+        if (! $material) {
+            return response()->json(['error' => 'El recurso indicado no existe.'], 404);
+        }
+        $idRap = (int) $material->idRap;
+        if ($idRap > 0 && ! $this->rapAccess->usuarioPuedeAccederRap($idRap) && ! $this->usuarioPuedeMutarMaterialApoyoRap($material)) {
+            return response()->json(['error' => 'No autorizado para este recurso.'], 403);
+        }
+
+        return $material;
     }
 
     private function competenciaId(Materia $materia): int

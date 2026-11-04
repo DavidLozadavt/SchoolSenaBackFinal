@@ -24,6 +24,7 @@ class MaterialCompetenciaConsolidacionTest extends TestCase
         $this->assertFalse(class_exists(\App\Models\MaterialRap::class));
         $this->assertSame('materialCompetencia', (new MaterialCompetencia())->getTable());
         $this->assertTrue(Schema::hasColumn('materialCompetencia', 'idCompetencia'));
+        $this->assertTrue(Schema::hasColumn('materialCompetencia', 'idFicha'));
         $this->assertTrue(Schema::hasColumn('materialCompetencia', 'claveOrigen'));
         $this->assertTrue(Schema::hasColumn('materialCompetencia', 'urlDocumento'));
         $this->assertTrue(Schema::hasColumn('materialCompetencia', 'urlAdicional'));
@@ -41,6 +42,9 @@ class MaterialCompetenciaConsolidacionTest extends TestCase
         $this->assertTrue(Schema::hasColumn('materialCompetenciaRecurso', 'ruta'));
         $this->assertTrue(
             DB::table('migrations')->where('migration', '2026_10_27_233358_add_url_video_and_recursos_to_material_competencia')->exists()
+        );
+        $this->assertTrue(
+            DB::table('migrations')->where('migration', '2026_10_30_201600_add_id_ficha_to_material_competencia')->exists()
         );
         $this->assertFalse(
             DB::table('migrations')->whereIn('migration', [
@@ -83,7 +87,7 @@ class MaterialCompetenciaConsolidacionTest extends TestCase
         }
     }
 
-    public function test_unicidad_de_incorporacion_es_por_competencia(): void
+    public function test_unicidad_de_incorporacion_es_por_competencia_y_ficha(): void
     {
         $clave = MaterialCompetenciaReglas::claveIncorporacion(
             MaterialCompetenciaReglas::ORIGEN_ACTIVIDAD,
@@ -92,14 +96,15 @@ class MaterialCompetenciaConsolidacionTest extends TestCase
         );
         $this->assertSame('ACTIVIDAD:actividad:36', $clave);
 
-        if (! Schema::hasTable('materialCompetencia')) {
+        if (! Schema::hasTable('materialCompetencia') || ! Schema::hasColumn('materialCompetencia', 'idFicha')) {
             return;
         }
 
         $duplicados = DB::table('materialCompetencia')
-            ->select('idCompetencia', 'claveOrigen', DB::raw('COUNT(*) as total'))
+            ->select('idCompetencia', 'idFicha', 'claveOrigen', DB::raw('COUNT(*) as total'))
             ->whereNotNull('claveOrigen')
-            ->groupBy('idCompetencia', 'claveOrigen')
+            ->whereNotNull('idFicha')
+            ->groupBy('idCompetencia', 'idFicha', 'claveOrigen')
             ->having('total', '>', 1)
             ->count();
 

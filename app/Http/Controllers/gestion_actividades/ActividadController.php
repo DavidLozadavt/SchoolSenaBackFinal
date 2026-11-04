@@ -41,6 +41,11 @@ class ActividadController extends Controller
     /** Rechazo mover RAP cuando el destino no es de la misma ficha o la actividad no pertenece a esa ficha. */
     private const ERROR_MOVER_RAP_FICHA_DISTINTA = 'No puedes mover esta actividad a un RAP de otra ficha.';
 
+    /**
+     * Biblioteca de conocimiento (consulta): recursos GENERALES por RAP/competencia.
+     * El universo académico (qué RAP puede ver el usuario) puede derivarse de sus fichas,
+     * pero el recurso NO se aísla por idFicha. Material de Apoyo (materialCompetencia) sí.
+     */
     public function materialApoyoAprendiz(Request $request): JsonResponse
     {
         try {
@@ -50,38 +55,15 @@ class ActividadController extends Controller
                 return response()->json(['error' => 'Usuario autenticado sin persona asociada'], 401);
             }
 
-            $tablaMa = Schema::hasTable('matriculaAcademica') ? 'matriculaAcademica' : 'matriculaacademica';
-            if (!Schema::hasTable($tablaMa)) {
-                return response()->json([]);
-            }
-            $colFicha = Schema::hasColumn($tablaMa, 'idFicha')
-                ? 'idFicha'
-                : (Schema::hasColumn($tablaMa, 'idAsignacionPeriodoProgramaJornada') ? 'idAsignacionPeriodoProgramaJornada' : null);
-            if (!$colFicha) {
-                return response()->json([]);
-            }
-
-            $fichaIds = DB::table($tablaMa . ' as ma')
-                ->join('matricula as m', 'ma.idMatricula', '=', 'm.id')
-                ->where('m.idPersona', $idPersona)
-                ->whereNotNull('ma.' . $colFicha)
-                ->distinct()
-                ->pluck('ma.' . $colFicha)
-                ->map(fn ($id) => (int) $id)
-                ->filter(fn ($id) => $id > 0)
-                ->values();
-
-            if ($fichaIds->isEmpty()) {
-                return response()->json([]);
-            }
-
             $tablaMaterial = (new MaterialApoyoRap())->getTable();
             if (! Schema::hasTable($tablaMaterial)) {
                 return response()->json([]);
             }
 
-            /** @var array<int, int> */
-            $fichaIdsPrograma = $this->expandFichaIdsMismoPrograma($fichaIds->all());
+            $idsRap = (new RapAccessService())->idsRapAccesibles();
+            if ($idsRap === []) {
+                return response()->json([]);
+            }
 
             $query = DB::table($tablaMaterial . ' as mar')
                 ->leftJoin('materia as mat', 'mar.idMateria', '=', 'mat.id')
@@ -89,16 +71,12 @@ class ActividadController extends Controller
                 ->leftJoin('materia as comp', 'mat.idMateriaPadre', '=', 'comp.id')
                 ->leftJoin('ficha as f', 'mar.idFicha', '=', 'f.id')
                 ->leftJoin('persona as creador', 'mar.idPersona', '=', 'creador.id')
-                ->whereIn('mar.idFicha', $fichaIdsPrograma);
+                ->whereIn('mar.idRap', $idsRap);
 
-            $idFicha = (int) $request->query('idFicha', 0);
             $idMateria = (int) $request->query('idMateria', 0);
             $idRap = (int) $request->query('idRap', 0);
             $idCompetencia = (int) $request->query('idCompetencia', 0);
 
-            if ($idFicha > 0) {
-                $query->where('mar.idFicha', $idFicha);
-            }
             if ($idMateria > 0) {
                 $query->where('mar.idMateria', $idMateria);
             }
@@ -133,6 +111,7 @@ class ActividadController extends Controller
                 'mat.nombreMateria as materiaNombre',
                 'mat.idMateriaPadre as idCompetenciaMat',
                 'rap.nombreMateria as rapNombre',
+                'rap.codigo as rapCodigo',
                 'rap.idMateriaPadre as idCompetenciaRap',
                 'f.codigo as fichaCodigo',
                 'creador.nombre1 as creadorNombre1',
@@ -142,6 +121,7 @@ class ActividadController extends Controller
                 'creador.email as creadorEmail',
                 'creador.rutaFoto as creadorRutaFoto',
                 DB::raw('COALESCE(comp.nombreMateria, mat.nombreMateria) as competenciaNombre'),
+                DB::raw('COALESCE(comp.codigo, mat.codigo) as competenciaCodigo'),
             ];
             if (Schema::hasColumn($tablaMaterial, 'urlVideo')) {
                 $selectCols[] = 'mar.urlVideo';
@@ -201,11 +181,13 @@ class ActividadController extends Controller
                     'idMateria' => (int) $row->idMateria,
                     'materiaNombre' => $row->materiaNombre,
                     'competenciaNombre' => $row->competenciaNombre,
+                    'competenciaCodigo' => $row->competenciaCodigo ?? null,
                     'idCompetencia' => $idCompetenciaResolved > 0 ? $idCompetenciaResolved : null,
                     'idFicha' => (int) $row->idFicha,
                     'fichaCodigo' => $row->fichaCodigo,
                     'idRap' => $idRapResolved > 0 ? $idRapResolved : null,
                     'rapNombre' => $row->rapNombre ?: $row->materiaNombre,
+                    'rapCodigo' => $row->rapCodigo ?? null,
                     'legacySinRap' => false,
                     'created_at' => $row->created_at,
                     'idPersona' => $row->idPersona ? (int) $row->idPersona : null,

@@ -27,6 +27,9 @@ class MaterialCompetenciaController extends Controller
 {
     use ValidatesMaterialDocumentUpload;
 
+    /** @var array<int, list<array<string, mixed>>> */
+    private array $cacheFichasCompetencia = [];
+
     public function __construct(private RapAccessService $rapAccess)
     {
     }
@@ -47,7 +50,89 @@ class MaterialCompetenciaController extends Controller
         }
     }
 
-    public function index(int $idCompetencia): JsonResponse
+    public function fichasInstructor(): JsonResponse
+    {
+        try {
+            if (! $this->usuarioAutorizadoModulo()) {
+                return response()->json(['error' => 'No autorizado para Material de Apoyo.'], 403);
+            }
+            if (! $this->rapAccess->usuarioPuedeAdministrar()) {
+                return response()->json(['error' => 'El aprendiz no consulta fichas desde este listado.'], 403);
+            }
+
+            return response()->json([
+                'data' => $this->rapAccess->fichasAdministrables(),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function competenciasDeFicha(int $idFicha): JsonResponse
+    {
+        try {
+            if (! $this->usuarioAutorizadoModulo()) {
+                return response()->json(['error' => 'No autorizado para Material de Apoyo.'], 403);
+            }
+            if (! $this->rapAccess->usuarioPuedeAdministrar()) {
+                return response()->json(['error' => 'El aprendiz no administra competencias por ficha.'], 403);
+            }
+            if ($idFicha <= 0) {
+                return response()->json(['error' => 'Indique la ficha.'], 422);
+            }
+            if (! Schema::hasTable('ficha') || ! DB::table('ficha')->where('id', $idFicha)->exists()) {
+                return response()->json(['error' => 'La ficha solicitada no existe.'], 404);
+            }
+            if (! $this->rapAccess->fichaEsDelInstructor($idFicha)) {
+                return response()->json(['error' => 'No autorizado para administrar esta ficha.'], 403);
+            }
+
+            return response()->json([
+                'data' => $this->rapAccess->competenciasDeFicha($idFicha),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function fichas(int $idCompetencia): JsonResponse
+    {
+        try {
+            $gate = $this->asegurarCompetencia($idCompetencia);
+            if ($gate instanceof JsonResponse) {
+                return $gate;
+            }
+
+            return response()->json([
+                'data' => $this->rapAccess->fichasDeCompetencia($idCompetencia),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Clases de hoy de las fichas de la competencia. Solo ayuda visual para elegir ficha.
+     * No persiste fecha, sesión ni horarioMateria en el material.
+     */
+    public function clasesReferencia(int $idCompetencia): JsonResponse
+    {
+        try {
+            $gate = $this->asegurarCompetencia($idCompetencia);
+            if ($gate instanceof JsonResponse) {
+                return $gate;
+            }
+
+            return response()->json([
+                'fecha' => now()->toDateString(),
+                'data' => $this->rapAccess->clasesReferenciaHoy($idCompetencia),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function index(Request $request, int $idCompetencia): JsonResponse
     {
         try {
             $gate = $this->asegurarCompetencia($idCompetencia);
@@ -58,9 +143,20 @@ class MaterialCompetenciaController extends Controller
                 return response()->json(['error' => $this->mensajeMigracion()], 503);
             }
 
-            $rows = MaterialCompetencia::query()
+            $idFicha = $this->idFichaSolicitado($request);
+            $acceso = $this->asegurarFichaConsulta($idCompetencia, $idFicha);
+            if ($acceso instanceof JsonResponse) {
+                return $acceso;
+            }
+
+            // Material de Apoyo: aislamiento real por ficha + competencia (no por jornada).
+            $query = MaterialCompetencia::query()
                 ->where('idCompetencia', $idCompetencia)
-                ->where('activo', true)
+                ->where('activo', true);
+            if ($this->tieneColumnaIdFicha()) {
+                $query->where('idFicha', $idFicha);
+            }
+            $rows = $query
                 ->with($this->relacionesMaterial())
                 ->orderByDesc('id')
                 ->get();
@@ -102,9 +198,22 @@ class MaterialCompetenciaController extends Controller
                 ]);
             }
 
-            $rows = MaterialCompetencia::query()
+            $query = MaterialCompetencia::query()
                 ->whereIn('idCompetencia', $ids)
-                ->where('activo', true)
+                ->where('activo', true);
+            if ($this->tieneColumnaIdFicha()) {
+                $idsFicha = $this->rapAccess->usuarioPuedeAdministrar()
+                    ? $this->rapAccess->idsFichasInstructor()
+                    : $this->rapAccess->idsFichasAprendiz();
+                if ($idsFicha === []) {
+                    return response()->json([
+                        'data' => [],
+                        'puedeAdministrar' => $puedeAdministrar,
+                    ]);
+                }
+                $query->whereIn('idFicha', $idsFicha);
+            }
+            $rows = $query
                 ->with($this->relacionesMaterial())
                 ->orderBy('idCompetencia')
                 ->orderByDesc('id')
@@ -141,6 +250,12 @@ class MaterialCompetenciaController extends Controller
             $validator = $this->validadorRecursos($request, true);
             $validator->validate();
 
+            $idFicha = $this->idFichaSolicitado($request);
+            $acceso = $this->asegurarFichaAdministrable($idCompetencia, $idFicha);
+            if ($acceso instanceof JsonResponse) {
+                return $acceso;
+            }
+
             $pendientes = [];
             try {
                 $pendientes = $this->almacenarArchivosNuevos($request);
@@ -151,6 +266,7 @@ class MaterialCompetenciaController extends Controller
 
                 $payloadCreate = [
                     'idCompetencia' => $idCompetencia,
+                    'idFicha' => $idFicha,
                     'idPersona' => $this->idPersonaActual(),
                     'idActividad' => null,
                     'idMaterialApoyoActividad' => null,
@@ -203,9 +319,15 @@ class MaterialCompetenciaController extends Controller
                 return $gate;
             }
 
+            $idFicha = $this->idFichaSolicitado($request);
+            $acceso = $this->asegurarFichaAdministrable($idCompetencia, $idFicha);
+            if ($acceso instanceof JsonResponse) {
+                return $acceso;
+            }
+
             $q = trim((string) $request->query('q', ''));
 
-            return response()->json($this->materialesElegibles($idCompetencia, $q));
+            return response()->json($this->materialesElegibles($idCompetencia, $idFicha, $q));
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -226,19 +348,26 @@ class MaterialCompetenciaController extends Controller
                 'origen' => 'required|string|in:'.MaterialCompetencia::ORIGEN_ACTIVIDAD.','.MaterialCompetencia::ORIGEN_MATERIAL_APOYO,
                 'idActividad' => 'nullable|integer',
                 'idMaterialApoyoActividad' => 'nullable|integer',
+                'idFicha' => 'required|integer|min:1',
             ])->validate();
+
+            $idFicha = (int) $validated['idFicha'];
+            $acceso = $this->asegurarFichaAdministrable($idCompetencia, $idFicha);
+            if ($acceso instanceof JsonResponse) {
+                return $acceso;
+            }
 
             $origen = (string) $validated['origen'];
             $idActividad = isset($validated['idActividad']) ? (int) $validated['idActividad'] : 0;
             $idApoyo = isset($validated['idMaterialApoyoActividad']) ? (int) $validated['idMaterialApoyoActividad'] : 0;
 
-            $payload = $this->payloadIncorporacion($idCompetencia, $origen, $idActividad, $idApoyo);
+            $payload = $this->payloadIncorporacion($idCompetencia, $idFicha, $origen, $idActividad, $idApoyo);
             if ($payload instanceof JsonResponse) {
                 return $payload;
             }
 
-            if ($this->yaAsociado($idCompetencia, $origen, $payload['idActividad'], $payload['idMaterialApoyoActividad'])) {
-                return response()->json(['error' => 'Este material ya está asociado a la competencia.'], 422);
+            if ($this->yaAsociado($idCompetencia, $idFicha, $origen, $payload['idActividad'], $payload['idMaterialApoyoActividad'])) {
+                return response()->json(['error' => 'Este material ya está asociado a la competencia y ficha.'], 422);
             }
 
             try {
@@ -247,7 +376,7 @@ class MaterialCompetenciaController extends Controller
                 });
             } catch (QueryException $e) {
                 if ($this->esViolacionUnica($e)) {
-                    return response()->json(['error' => 'Este material ya está asociado a la competencia.'], 422);
+                    return response()->json(['error' => 'Este material ya está asociado a la competencia y ficha.'], 422);
                 }
                 throw $e;
             }
@@ -279,6 +408,10 @@ class MaterialCompetenciaController extends Controller
             if (! $material) {
                 return response()->json(['error' => 'Material no encontrado.'], 404);
             }
+            $visible = $this->asegurarMaterialVisible($material);
+            if ($visible instanceof JsonResponse) {
+                return $visible;
+            }
 
             return response()->json($this->toResource($material, $this->rapAccess->usuarioPuedeAdministrar()));
         } catch (\Throwable $e) {
@@ -296,6 +429,10 @@ class MaterialCompetenciaController extends Controller
             $material = $this->buscarMaterial($idCompetencia, $id);
             if (! $material) {
                 return response()->json(['error' => 'Material no encontrado.'], 404);
+            }
+            $visible = $this->asegurarMaterialVisible($material);
+            if ($visible instanceof JsonResponse) {
+                return $visible;
             }
 
             $recurso = $this->resolverRecurso($material);
@@ -346,6 +483,10 @@ class MaterialCompetenciaController extends Controller
             if (! $material) {
                 return response()->json(['error' => 'Material no encontrado.'], 404);
             }
+            $visible = $this->asegurarMaterialVisible($material);
+            if ($visible instanceof JsonResponse) {
+                return $visible;
+            }
 
             DB::transaction(function () use ($material) {
                 if ($this->tablaRecursosLista()) {
@@ -365,7 +506,7 @@ class MaterialCompetenciaController extends Controller
                 $material->delete();
             });
 
-            return response()->json(['message' => 'Material desvinculado de la competencia.']);
+            return response()->json(['message' => 'Material desvinculado de la competencia y ficha.']);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -379,46 +520,62 @@ class MaterialCompetenciaController extends Controller
                 return $gateOrigen;
             }
 
-            $idDestino = (int) Validator::make($request->all(), [
+            $validated = Validator::make($request->all(), [
                 'idCompetenciaDestino' => 'required|integer|min:1',
-            ])->validate()['idCompetenciaDestino'];
-
-            if ($idDestino === $idCompetencia) {
-                return response()->json(['error' => 'Seleccione una competencia distinta a la actual.'], 422);
-            }
+                'idFichaDestino' => 'required|integer|min:1',
+            ])->validate();
+            $idDestino = (int) $validated['idCompetenciaDestino'];
+            $idFichaDestino = (int) $validated['idFichaDestino'];
 
             $gateDestino = $this->asegurarCompetenciaAdministrable($idDestino);
             if ($gateDestino instanceof JsonResponse) {
                 return $gateDestino;
+            }
+            $accesoDestino = $this->asegurarFichaAdministrable($idDestino, $idFichaDestino);
+            if ($accesoDestino instanceof JsonResponse) {
+                return $accesoDestino;
             }
 
             $material = $this->buscarMaterial($idCompetencia, $id);
             if (! $material) {
                 return response()->json(['error' => 'Material no encontrado.'], 404);
             }
+            $visible = $this->asegurarMaterialVisible($material);
+            if ($visible instanceof JsonResponse) {
+                return $visible;
+            }
 
-            $bloqueo = MaterialCompetenciaReglas::motivoBloqueoTraslado((string) $material->origen);
-            if ($bloqueo) {
-                return response()->json(['error' => $bloqueo], 422);
+            $idFichaOrigen = $material->idFicha ? (int) $material->idFicha : 0;
+            if ($idDestino === $idCompetencia && $idFichaDestino === $idFichaOrigen) {
+                return response()->json(['error' => 'Seleccione una competencia o ficha distinta a la actual.'], 422);
+            }
+
+            if ($idDestino !== $idCompetencia) {
+                $bloqueo = MaterialCompetenciaReglas::motivoBloqueoTraslado((string) $material->origen);
+                if ($bloqueo) {
+                    return response()->json(['error' => $bloqueo], 422);
+                }
             }
 
             if ($this->yaAsociado(
                 $idDestino,
+                $idFichaDestino,
                 (string) $material->origen,
                 $material->idActividad ? (int) $material->idActividad : null,
                 $material->idMaterialApoyoActividad ? (int) $material->idMaterialApoyoActividad : null
             )) {
-                return response()->json(['error' => 'El material ya está asociado a la competencia de destino.'], 422);
+                return response()->json(['error' => 'El material ya está asociado a la competencia y ficha de destino.'], 422);
             }
 
             try {
-                DB::transaction(function () use ($material, $idDestino) {
+                DB::transaction(function () use ($material, $idDestino, $idFichaDestino) {
                     $material->idCompetencia = $idDestino;
+                    $material->idFicha = $idFichaDestino;
                     $material->save();
                 });
             } catch (QueryException $e) {
                 if ($this->esViolacionUnica($e)) {
-                    return response()->json(['error' => 'El material ya está asociado a la competencia de destino.'], 422);
+                    return response()->json(['error' => 'El material ya está asociado a la competencia y ficha de destino.'], 422);
                 }
                 throw $e;
             }
@@ -426,7 +583,7 @@ class MaterialCompetenciaController extends Controller
             $material->load($this->relacionesMaterial());
 
             return response()->json([
-                'message' => 'Material movido correctamente a la competencia seleccionada.',
+                'message' => 'Material movido correctamente a la competencia y ficha seleccionadas.',
                 'data' => $this->toResource($material, true),
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -446,6 +603,10 @@ class MaterialCompetenciaController extends Controller
             $material = $this->buscarMaterial($idCompetencia, $id);
             if (! $material) {
                 return response()->json(['error' => 'Material no encontrado.'], 404);
+            }
+            $visible = $this->asegurarMaterialVisible($material);
+            if ($visible instanceof JsonResponse) {
+                return $visible;
             }
             if (! $material->esDirecto()) {
                 return response()->json(['error' => 'Solo se pueden editar los materiales de subida directa.'], 422);
@@ -498,6 +659,10 @@ class MaterialCompetenciaController extends Controller
             if (! $material) {
                 return response()->json(['error' => 'Material no encontrado.'], 404);
             }
+            $visible = $this->asegurarMaterialVisible($material);
+            if ($visible instanceof JsonResponse) {
+                return $visible;
+            }
             if (! $this->tablaRecursosLista()) {
                 return response()->json(['error' => 'La tabla de recursos no está disponible.'], 503);
             }
@@ -532,6 +697,10 @@ class MaterialCompetenciaController extends Controller
             $material = $this->buscarMaterial($idCompetencia, $id);
             if (! $material) {
                 return response()->json(['error' => 'Material no encontrado.'], 404);
+            }
+            $visible = $this->asegurarMaterialVisible($material);
+            if ($visible instanceof JsonResponse) {
+                return $visible;
             }
             $recurso = $this->recursoDeMaterial($material, $idRecurso);
             if (! $recurso) {
@@ -580,6 +749,68 @@ class MaterialCompetenciaController extends Controller
         }
         if (! $this->rapAccess->usuarioPuedeAccederCompetencia($idCompetencia)) {
             return response()->json(['error' => 'No autorizado para consultar esta competencia.'], 403);
+        }
+
+        return null;
+    }
+
+    private function idFichaSolicitado(Request $request): int
+    {
+        $valor = $request->input('idFicha', $request->query('idFicha', 0));
+
+        return is_numeric($valor) ? (int) $valor : 0;
+    }
+
+    private function asegurarFichaConsulta(int $idCompetencia, int $idFicha): ?JsonResponse
+    {
+        if ($idFicha <= 0) {
+            return response()->json(['error' => 'Indique la ficha para consultar el material de apoyo.'], 422);
+        }
+        if (! Schema::hasTable('ficha') || ! DB::table('ficha')->where('id', $idFicha)->exists()) {
+            return response()->json(['error' => 'La ficha solicitada no existe.'], 404);
+        }
+        if (! $this->rapAccess->usuarioPuedeAccederFichaCompetencia($idFicha, $idCompetencia)) {
+            if ($this->rapAccess->usuarioPuedeAdministrar() && ! $this->rapAccess->fichaEsDelInstructor($idFicha)) {
+                return response()->json(['error' => 'No autorizado para consultar esta ficha.'], 403);
+            }
+
+            return response()->json(['error' => 'La ficha no tiene relación académica con esta competencia.'], 422);
+        }
+
+        return null;
+    }
+
+    private function asegurarFichaAdministrable(int $idCompetencia, int $idFicha): ?JsonResponse
+    {
+        if ($idFicha <= 0) {
+            return response()->json(['error' => 'Indique la ficha para el material de apoyo.'], 422);
+        }
+        if (! Schema::hasTable('ficha') || ! DB::table('ficha')->where('id', $idFicha)->exists()) {
+            return response()->json(['error' => 'La ficha solicitada no existe.'], 404);
+        }
+        if (! $this->rapAccess->usuarioPuedeAdministrarFichaCompetencia($idFicha, $idCompetencia)) {
+            if (! $this->rapAccess->fichaEsDelInstructor($idFicha)) {
+                return response()->json(['error' => 'No autorizado para administrar esta ficha.'], 403);
+            }
+
+            return response()->json(['error' => 'La ficha no tiene relación académica con esta competencia.'], 422);
+        }
+
+        return null;
+    }
+
+    private function asegurarMaterialVisible(MaterialCompetencia $material): ?JsonResponse
+    {
+        $idFicha = $material->idFicha ? (int) $material->idFicha : 0;
+        if ($idFicha <= 0) {
+            if (! $this->rapAccess->usuarioPuedeAdministrar()) {
+                return response()->json(['error' => 'Material no encontrado.'], 404);
+            }
+
+            return null;
+        }
+        if (! $this->rapAccess->usuarioPuedeAccederFichaCompetencia($idFicha, (int) $material->idCompetencia)) {
+            return response()->json(['error' => 'No autorizado para consultar el material de esta ficha.'], 403);
         }
 
         return null;
@@ -645,6 +876,7 @@ class MaterialCompetenciaController extends Controller
             'actividad.materia:id,nombreMateria,idMateriaPadre,codigo',
             'materialApoyoActividad',
             'competencia:id,nombreMateria,idMateriaPadre,codigo',
+            'ficha:id,codigo,idJornada,idAsignacion',
         ];
         if ($this->tablaRecursosLista()) {
             $rels[] = 'recursos';
@@ -670,7 +902,7 @@ class MaterialCompetenciaController extends Controller
     /**
      * @return array<string, mixed>|\Illuminate\Http\JsonResponse
      */
-    private function payloadIncorporacion(int $idCompetencia, string $origen, int $idActividad, int $idApoyo)
+    private function payloadIncorporacion(int $idCompetencia, int $idFicha, string $origen, int $idActividad, int $idApoyo)
     {
         if ($origen === MaterialCompetencia::ORIGEN_MATERIAL_APOYO) {
             if ($idApoyo <= 0) {
@@ -701,6 +933,7 @@ class MaterialCompetenciaController extends Controller
 
             return [
                 'idCompetencia' => $idCompetencia,
+                'idFicha' => $idFicha,
                 'idPersona' => $this->idPersonaActual(),
                 'idActividad' => (int) $actividad->id,
                 'idMaterialApoyoActividad' => (int) $apoyo->id,
@@ -731,6 +964,7 @@ class MaterialCompetenciaController extends Controller
 
         return [
             'idCompetencia' => $idCompetencia,
+            'idFicha' => $idFicha,
             'idPersona' => $this->idPersonaActual(),
             'idActividad' => (int) $actividad->id,
             'idMaterialApoyoActividad' => null,
@@ -744,10 +978,13 @@ class MaterialCompetenciaController extends Controller
         ];
     }
 
-    private function yaAsociado(int $idCompetencia, string $origen, ?int $idActividad, ?int $idApoyo): bool
+    private function yaAsociado(int $idCompetencia, int $idFicha, string $origen, ?int $idActividad, ?int $idApoyo): bool
     {
         $clave = MaterialCompetenciaReglas::claveIncorporacion($origen, $idActividad, $idApoyo);
         $query = MaterialCompetencia::query()->where('idCompetencia', $idCompetencia)->where('activo', true);
+        if ($this->tieneColumnaIdFicha()) {
+            $query->where('idFicha', $idFicha);
+        }
         if ($clave && Schema::hasColumn((new MaterialCompetencia())->getTable(), 'claveOrigen')) {
             return $query->where('claveOrigen', $clave)->exists();
         }
@@ -765,7 +1002,7 @@ class MaterialCompetenciaController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
-    private function materialesElegibles(int $idCompetencia, string $q): array
+    private function materialesElegibles(int $idCompetencia, int $idFicha, string $q): array
     {
         $idsRap = $this->rapAccess->idsRapDeCompetencia($idCompetencia);
         if ($idsRap === []) {
@@ -787,18 +1024,24 @@ class MaterialCompetenciaController extends Controller
             ->orderByDesc('id')
             ->get();
 
-        $asociadosApoyo = MaterialCompetencia::query()
+        $asociadosApoyoQuery = MaterialCompetencia::query()
             ->where('idCompetencia', $idCompetencia)
             ->where('activo', true)
             ->where('origen', MaterialCompetencia::ORIGEN_MATERIAL_APOYO)
-            ->whereNotNull('idMaterialApoyoActividad')
+            ->whereNotNull('idMaterialApoyoActividad');
+        $asociadosActividadQuery = MaterialCompetencia::query()
+            ->where('idCompetencia', $idCompetencia)
+            ->where('activo', true)
+            ->where('origen', MaterialCompetencia::ORIGEN_ACTIVIDAD);
+        if ($this->tieneColumnaIdFicha()) {
+            $asociadosApoyoQuery->where('idFicha', $idFicha);
+            $asociadosActividadQuery->where('idFicha', $idFicha);
+        }
+        $asociadosApoyo = $asociadosApoyoQuery
             ->pluck('idMaterialApoyoActividad')
             ->map(fn ($id) => (int) $id)
             ->all();
-        $asociadosActividad = MaterialCompetencia::query()
-            ->where('idCompetencia', $idCompetencia)
-            ->where('activo', true)
-            ->where('origen', MaterialCompetencia::ORIGEN_ACTIVIDAD)
+        $asociadosActividad = $asociadosActividadQuery
             ->pluck('idActividad')
             ->map(fn ($id) => (int) $id)
             ->all();
@@ -887,9 +1130,13 @@ class MaterialCompetenciaController extends Controller
             $creador = $this->personaResumen($actividad->persona);
         }
 
+        $fichaResumen = $this->fichaResumen($m);
+
         return [
             'id' => (int) $m->id,
             'idCompetencia' => (int) $m->idCompetencia,
+            'idFicha' => $m->idFicha ? (int) $m->idFicha : null,
+            'ficha' => $fichaResumen,
             'origen' => $m->origen,
             'origenLabel' => $this->origenLabel($m->origen),
             'titulo' => $m->titulo,
@@ -948,6 +1195,47 @@ class MaterialCompetenciaController extends Controller
             'urlExterna' => $urlAdicional ?: null,
             'urlVideo' => $urlVideo ?: null,
         ];
+    }
+
+    /**
+     * @return array{id:int,codigo:?string,programa:?string,jornada:?string,etiqueta:string}|null
+     */
+    private function fichaResumen(MaterialCompetencia $m): ?array
+    {
+        $idFicha = $m->idFicha ? (int) $m->idFicha : 0;
+        if ($idFicha <= 0) {
+            return null;
+        }
+        $idCompetencia = (int) $m->idCompetencia;
+        if (! isset($this->cacheFichasCompetencia[$idCompetencia])) {
+            $this->cacheFichasCompetencia[$idCompetencia] = $this->rapAccess->fichasDeCompetencia($idCompetencia);
+        }
+        foreach ($this->cacheFichasCompetencia[$idCompetencia] as $ficha) {
+            if ((int) $ficha['id'] === $idFicha) {
+                return $ficha;
+            }
+        }
+        $codigo = $m->ficha?->codigo ? (string) $m->ficha->codigo : null;
+
+        return [
+            'id' => $idFicha,
+            'codigo' => $codigo,
+            'programa' => null,
+            'jornada' => null,
+            'etiqueta' => $codigo ?: (string) $idFicha,
+        ];
+    }
+
+    private function tieneColumnaIdFicha(): bool
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+        $table = (new MaterialCompetencia())->getTable();
+        $cache = Schema::hasTable($table) && Schema::hasColumn($table, 'idFicha');
+
+        return $cache;
     }
 
     private function tieneColumnaUrlVideo(): bool
@@ -1280,7 +1568,7 @@ class MaterialCompetenciaController extends Controller
     private function mensajeErrorCarga(\Illuminate\Http\UploadedFile $file, bool $esMultimedia): string
     {
         return match ($file->getError()) {
-            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'El archivo supera el tamaño máximo permitido de 50 MB.',
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'El archivo supera el máximo permitido de 50 MB.',
             UPLOAD_ERR_PARTIAL => 'El archivo no pudo cargarse completamente. Inténtalo nuevamente.',
             UPLOAD_ERR_NO_FILE => 'No se recibió el archivo.',
             UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE, UPLOAD_ERR_EXTENSION => $esMultimedia

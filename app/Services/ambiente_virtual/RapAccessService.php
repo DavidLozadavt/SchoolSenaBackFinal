@@ -105,6 +105,46 @@ class RapAccessService
             ->all();
     }
 
+    /**
+     * Todas las fichas del instructor, una por ficha.id, con programa y jornada.
+     * Jornada sale de ficha.idJornada → jornadas.nombreJornada, no del horario.
+     *
+     * @return list<array{id:int,codigo:?string,programa:?string,jornada:?string,etiqueta:string}>
+     */
+    public function fichasAdministrables(): array
+    {
+        if (! $this->usuarioPuedeAdministrar()) {
+            return [];
+        }
+
+        return $this->enriquecerMetaFichas($this->fichasInstructor());
+    }
+
+    /**
+     * Competencias de una ficha del instructor (horario → RAP → padre competencia).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function competenciasDeFicha(int $idFicha): array
+    {
+        if ($idFicha <= 0) {
+            return [];
+        }
+        if ($this->usuarioPuedeAdministrar()) {
+            if (! $this->fichaEsDelInstructor($idFicha)) {
+                return [];
+            }
+        } elseif ($this->usuarioEsAprendiz()) {
+            if (! in_array($idFicha, $this->idsFichasAprendiz(), true)) {
+                return [];
+            }
+        } else {
+            return [];
+        }
+
+        return $this->competenciasDesdeIdsRap($this->idsRapDeFichas([$idFicha], true));
+    }
+
     public function usuarioPuedeAccederCompetencia(int $idCompetencia): bool
     {
         if ($idCompetencia <= 0) {
@@ -142,7 +182,34 @@ class RapAccessService
      */
     public function competenciasAccesibles(): array
     {
-        $ids = $this->idsCompetenciaAccesibles();
+        return $this->competenciasDesdeIdsRap($this->idsRapAccesibles());
+    }
+
+    /**
+     * @param  list<int>  $idsRap
+     * @return list<array<string, mixed>>
+     */
+    private function competenciasDesdeIdsRap(array $idsRap): array
+    {
+        $idsRap = array_values(array_unique(array_filter(
+            array_map(static fn ($id) => (int) $id, $idsRap),
+            static fn ($id) => $id > 0
+        )));
+        if ($idsRap === [] || ! Schema::hasTable('materia')) {
+            return [];
+        }
+
+        $ids = DB::table('materia')
+            ->whereIn('id', $idsRap)
+            ->whereNotNull('idMateriaPadre')
+            ->where('idMateriaPadre', '>', 0)
+            ->pluck('idMateriaPadre')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
         if ($ids === []) {
             return [];
         }
@@ -321,6 +388,300 @@ class RapAccessService
         usort($compatibles, static fn ($a, $b) => strcmp((string) ($a['codigo'] ?? $a['id']), (string) ($b['codigo'] ?? $b['id'])));
 
         return $compatibles;
+    }
+
+    /**
+     * Todas las fichas del usuario compatibles con la competencia (no "la ficha actual").
+     * Universo instructor: las mismas fichas de Mis clases, deduplicadas por ficha.id.
+     * Filtro: el horario de esa ficha alcanza la competencia o alguno de sus RAP.
+     * Jornada, día y horarioMateria son contexto visual; no aíslan el material.
+     *
+     * @return list<array{id:int,codigo:?string,programa:?string,jornada:?string,etiqueta:string}>
+     */
+    public function fichasDeCompetencia(int $idCompetencia): array
+    {
+        if ($idCompetencia <= 0 || ! $this->usuarioPuedeAccederCompetencia($idCompetencia)) {
+            return [];
+        }
+
+        $universo = [];
+        if ($this->usuarioPuedeAdministrar()) {
+            $universo = $this->fichasInstructor();
+        } elseif ($this->usuarioEsAprendiz()) {
+            foreach ($this->idsFichaAprendiz() as $idFicha) {
+                $universo[] = [
+                    'id' => $idFicha,
+                    'codigo' => null,
+                    'idHorarioMateria' => null,
+                ];
+            }
+        }
+        if ($universo === []) {
+            return [];
+        }
+
+        $idsFicha = array_values(array_unique(array_filter(
+            array_map(static fn (array $f): int => (int) $f['id'], $universo),
+            static fn (int $id): bool => $id > 0
+        )));
+        $idsRapComp = $this->idsRapDeCompetencia($idCompetencia);
+        $filas = $this->filasHorarioDeFichas($idsFicha);
+        $porFicha = [];
+        foreach ($universo as $ficha) {
+            $idFicha = (int) $ficha['id'];
+            if ($idFicha <= 0 || isset($porFicha[$idFicha])) {
+                continue;
+            }
+            $porFicha[$idFicha] = [
+                'id' => $idFicha,
+                'codigo' => $ficha['codigo'] ?? null,
+                'filas' => [],
+            ];
+        }
+        foreach ($filas as $row) {
+            $idFicha = (int) ($row->idFicha ?? 0);
+            if ($idFicha <= 0 || ! isset($porFicha[$idFicha])) {
+                continue;
+            }
+            if (($porFicha[$idFicha]['codigo'] ?? null) === null && isset($row->codigo)) {
+                $porFicha[$idFicha]['codigo'] = $row->codigo !== null ? (string) $row->codigo : null;
+            }
+            $porFicha[$idFicha]['filas'][] = $row;
+        }
+
+        $compatibles = [];
+        foreach ($porFicha as $idFicha => $info) {
+            if (! $this->fichaAlcanzaCompetencia($info['filas'] ?? [], $idCompetencia, $idsRapComp)) {
+                continue;
+            }
+            $compatibles[] = [
+                'id' => (int) $idFicha,
+                'codigo' => $info['codigo'] ?? null,
+            ];
+        }
+
+        return $this->enriquecerMetaFichas($compatibles);
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function idsFichasDeCompetencia(int $idCompetencia): array
+    {
+        return array_values(array_map(
+            static fn (array $ficha): int => (int) $ficha['id'],
+            $this->fichasDeCompetencia($idCompetencia)
+        ));
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function idsFichasInstructor(): array
+    {
+        return array_values(array_map(
+            static fn (array $ficha): int => (int) $ficha['id'],
+            $this->fichasInstructor()
+        ));
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function idsFichasAprendiz(): array
+    {
+        return $this->idsFichaAprendiz();
+    }
+
+    public function usuarioPuedeAdministrarFichaCompetencia(int $idFicha, int $idCompetencia): bool
+    {
+        if ($idFicha <= 0 || $idCompetencia <= 0 || ! $this->usuarioPuedeAdministrar()) {
+            return false;
+        }
+
+        return in_array($idFicha, $this->idsFichasDeCompetencia($idCompetencia), true);
+    }
+
+    public function usuarioPuedeAccederFichaCompetencia(int $idFicha, int $idCompetencia): bool
+    {
+        if ($idFicha <= 0 || $idCompetencia <= 0) {
+            return false;
+        }
+
+        return in_array($idFicha, $this->idsFichasDeCompetencia($idCompetencia), true);
+    }
+
+    public function fichaEsDelInstructor(int $idFicha): bool
+    {
+        return $idFicha > 0 && in_array($idFicha, $this->idsFichasInstructor(), true);
+    }
+
+    /**
+     * Clases de hoy de las fichas de la competencia. Solo apoyo visual para elegir ficha.
+     * No se persisten fecha, sesión ni horarioMateria en el material.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function clasesReferenciaHoy(int $idCompetencia): array
+    {
+        $fichas = $this->fichasDeCompetencia($idCompetencia);
+        if ($fichas === [] || ! Schema::hasTable('horarioMateria') || ! Schema::hasTable('gradoMateria')) {
+            return [];
+        }
+
+        $idsFicha = array_map(static fn (array $f): int => (int) $f['id'], $fichas);
+        $idsMateria = $this->idsRapDeCompetencia($idCompetencia);
+        $idsMateria[] = $idCompetencia;
+        $idsMateria = array_values(array_unique(array_filter($idsMateria, static fn ($id) => $id > 0)));
+        $idDia = (int) now()->isoWeekday();
+        if ($idDia < 1 || $idDia > 7) {
+            $idDia = 1;
+        }
+
+        $qb = DB::table('horarioMateria as hm')
+            ->join('gradoMateria as gm', 'hm.idGradoMateria', '=', 'gm.id')
+            ->whereIn('hm.idFicha', $idsFicha)
+            ->where('hm.idDia', $idDia)
+            ->whereIn('gm.idMateria', $idsMateria)
+            ->select(['hm.idFicha', 'hm.horaInicial', 'hm.horaFinal', 'hm.idDia'])
+            ->orderBy('hm.horaInicial')
+            ->orderBy('hm.idFicha');
+
+        $meta = [];
+        foreach ($fichas as $ficha) {
+            $meta[(int) $ficha['id']] = $ficha;
+        }
+
+        $out = [];
+        $vistos = [];
+        foreach ($qb->get() as $row) {
+            $idFicha = (int) ($row->idFicha ?? 0);
+            $inicio = $this->formatearHora($row->horaInicial ?? null);
+            $fin = $this->formatearHora($row->horaFinal ?? null);
+            $clave = $idFicha.'|'.$inicio.'|'.$fin;
+            if ($idFicha <= 0 || isset($vistos[$clave])) {
+                continue;
+            }
+            $vistos[$clave] = true;
+            $ficha = $meta[$idFicha] ?? null;
+            $out[] = [
+                'idFicha' => $idFicha,
+                'codigo' => $ficha['codigo'] ?? null,
+                'programa' => $ficha['programa'] ?? null,
+                'jornada' => $ficha['jornada'] ?? null,
+                'etiqueta' => $ficha['etiqueta'] ?? (string) $idFicha,
+                'horaInicial' => $inicio,
+                'horaFinal' => $fin,
+                'idDia' => isset($row->idDia) ? (int) $row->idDia : $idDia,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  iterable<int, object>  $filas
+     * @param  list<int>  $idsRapComp
+     */
+    private function fichaAlcanzaCompetencia($filas, int $idCompetencia, array $idsRapComp): bool
+    {
+        foreach ($filas as $fila) {
+            $id = (int) ($fila->id ?? 0);
+            if ($id === $idCompetencia) {
+                return true;
+            }
+        }
+        if ($idsRapComp === []) {
+            return false;
+        }
+        $idsRapFicha = $this->expandirIdsRap($filas);
+
+        return array_intersect($idsRapComp, $idsRapFicha) !== [];
+    }
+
+    /**
+     * @param  list<array{id:int,codigo:?string}>  $fichas
+     * @return list<array{id:int,codigo:?string,programa:?string,jornada:?string,etiqueta:string}>
+     */
+    private function enriquecerMetaFichas(array $fichas): array
+    {
+        if ($fichas === [] || ! Schema::hasTable('ficha')) {
+            return [];
+        }
+
+        $ids = array_map(static fn (array $f): int => (int) $f['id'], $fichas);
+        $qb = DB::table('ficha as f')->whereIn('f.id', $ids)->select(['f.id', 'f.codigo']);
+        if (Schema::hasTable('jornadas')) {
+            $qb->leftJoin('jornadas as j', 'f.idJornada', '=', 'j.id')
+                ->addSelect('j.nombreJornada as jornada');
+        }
+        if (Schema::hasTable('aperturarprograma')) {
+            $qb->leftJoin('aperturarprograma as ap', 'f.idAsignacion', '=', 'ap.id');
+            if (Schema::hasTable('programa')) {
+                $qb->leftJoin('programa as p', 'ap.idPrograma', '=', 'p.id')
+                    ->addSelect('p.nombrePrograma as programa');
+            }
+        }
+
+        $meta = [];
+        foreach ($qb->get() as $row) {
+            $id = (int) $row->id;
+            $codigo = $row->codigo !== null ? (string) $row->codigo : null;
+            $programa = isset($row->programa) && $row->programa !== null ? (string) $row->programa : null;
+            $jornada = isset($row->jornada) && $row->jornada !== null ? (string) $row->jornada : null;
+            $meta[$id] = [
+                'id' => $id,
+                'codigo' => $codigo,
+                'programa' => $programa,
+                'jornada' => $jornada,
+                'etiqueta' => $this->etiquetaFicha($codigo, $programa, $jornada, $id),
+            ];
+        }
+
+        $out = [];
+        foreach ($fichas as $ficha) {
+            $id = (int) $ficha['id'];
+            if (isset($meta[$id])) {
+                $out[] = $meta[$id];
+                continue;
+            }
+            $codigo = $ficha['codigo'] ?? null;
+            $out[] = [
+                'id' => $id,
+                'codigo' => $codigo,
+                'programa' => null,
+                'jornada' => null,
+                'etiqueta' => $this->etiquetaFicha($codigo, null, null, $id),
+            ];
+        }
+
+        usort($out, static fn ($a, $b) => strcmp((string) ($a['codigo'] ?? $a['id']), (string) ($b['codigo'] ?? $b['id'])));
+
+        return $out;
+    }
+
+    private function etiquetaFicha(?string $codigo, ?string $programa, ?string $jornada, int $id): string
+    {
+        $partes = array_values(array_filter([
+            $codigo ?: (string) $id,
+            $programa,
+            $jornada ? mb_strtoupper($jornada) : null,
+        ], static fn ($v) => $v !== null && $v !== ''));
+
+        return implode(' · ', $partes);
+    }
+
+    private function formatearHora($valor): ?string
+    {
+        if ($valor === null || $valor === '') {
+            return null;
+        }
+        $texto = (string) $valor;
+        if (preg_match('/^(\d{1,2}:\d{2})/', $texto, $m)) {
+            return $m[1];
+        }
+
+        return $texto;
     }
 
     /**

@@ -7,7 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Material general de una competencia (materia raíz).
+ * Material general de una competencia + ficha.
+ * La clase, fecha, horario y jornada no forman parte de la clave: solo idCompetencia + idFicha.
  * DIRECTO guarda archivo propio. ACTIVIDAD / MATERIAL_APOYO reutilizan la referencia original.
  */
 class MaterialCompetencia extends Model
@@ -30,6 +31,7 @@ class MaterialCompetencia extends Model
 
     protected $fillable = [
         'idCompetencia',
+        'idFicha',
         'idPersona',
         'idActividad',
         'idMaterialApoyoActividad',
@@ -51,6 +53,11 @@ class MaterialCompetencia extends Model
     public function competencia()
     {
         return $this->belongsTo(Materia::class, 'idCompetencia');
+    }
+
+    public function ficha()
+    {
+        return $this->belongsTo(Ficha::class, 'idFicha');
     }
 
     public function persona()

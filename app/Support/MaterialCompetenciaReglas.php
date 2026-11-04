@@ -72,6 +72,8 @@ class MaterialCompetenciaReglas
 
     /**
      * Clave de unicidad de incorporación (no aplica a subidas DIRECTO).
+     * En BD se evalúa junto con idCompetencia + idFicha: la misma actividad
+     * puede incorporarse a dos fichas de la misma competencia.
      */
     public static function claveIncorporacion(string $origen, ?int $idActividad, ?int $idMaterialApoyoActividad): ?string
     {

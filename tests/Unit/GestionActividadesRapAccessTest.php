@@ -25,6 +25,11 @@ class GestionActividadesRapAccessTest extends TestCase
         $this->assertSame([], $service->idsFichasHorarioDeRap(0));
         $this->assertSame([], $service->idsFichasHorarioDeRap(-1));
         $this->assertSame([], $service->fichasInstructor());
+        $this->assertSame([], $service->fichasAdministrables());
+        $this->assertSame([], $service->competenciasDeFicha(0));
+        $this->assertSame([], $service->competenciasDeFicha(-1));
+        $this->assertSame([], $service->rapsAccesibles());
+        $this->assertSame([], $service->idsRapAccesibles());
     }
 
     public function test_completar_raps_incluye_hermanos_sin_abrir_otras_competencias(): void
