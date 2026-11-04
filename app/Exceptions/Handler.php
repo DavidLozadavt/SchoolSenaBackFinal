@@ -3,6 +3,8 @@
 namespace App\Exceptions;
 
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Http\Exceptions\PostTooLargeException;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class Handler extends ExceptionHandler
@@ -36,6 +38,24 @@ class Handler extends ExceptionHandler
     {
         $this->reportable(function (Throwable $e) {
             //
+        });
+
+        $this->renderable(function (PostTooLargeException $e, $request) {
+            Log::warning('POST too large para upload', [
+                'content_length' => $request->server('CONTENT_LENGTH'),
+                'post_max_size' => ini_get('post_max_size'),
+                'path' => $request->path(),
+            ]);
+            $msg = 'El archivo supera el tamaño máximo permitido de 50 MB.';
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'error' => $msg,
+                    'errors' => [
+                        'video' => [$msg],
+                        'documento' => [$msg],
+                    ],
+                ], 413);
+            }
         });
     }
 }

@@ -1375,6 +1375,15 @@ Route::middleware('auth:api')->group(function () {
     // Actividades asignadas a un estudiante específico (vista instructor)
     Route::get('fichas/{idFicha}/actividades-estudiante', [AsignacionActividadController::class, 'actividadesEstudiante']);
 
+    // Biblioteca de conocimiento (general): Competencia → RAP. Sin selector de ficha.
+    Route::get('ambiente-virtual/biblioteca-conocimiento/raps', [MaterialApoyoFichaController::class, 'rapsGeneral']);
+    Route::get('ambiente-virtual/biblioteca-conocimiento', [MaterialApoyoFichaController::class, 'indexGeneral']);
+    Route::post('ambiente-virtual/biblioteca-conocimiento', [MaterialApoyoFichaController::class, 'storeGeneral']);
+    Route::put('ambiente-virtual/biblioteca-conocimiento/{id}', [MaterialApoyoFichaController::class, 'updateGeneral']);
+    // POST: PHP solo llena $_FILES en POST; la edición con documento/video usa FormData.
+    Route::post('ambiente-virtual/biblioteca-conocimiento/{id}', [MaterialApoyoFichaController::class, 'updateGeneral']);
+    Route::delete('ambiente-virtual/biblioteca-conocimiento/{id}', [MaterialApoyoFichaController::class, 'destroyGeneral']);
+
     // Material de apoyo general por ficha (PDF / enlaces), separado del material ligado solo a actividades
     Route::get('fichas/{idFicha}/materiales-apoyo/raps', [MaterialApoyoFichaController::class, 'raps']);
     Route::get('fichas/{idFicha}/materiales-apoyo', [MaterialApoyoFichaController::class, 'index']);
@@ -1385,6 +1394,10 @@ Route::middleware('auth:api')->group(function () {
     // Material de apoyo por competencia (menú Material de Apoyo). Rutas internas sin cambio de tablas.
     Route::get('ambiente-virtual/actividades-competencia/competencias', [MaterialCompetenciaController::class, 'competencias']);
     Route::get('ambiente-virtual/actividades-competencia/materiales', [MaterialCompetenciaController::class, 'indexTodos']);
+    Route::get('ambiente-virtual/actividades-competencia/fichas', [MaterialCompetenciaController::class, 'fichasInstructor']);
+    Route::get('ambiente-virtual/actividades-competencia/fichas/{idFicha}/competencias', [MaterialCompetenciaController::class, 'competenciasDeFicha']);
+    Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/fichas', [MaterialCompetenciaController::class, 'fichas']);
+    Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/clases-referencia', [MaterialCompetenciaController::class, 'clasesReferencia']);
     Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales', [MaterialCompetenciaController::class, 'index']);
     Route::post('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales', [MaterialCompetenciaController::class, 'store']);
     Route::get('ambiente-virtual/actividades-competencia/competencias/{idCompetencia}/materiales-elegibles', [MaterialCompetenciaController::class, 'elegibles']);
