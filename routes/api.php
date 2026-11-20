@@ -1484,8 +1484,34 @@ Route::middleware('auth:api')->group(function () {
         Route::get('nomina/resumen', [LyraController::class, 'nominaResumen']);
         Route::get('instructores/lista', [LyraController::class, 'listaInstructores']);
         Route::get('contratos/vencimiento', [LyraController::class, 'contratosVencimiento']);
-        Route::get('fichas/{id}/estudiantes', [LyraController::class, 'getEstudiantesFicha']);
+        Route::get('fichas/codigo/{codigo}/estudiantes', [LyraController::class, 'getEstudiantesFichaPorCodigo']);
+        Route::get('fichas/{id}/estudiantes', [LyraController::class, 'getEstudiantesFicha'])->whereNumber('id');
         Route::get('actividades/{id}/respuestas', [LyraController::class, 'getEntregas']);
+        Route::get('capacidades', [LyraController::class, 'capacidades']);
+        Route::get('centros-formacion', [LyraController::class, 'centrosFormacion']);
+        Route::get('sedes', [LyraController::class, 'sedes']);
+        Route::get('ambientes', [LyraController::class, 'ambientes']);
+        Route::get('periodos', [LyraController::class, 'periodos']);
+        Route::get('jornadas', [LyraController::class, 'jornadas']);
+        Route::get('planeacion', [LyraController::class, 'planeacion']);
+        Route::get('regionales', [LyraController::class, 'regionales']);
+        Route::get('eventos', [LyraController::class, 'eventos']);
+        Route::post('eventos', [LyraController::class, 'crearEvento']);
+        Route::get('formularios', [LyraController::class, 'formularios']);
+        Route::get('carpetas-viajeras', [LyraController::class, 'carpetasViajeras']);
+        Route::get('configuracion-pagos', [LyraController::class, 'configuracionPagos']);
+        Route::post('formularios', [LyraController::class, 'crearFormulario']);
+        Route::get('pagos-pendientes', [LyraController::class, 'pagosPendientes']);
+        Route::get('solicitudes-inscripcion', [LyraController::class, 'solicitudesInscripcion']);
+        Route::get('configuracion-inscripcion', [LyraController::class, 'configuracionInscripcion']);
+        Route::get('multimedia', [LyraController::class, 'multimedia']);
+        Route::get('informes-instructores', [LyraController::class, 'informesInstructores']);
+        // Fase 7: constructor conversacional y vínculo evento ↔ formulario.
+        Route::get('formularios/{id}', [LyraController::class, 'formulario'])->whereNumber('id');
+        Route::put('formularios/{id}', [LyraController::class, 'guardarFormulario'])->whereNumber('id');
+        Route::put('formularios/{id}/estado', [LyraController::class, 'estadoFormulario'])->whereNumber('id');
+        Route::get('eventos/{id}', [LyraController::class, 'evento'])->whereNumber('id');
+        Route::put('eventos/{id}/formulario', [LyraController::class, 'vincularFormulario'])->whereNumber('id');
     });
 
     Route::get('red', [RedController::class, 'index']);
@@ -1677,9 +1703,9 @@ Route::middleware('auth:api')->group(function () {
     // --- EVENTOS ---
     Route::get('eventos-multimedia', [EventoController::class, 'index']);
     Route::get('eventos-multimedia/{id}', [EventoController::class, 'show']);
-    Route::post('eventos-multimedia', [EventoController::class, 'store']);
-    Route::post('eventos-multimedia/{id}', [EventoController::class, 'update']);
-    Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy']);
+    Route::post('eventos-multimedia', [EventoController::class, 'store'])->middleware('permiso.efectivo:GESTION_EVENTOS|GESTION_USUARIO|AULA_VIRTUAL_INSTRUCTOR');
+    Route::post('eventos-multimedia/{id}', [EventoController::class, 'update'])->middleware('permiso.efectivo:GESTION_EVENTOS|GESTION_USUARIO|AULA_VIRTUAL_INSTRUCTOR');
+    Route::delete('eventos-multimedia/{id}', [EventoController::class, 'destroy'])->middleware('permiso.efectivo:GESTION_EVENTOS|GESTION_USUARIO|AULA_VIRTUAL_INSTRUCTOR');
 
     // Rutas de inscripción
     Route::get('eventos-multimedia/{id}/check-registration', [EventoController::class, 'checkRegistration']);
@@ -1688,11 +1714,11 @@ Route::middleware('auth:api')->group(function () {
 
     // --- FORMULARIOS INTERNOS ---
     Route::get('formularios', [App\Http\Controllers\FormularioController::class, 'index']);
-    Route::post('formularios', [App\Http\Controllers\FormularioController::class, 'store']);
+    Route::post('formularios', [App\Http\Controllers\FormularioController::class, 'store'])->middleware('permiso.efectivo:GESTION_FORMULARIOS|GESTION_USUARIO|AULA_VIRTUAL_INSTRUCTOR');
     Route::post('formularios/upload-logo', [App\Http\Controllers\FormularioController::class, 'uploadLogo']);
     Route::get('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'show']);
-    Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update']);
-    Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy']);
+    Route::put('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'update'])->middleware('permiso.efectivo:GESTION_FORMULARIOS|GESTION_USUARIO|AULA_VIRTUAL_INSTRUCTOR');
+    Route::delete('formularios/{id}', [App\Http\Controllers\FormularioController::class, 'destroy'])->middleware('permiso.efectivo:GESTION_FORMULARIOS|GESTION_USUARIO|AULA_VIRTUAL_INSTRUCTOR');
     Route::get('formularios/{id}/respuestas', [App\Http\Controllers\FormularioController::class, 'respuestas']);
     Route::delete('formularios/{id}/respuestas/{respuestaId}', [App\Http\Controllers\FormularioController::class, 'destroyRespuesta']);
 
